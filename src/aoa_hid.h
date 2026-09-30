@@ -29,6 +29,7 @@
 
 #define AOA_KEYBOARD_REPORT_SIZE 8
 #define AOA_MOUSE_REPORT_SIZE    5
+#define AOA_ABSOLUTE_MOUSE_REPORT_SIZE 8
 
 struct aoa_hid {
     libusb_context *ctx;

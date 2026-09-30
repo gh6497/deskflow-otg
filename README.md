@@ -29,9 +29,10 @@
   `src/lib/deskflow/ProtocolTypes.h`。
 - **scrcpy/OTG 侧**：本程序通过 libusb 直接向手机发送 **AOA 2.0 HID** 控制请求
   （`ACCESSORY_REGISTER_HID`=54 / `SET_HID_REPORT_DESC`=56 / `SEND_HID_EVENT`=57），
-  把键鼠事件编码成标准 USB HID 键盘/鼠标报告注入手机。HID 报告描述符和编码逻辑
-  与 scrcpy 的 `app/src/usb/aoa_hid.c`、`app/src/hid/hid_keyboard.c`、
-  `app/src/hid/hid_mouse.c` 逐字节一致。
+  把键鼠事件编码成标准 USB HID 报告注入手机。USB 传输、键盘和相对鼠标参考 scrcpy 的
+  `app/src/usb/aoa_hid.c`、`app/src/hid/hid_keyboard.c`、`app/src/hid/hid_mouse.c`。
+  默认指针使用支持悬停的 **HID 数位板绝对坐标**，直接把 Deskflow 坐标映射到手机全屏，
+  避免 Android 鼠标加速造成坐标漂移。
 
 两者串起来就是：`主机键盘鼠标 → deskflow → 本程序 → AOA HID → 手机`。
 
@@ -90,6 +91,10 @@ sudo ./build/deskflow-otg \
 把鼠标移出主机屏幕边缘（滑向"手机"那块屏幕），此时键盘鼠标就会注入到手机。
 把鼠标再滑回主机屏幕边缘，即可回到主机。
 
+默认 `--mouse-mode absolute`：移动时悬停，按住左键拖动时连续按下，离开手机屏幕时松开。
+建议把 `--width/--height` 设为手机当前方向的分辨率，以获得自然的移动比例；绝对模式会
+把虚拟屏幕完整映射到手机显示区域，尺寸不一致也不会累积相对位移误差。
+
 > **退出程序**：当鼠标停留在"手机"屏幕上时，键盘（包括 Ctrl+C）都被转发给了手机，
 > 不会到达终端。要退出，先把鼠标滑回主机屏幕，再按 Ctrl+C；或者直接拔掉手机 ——
 > 本程序会检测到 USB 断开、自动退出，并让鼠标回到主机。
@@ -101,10 +106,23 @@ sudo ./build/deskflow-otg \
   -p, --port PORT       Deskflow server 端口 (默认 24800)
   -n, --name NAME       上报给 server 的屏幕名 (默认 android)
   -s, --serial SERIAL   安卓设备的 USB 序列号 (不指定则自动检测)
-      --width W         虚拟屏幕宽度，用手机分辨率 (默认 1080)
-      --height H        虚拟屏幕高度 (默认 1920)
+      --width W         虚拟屏幕宽度，1..32767 (默认 1080)
+      --height H        虚拟屏幕高度，1..32767 (默认 1920)
+      --mouse-mode MODE absolute（默认）或 relative（兼容模式）
   -h, --help            帮助
 ```
+
+### 鼠标提前碰到“看不见的边界”
+
+旧版把 Deskflow 绝对坐标之差直接作为相对 HID 位移。但 Android 会按鼠标速度、加速设置
+改变实际移动距离，导致 server 认为已经到达边界，手机指针却还在屏幕中间。仅在进入时
+归零、拆分大位移或调整分辨率，不能保证消除这种偏差。
+
+新版默认的绝对坐标模式使用数位板的 `Tip Switch + In Range + ABS X/Y`，每个报告同时
+包含当前位置和按键状态，不依赖上一次指针位置。它仍通过 AOA 工作，无需 adb。
+Android 会把它识别为带鼠标按键的数位板/笔，个别应用对笔和鼠标的响应可能不同。
+如果设备不支持该模式，可加 `--mouse-mode relative` 使用原有相对鼠标；该模式仍受
+Android 加速影响，不能保证指针与 Deskflow 边界一致。
 
 ## 免 root 访问 USB（udev 规则）
 
@@ -133,7 +151,8 @@ src/
 | 本仓库文件 | 对应来源 |
 |---|---|
 | `src/aoa_hid.c` | scrcpy `app/src/usb/aoa_hid.c` + `app/src/usb/usb.c` |
-| `src/bridge.c`（HID 报告描述符与编码） | scrcpy `app/src/hid/hid_keyboard.c` + `app/src/hid/hid_mouse.c` |
+| `src/bridge.c`（键盘、相对鼠标） | scrcpy `app/src/hid/hid_keyboard.c` + `app/src/hid/hid_mouse.c` |
+| `src/bridge.c`（绝对指针） | HID Digitizer 规范；Android `TouchInputMapper::dispatchPointerStylus` |
 | `src/keymap.c`（KeyID 常量） | deskflow `src/lib/deskflow/KeyTypes.h` |
 | `src/deskflow_client.c`（协议格式） | deskflow `src/lib/deskflow/ProtocolTypes.h` |
 
@@ -151,5 +170,6 @@ deskflow 1.26+ 默认开启 TLS（`security/tlsEnabled`）。本桥接程序目�
 - 键盘映射按 **US 布局**（其它布局下部分符号键可能错位）。
 - 不支持剪贴板同步、文件拖放、屏幕截图（这些与"操控手机"无关）。
 - 只支持键盘 + 鼠标，不支持游戏手柄（AOA gamepad 未实现）。
-- 鼠标用**相对位移**（AOA 鼠标是相对 HID），绝对 warp 会被换算成增量。
+- 默认绝对指针依赖 Android 的 HID 数位板支持，具体设备兼容性需真机验证。
+- `--mouse-mode relative` 为兼容模式，Android 鼠标加速可能造成漂移、提前碰边。
 - 需要先能访问 USB 设备（root 或 udev 规则）。

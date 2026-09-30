@@ -86,7 +86,8 @@ AOAv2 HID（无 adb、无 accessory-mode 握手，直接对已打开设备发 ve
 - `ACCESSORY_SET_HID_REPORT_DESC` = 56
 - `ACCESSORY_SEND_HID_EVENT` = 57
 
-键盘 id=1，鼠标 id=2（`aoa_hid.h`）。HID 报告描述符在 `bridge.c` 里是逐字节从 scrcpy 复制的。
+键盘 id=1，指针 id=2（`aoa_hid.h`）。键盘和相对鼠标描述符来自 scrcpy；默认绝对指针
+使用 `bridge.c` 中的 `ABSOLUTE_MOUSE_REPORT_DESC`，不能按 scrcpy 的 5 字节相对报告解码。
 
 ### 5. 键盘模型
 
@@ -98,49 +99,52 @@ AOAv2 HID（无 adb、无 accessory-mode 握手，直接对已打开设备发 ve
 
 ### 6. 鼠标模型
 
-AOA 鼠标是**相对模式**，而 deskflow 的光标是**绝对坐标**并被 server 钳制在手机屏幕矩形内。
-两者要 1:1 对应，必须满足两件事，`bridge.c` 里都做了：
+**默认 `--mouse-mode absolute`**，通过 AOA 注册绝对坐标数位板，不是简单地把普通鼠标
+的 `Input(Relative)` 改成 `Input(Absolute)`：Android 普通鼠标 mapper 只处理 REL_X/Y。
 
-1. **进入时必须把设备指针"warp"到 enter 坐标**（`mouse_warp()`）。
-   真正的 deskflow 客户端在 `Client::enter()` 里会调 `Screen::mouseMove()`（X11 下就是
-   `XWarpPointer`），把本机光标放到 enter 坐标再开始算增量。AOA HID 鼠标只有相对模式，
-   没有绝对寻址，所以用两步模拟：先朝**最小边**走一整个屏幕宽/高（必然被钳到 0，位置就确定了），
-   再走精确的剩余位移到目标。**warp 期间按键强制松开**，避免进手机时把一次点击/拖拽抹在屏幕上。
-   不做这一步：设备指针停在上次离开的位置，和 server 光标差一个未知常量偏移 →
-   屏幕一侧永远够不到，另一侧指针先撞到 Android 边缘卡死，server 光标还在继续走。
-   这就是"部分区域无法到达 + 到某个位置就到底"的成因。
+- Application 必须是 **Digitizer (0x0D/0x01)**，在 Linux 中产生 `INPUT_PROP_POINTER`。
+  使用 Pen Application 会变成 `INPUT_PROP_DIRECT`，影响光标和滚轮行为。
+- Stylus Physical Collection 中的 **Tip Switch + In Range** 产生 `BTN_TOUCH + BTN_TOOL_PEN`，
+  让 Android `TouchInputMapper::dispatchPointerStylus()` 按绝对坐标定位并支持悬停。
+  不能换成 Finger/Puck，否则又会进入相对触摸板/鼠标逻辑。
+- 按钮置于嵌套的 **Pointer Physical Collection** 中，让 Linux 把 Button usages 映射为
+  `BTN_LEFT/RIGHT/...`，而不是 `BTN_0/...`；按钮和坐标在同一个输入设备、同一条报告中。
+- 8 字节报告：`[flags][buttons][X LE16][Y LE16][wheel i8][pan i8]`。
+  flags bit0=Tip Switch，bit1=In Range。X/Y 逻辑范围 0..32767。
+- Deskflow 的 `[0,width-1] / [0,height-1]` 分别映射到完整 HID 轴范围。按键、滚轮报告也
+  携带当前位置，丢失一条移动报告不会让后续点击永久偏移。
+- enter 只发悬停（不带按键）；leave/close 先松开按键，再结束 In Range。
+  `DMRM` 累积并钳位到虚拟屏幕，下一条 `DMMV` 重新给出权威位置。
 
-2. **超过 ±127 的位移必须拆成多个报告**（`mouse_travel()`）。
-   一个 HID 报告每轴最多带 127，而两个 `DMMV` 之间 server 光标可以跳几百上千像素
-   （高回报率鼠标的一次快速甩动）。只发一个钳到 127 的报告会**静默丢掉剩下的位移**，
-   设备指针越落越远，最后卡在边缘。
+**`--mouse-mode relative` 兼容模式**保留 scrcpy 的 5 字节鼠标报告：进入时
+`mouse_warp()` 先撞左上边界再移动到目标；`mouse_travel()` 将超过 ±127 的位移拆分。
+这只能在“相同显示尺寸、无加速的 1:1 位移”模型中保持同步，**不能保证真机准确**。
+Android `CursorInputMapper` 会做速度缩放/加速；即使起点校准、尺寸一致，依然可能出现
+server 到达 y=0 而手机指针还在屏幕中间的情况。AOA 本身并不限制只能相对定位。
 
 - 滚轮 delta 以 120/格 为单位（`WHEEL_DELTA`），除以 120 后累加、凑整再发。
 - 按钮映射（deskflow ButtonID → HID bit）：1=左(bit0) 2=中(bit2) 3=右(bit1) 4=bit3 5=bit4。
 - `active` 标志（enter→leave 之间为真）用来丢弃窗口外的 move/wheel/button 事件。
-- `--width/--height` **必须等于手机真实分辨率**（也要和 server 布局里该屏幕的
-  `halfwidths/halfheights` 一致）：server 把光标钳到 `--width/--height` 矩形，
-  Android 把设备指针钳到真实显示矩形，两者相等时增量才不会被截断。
+- `--width/--height` 范围 1..32767（协议坐标按 int16 解析）；建议与手机当前方向分辨率
+  一致以获得自然移动比例。绝对模式不依赖设备实际像素数相等。
 
 ## 如何验证（无需真机/真 server）
 
-仓库没有测试目录，本地验证用临时文件（在 `/tmp/opencode/`，未入库）：
+仓库没有测试目录，本地验证用 `/tmp/opencode/mouse-regression/` 中的临时文件（未入库）：
 
-1. `stub libusb`：`/tmp/opencode/libusbstub/`（`libusb-1.0/libusb.h` + `stub.c`），
-   返回一个假设备并**记录每次 `SEND_HID_EVENT` 的字节**。
-2. `testsim.c` + `run.sh`：一个内含 mock deskflow server（fork + 127.0.0.1 socket）的
-   端到端仿真。它按脚本发 `CINN`（5 种进入位置/5 种上次停留位置）、连续 `DMMV` 扫过
-   四个角、`COUT`，最后再做一次 20px 步进的连续拖拽；把录到的 HID 报告回放进一个
-   "模拟 Android 相对指针"（按屏幕矩形钳位），逐步断言**设备指针坐标 == server 光标坐标**。
+1. `test_mouse.c` stub AOA 层，解析实际注册的 HID 描述符，再按字段回放报告。
+   相对模式施加随位移变化的速度增益；绝对模式按 Android 数位板轴范围缩放。
+2. 覆盖四角、大跳跃、连续拖拽、悬停、按钮/滚轮、离开后事件、重入、不同设备分辨率、
+   丢包后点击恢复、DMRM 边界反向、极限尺寸与相对兼容模式。ASan/UBSan 检查通过。
+3. 修复前版本的相同加速模型复现：server y=0，手机指针 y=1050，无法继续向上。
 
 ```bash
-/tmp/opencode/run.sh
-# 期望: "136 samples, 0 failures" + "REACHABILITY: ok" + "DRAG: ok" + "PASS"
-# 回归对照：把 HEAD 的 bridge.c/h 拿来跑同一个 testsim，会看到
-#   "131 failures" + "DRAG: FAIL (pointer is up to 832px away ...)"
+sh /tmp/opencode/mouse-regression/run.sh
+# 期望: "PASS: 2729 pointer samples ..." + 旧版 "REPRODUCED ... y=1050"
+# 修复前基线固定为 0e6a97e。
 ```
 
-warp 的开销是每次 enter 18~33 个 HID 报告（几十毫秒的 USB 控制传输），只在切屏时发生一次。
+这些是主机仿真，不代表 Android 真机兼容性已验证。绝对模式 enter 只需一条指针报告。
 
 所有源文件应保持 `-Wall -Wextra -Werror` 干净：
 
@@ -159,7 +163,8 @@ for f in src/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only -Isrc "$f"
 
 - ✅ 协议握手 + 消息流 + HID 报告，mock 验证通过。
 - ✅ 真机环境下已连上 deskflow server（`connected ... as "android"`）。
-- ⏳ **待真机实测**：鼠标滑入手机屏幕后是否能真正操控（用户待验证，vid 0x0a9d 待确认是否为手机）。
+- ✅ 已复现相对模式加速漂移，并加入默认绝对数位板指针；主机仿真与构建通过。
+- ⏳ **待真机实测**：绝对模式在用户手机上的悬停、全屏到达、拖拽、滚轮与切屏兼容性。
 - 潜在后续项：游戏手柄支持、多键盘布局、TLS 支持、udev 规则/systemd 示例。
 
 ## 代码风格约定

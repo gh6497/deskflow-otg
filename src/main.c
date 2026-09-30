@@ -8,6 +8,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <errno.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,15 +43,27 @@ static void usage(const char *prog)
             "  -p, --port PORT       Deskflow server port (default %u)\n"
             "  -n, --name NAME       Screen name reported to the server (default %s)\n"
             "  -s, --serial SERIAL   Android USB device serial (auto-detect if omitted)\n"
-            "      --width W         Phone screen width in pixels (default %d)\n"
-            "      --height H        Phone screen height in pixels (default %d)\n"
+            "      --width W         Virtual screen width, 1..32767 (default %d)\n"
+            "      --height H        Virtual screen height, 1..32767 (default %d)\n"
+            "      --mouse-mode MODE absolute (default) or relative (compatibility)\n"
             "  -h, --help            Show this help\n"
             "\n"
-            "--width/--height must match the phone's real display resolution,\n"
-            "and must match the \"halfwidths/halfheights\" of the \"%s\" screen\n"
-            "in the deskflow server layout.\n",
+            "Absolute mode maps the virtual screen to the full phone display.\n"
+            "Use the phone's resolution/aspect ratio for natural movement.\n"
+            "Relative mode may drift due to Android pointer speed/acceleration.\n",
             prog, DEFAULT_HOST, (unsigned)DEFAULT_PORT, DEFAULT_NAME,
-            DEFAULT_WIDTH, DEFAULT_HEIGHT, DEFAULT_NAME);
+            DEFAULT_WIDTH, DEFAULT_HEIGHT);
+}
+
+static int parse_screen_size(const char *arg)
+{
+    char *end;
+    errno = 0;
+    long size = strtol(arg, &end, 10);
+    if (errno || end == arg || *end || size < 1 || size > INT16_MAX) {
+        return 0;
+    }
+    return (int)size;
 }
 
 /* ---- deskflow callbacks -> bridge --------------------------------------- */
@@ -151,6 +164,7 @@ int main(int argc, char **argv)
     unsigned port = DEFAULT_PORT;
     int width = DEFAULT_WIDTH;
     int height = DEFAULT_HEIGHT;
+    enum otg_mouse_mode mouse_mode = OTG_MOUSE_ABSOLUTE;
 
     for (int i = 1; i < argc; ++i) {
         const char *a = argv[i];
@@ -166,14 +180,29 @@ int main(int argc, char **argv)
         } else if ((strcmp(a, "-s") == 0 || strcmp(a, "--serial") == 0) && i + 1 < argc) {
             serial = argv[++i];
         } else if (strcmp(a, "--width") == 0 && i + 1 < argc) {
-            width = atoi(argv[++i]);
+            width = parse_screen_size(argv[++i]);
         } else if (strcmp(a, "--height") == 0 && i + 1 < argc) {
-            height = atoi(argv[++i]);
+            height = parse_screen_size(argv[++i]);
+        } else if (strcmp(a, "--mouse-mode") == 0 && i + 1 < argc) {
+            const char *mode = argv[++i];
+            if (strcmp(mode, "absolute") == 0) {
+                mouse_mode = OTG_MOUSE_ABSOLUTE;
+            } else if (strcmp(mode, "relative") == 0) {
+                mouse_mode = OTG_MOUSE_RELATIVE;
+            } else {
+                fprintf(stderr, "invalid mouse mode: %s (use absolute or relative)\n", mode);
+                return 2;
+            }
         } else {
             fprintf(stderr, "unknown argument: %s\n", a);
             usage(argv[0]);
             return 2;
         }
+    }
+
+    if (!width || !height) {
+        fprintf(stderr, "screen width and height must be integers in 1..32767\n");
+        return 2;
     }
 
     signal(SIGINT, on_signal);
@@ -184,10 +213,11 @@ int main(int argc, char **argv)
     state.serial = serial;
 
     /* 1. Open the Android device and register the AOA HID keyboard + mouse. */
-    if (otg_bridge_open(&state.bridge, serial, width, height) != 0) {
+    if (otg_bridge_open(&state.bridge, serial, width, height, mouse_mode) != 0) {
         return 1;
     }
-    fprintf(stderr, "INFO:  AOA HID keyboard + mouse ready\n");
+    fprintf(stderr, "INFO:  AOA HID keyboard + %s pointer ready (screen %dx%d)\n",
+            mouse_mode == OTG_MOUSE_ABSOLUTE ? "absolute" : "relative", width, height);
 
     /* 2. Connect to the Deskflow server. */
     df_client_callbacks cbs = {

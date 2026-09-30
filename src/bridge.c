@@ -1,10 +1,12 @@
 /*
  * bridge.c - see bridge.h.
  *
- * The HID report descriptors and encoding below are copied verbatim (with
+ * The keyboard and relative mouse descriptors below are copied verbatim (with
  * permission, Apache-2.0) from scrcpy:
  *   - app/src/hid/hid_keyboard.c  (SC_HID_KEYBOARD_REPORT_DESC and report layout)
  *   - app/src/hid/hid_mouse.c     (SC_HID_MOUSE_REPORT_DESC and report layout)
+ * The absolute tablet follows Android's TouchInputMapper::dispatchPointerStylus
+ * and Linux drivers/hid/hid-input.c (Digitizer + Tip Switch + In Range).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,6 +23,7 @@
 #define LOG_DBG(...)  fprintf(stderr, "DEBUG: " __VA_ARGS__)
 
 #define HID_KEYBOARD_MAX_KEYS 6
+#define HID_ABSOLUTE_MAX 32767
 
 /* Deskflow wheel deltas are in units of 120 per notch (PlatformScreen.h
  * s_scrollDelta), matching the Windows WHEEL_DELTA convention. */
@@ -102,6 +105,86 @@ static const uint8_t MOUSE_REPORT_DESC[] = {
     0xC0              /* End Collection (Application) */
 };
 
+/*
+ * Absolute tablet: flags + buttons + uint16 LE X/Y + wheel + pan.
+ * Android's normal mouse mapper only handles REL_X/Y and accelerates them.
+ * A Digitizer application sets INPUT_PROP_POINTER; Tip Switch and In Range
+ * provide BTN_TOUCH and BTN_TOOL_PEN, selecting absolute stylus positioning
+ * with a visible pointer and hover instead of relative touchpad gestures.
+ * Do not use a Pen application (INPUT_PROP_DIRECT) or a Puck tool (relative
+ * mouse mapping).  Buttons live in the Pointer physical collection so Linux
+ * maps them to BTN_LEFT/RIGHT/etc., on the SAME input device as the axes.
+ */
+static const uint8_t ABSOLUTE_MOUSE_REPORT_DESC[] = {
+    0x05, 0x0D,       /* Usage Page (Digitizers) */
+    0x09, 0x01,       /* Usage (Digitizer) */
+    0xA1, 0x01,       /* Collection (Application) */
+    0x09, 0x20,       /* Usage (Stylus) */
+    0xA1, 0x00,       /* Collection (Physical) */
+    0x09, 0x42,       /* Usage (Tip Switch) */
+    0x09, 0x32,       /* Usage (In Range) */
+    0x15, 0x00,       /* Logical Minimum (0) */
+    0x25, 0x01,       /* Logical Maximum (1) */
+    0x75, 0x01,       /* Report Size (1) */
+    0x95, 0x02,       /* Report Count (2) */
+    0x81, 0x02,       /* Input (Data, Variable, Absolute) */
+    0x75, 0x06,       /* Report Size (6) */
+    0x95, 0x01,       /* Report Count (1) */
+    0x81, 0x01,       /* Input (Constant): padding */
+    0x05, 0x01,       /* Usage Page (Generic Desktop) */
+    0x09, 0x01,       /* Usage (Pointer) */
+    0xA1, 0x00,       /* Collection (Physical) */
+    0x05, 0x09,       /* Usage Page (Buttons) */
+    0x19, 0x01,       /* Usage Minimum (1) */
+    0x29, 0x05,       /* Usage Maximum (5) */
+    0x15, 0x00,       /* Logical Minimum (0) */
+    0x25, 0x01,       /* Logical Maximum (1) */
+    0x75, 0x01,       /* Report Size (1) */
+    0x95, 0x05,       /* Report Count (5) */
+    0x81, 0x02,       /* Input (Data, Variable, Absolute): buttons */
+    0x75, 0x03,       /* Report Size (3) */
+    0x95, 0x01,       /* Report Count (1) */
+    0x81, 0x01,       /* Input (Constant): padding */
+    0x05, 0x01,       /* Usage Page (Generic Desktop) */
+    0x09, 0x30,       /* Usage (X) */
+    0x09, 0x31,       /* Usage (Y) */
+    0x15, 0x00,       /* Logical Minimum (0) */
+    0x26, 0xFF, 0x7F, /* Logical Maximum (32767) */
+    0x75, 0x10,       /* Report Size (16) */
+    0x95, 0x02,       /* Report Count (2) */
+    0x81, 0x02,       /* Input (Data, Variable, Absolute): X/Y */
+    0x09, 0x38,       /* Usage (Wheel) */
+    0x15, 0x81,       /* Logical Minimum (-127) */
+    0x25, 0x7F,       /* Logical Maximum (127) */
+    0x75, 0x08,       /* Report Size (8) */
+    0x95, 0x01,       /* Report Count (1) */
+    0x81, 0x06,       /* Input (Data, Variable, Relative): wheel */
+    0x05, 0x0C,       /* Usage Page (Consumer) */
+    0x0A, 0x38, 0x02, /* Usage (AC Pan) */
+    0x81, 0x06,       /* Input (Data, Variable, Relative): pan */
+    0xC0, 0xC0, 0xC0  /* End Pointer, Stylus, Application */
+};
+
+static int32_t clamp_position(int32_t value, int32_t size)
+{
+    if (value < 0) {
+        return 0;
+    }
+    if (value >= size) {
+        return size - 1;
+    }
+    return value;
+}
+
+static uint16_t absolute_axis(int32_t value, int32_t size)
+{
+    if (size <= 1) {
+        return 0;
+    }
+    return (uint16_t)((int64_t)clamp_position(value, size) * HID_ABSOLUTE_MAX /
+                      (size - 1));
+}
+
 static int8_t clamp_i8(int32_t v)
 {
     if (v > 127) {
@@ -148,9 +231,9 @@ static void send_keyboard_report(struct otg_bridge *b)
     }
 }
 
-static void send_mouse_report(struct otg_bridge *b, uint8_t buttons,
-                              int8_t dx, int8_t dy, int8_t vscroll,
-                              int8_t hscroll)
+static void send_relative_mouse_report(struct otg_bridge *b, uint8_t buttons,
+                                       int8_t dx, int8_t dy, int8_t vscroll,
+                                       int8_t hscroll)
 {
     uint8_t report[AOA_MOUSE_REPORT_SIZE];
     report[0] = buttons;
@@ -160,6 +243,29 @@ static void send_mouse_report(struct otg_bridge *b, uint8_t buttons,
     report[4] = (uint8_t)hscroll;
     if (!aoa_hid_send(&b->aoa, AOA_HID_ID_MOUSE, report, sizeof(report))) {
         LOG_WARN("failed to send mouse report\n");
+    }
+}
+
+/* Every absolute report is self-contained, including clicks and wheel events.
+ * A lost move therefore cannot leave the next click at an old location. */
+static void send_mouse_state(struct otg_bridge *b, int8_t vs, int8_t hs)
+{
+    if (b->mouse_mode == OTG_MOUSE_RELATIVE) {
+        send_relative_mouse_report(b, b->mouse_buttons, 0, 0, vs, hs);
+        return;
+    }
+
+    uint16_t x = absolute_axis(b->mouse_x, b->screen_w);
+    uint16_t y = absolute_axis(b->mouse_y, b->screen_h);
+    uint8_t buttons = b->active ? b->mouse_buttons : 0;
+    /* Like Android's mouse, left/right/middle count as pointer down. */
+    uint8_t flags = b->active ? (uint8_t)(0x02 | !!(buttons & 0x07)) : 0;
+    uint8_t report[AOA_ABSOLUTE_MOUSE_REPORT_SIZE] = {
+        flags, buttons, (uint8_t)x, (uint8_t)(x >> 8),
+        (uint8_t)y, (uint8_t)(y >> 8), (uint8_t)vs, (uint8_t)hs,
+    };
+    if (!aoa_hid_send(&b->aoa, AOA_HID_ID_MOUSE, report, sizeof(report))) {
+        LOG_WARN("failed to send absolute mouse report\n");
     }
 }
 
@@ -175,7 +281,7 @@ static void mouse_travel(struct otg_bridge *b, int32_t dx, int32_t dy,
     while (dx != 0 || dy != 0) {
         int8_t sx = clamp_i8(dx);
         int8_t sy = clamp_i8(dy);
-        send_mouse_report(b, buttons, sx, sy, 0, 0);
+        send_relative_mouse_report(b, buttons, sx, sy, 0, 0);
         dx -= sx;
         dy -= sy;
     }
@@ -193,13 +299,14 @@ static void send_mouse_move(struct otg_bridge *b, int32_t dx, int32_t dy)
 }
 
 /*
- * Force the device pointer to exactly (tx, ty) -- the equivalent of the
+ * Best-effort relative-mode warp to (tx, ty) -- the equivalent of the
  * XWarpPointer() the real deskflow client does on enter (deskflow's
  * Client::enter() calls Screen::mouseMove() to place the local cursor on the
  * enter coordinates before any delta is applied).
  *
- * The AOA mouse is relative only, so there is no way to address an absolute
- * position directly.  Instead:
+ * This compatibility path assumes unaccelerated 1:1 motion and matching
+ * display bounds. Android mouse speed/acceleration can violate both legs;
+ * absolute mode avoids this approximation entirely. For a relative HID:
  *
  *   1. Travel by a full screen width/height towards the *minimum* edge.  Any
  *      starting point clamps onto 0, so afterwards the position is known for
@@ -238,16 +345,23 @@ static void mouse_warp(struct otg_bridge *b, int32_t tx, int32_t ty)
     mouse_travel(b, tx, ty, 0);                     /* -> (tx, ty) exactly  */
 
     if (b->mouse_buttons) {
-        send_mouse_report(b, b->mouse_buttons, 0, 0, 0, 0);
+        send_mouse_state(b, 0, 0);
     }
 }
 
 int otg_bridge_open(struct otg_bridge *b, const char *serial,
-                    int32_t screen_w, int32_t screen_h)
+                    int32_t screen_w, int32_t screen_h,
+                    enum otg_mouse_mode mouse_mode)
 {
     memset(b, 0, sizeof(*b));
-    b->screen_w = screen_w > 0 ? screen_w : 1;
-    b->screen_h = screen_h > 0 ? screen_h : 1;
+    if (screen_w < 1 || screen_w > INT16_MAX ||
+        screen_h < 1 || screen_h > INT16_MAX) {
+        LOG_ERR("screen width and height must be in 1..32767\n");
+        return -1;
+    }
+    b->screen_w = screen_w;
+    b->screen_h = screen_h;
+    b->mouse_mode = mouse_mode;
 
     if (!aoa_hid_init(&b->aoa)) {
         return -1;
@@ -263,8 +377,12 @@ int otg_bridge_open(struct otg_bridge *b, const char *serial,
         aoa_hid_destroy(&b->aoa);
         return -1;
     }
-    if (!aoa_hid_register(&b->aoa, AOA_HID_ID_MOUSE,
-                          MOUSE_REPORT_DESC, sizeof(MOUSE_REPORT_DESC))) {
+    const uint8_t *mouse_desc = mouse_mode == OTG_MOUSE_ABSOLUTE
+                               ? ABSOLUTE_MOUSE_REPORT_DESC : MOUSE_REPORT_DESC;
+    uint16_t mouse_desc_size = mouse_mode == OTG_MOUSE_ABSOLUTE
+                              ? sizeof(ABSOLUTE_MOUSE_REPORT_DESC)
+                              : sizeof(MOUSE_REPORT_DESC);
+    if (!aoa_hid_register(&b->aoa, AOA_HID_ID_MOUSE, mouse_desc, mouse_desc_size)) {
         LOG_ERR("could not register AOA mouse\n");
         aoa_hid_destroy(&b->aoa);
         return -1;
@@ -274,6 +392,9 @@ int otg_bridge_open(struct otg_bridge *b, const char *serial,
 
 void otg_bridge_close(struct otg_bridge *b)
 {
+    if (b->active) {
+        otg_bridge_leave(b);
+    }
     aoa_hid_destroy(&b->aoa);
 }
 
@@ -288,29 +409,31 @@ void otg_bridge_enter(struct otg_bridge *b, int16_t x, int16_t y, uint16_t mask)
      * subsequent modifier key events will refine it. */
     b->hid_mods = modmask_to_hid(mask);
 
-    /* The server's cursor is absolute and clamped to the screen rectangle,
-     * while the device pointer is relative and clamped to the same rectangle.
-     * Differencing the absolute positions is only correct if both pointers
-     * currently sit at the same spot, and on enter the device pointer is
-     * wherever the last visit stranded it.  Put the device pointer on the
-     * enter position first, so from here on the two advance together. */
-    mouse_warp(b, x, y);
-
-    b->mouse_x = x;
-    b->mouse_y = y;
+    b->mouse_x = clamp_position(x, b->screen_w);
+    b->mouse_y = clamp_position(y, b->screen_h);
     b->have_mouse_pos = true;
     b->active = true;
+    b->mouse_buttons = 0;
+    if (b->mouse_mode == OTG_MOUSE_ABSOLUTE) {
+        send_mouse_state(b, 0, 0); /* hover at enter position, never click */
+    } else {
+        mouse_warp(b, b->mouse_x, b->mouse_y);
+    }
     send_keyboard_report(b);
     LOG_DBG("enter at %d,%d mask=0x%04x\n", x, y, mask);
 }
 
 void otg_bridge_leave(struct otg_bridge *b)
 {
-    b->active = false;
     if (b->mouse_buttons) {
         /* Never leave a button stuck down on the device. */
         b->mouse_buttons = 0;
-        send_mouse_report(b, 0, 0, 0, 0, 0);
+        send_mouse_state(b, 0, 0);
+    }
+    bool was_active = b->active;
+    b->active = false;
+    if (was_active && b->mouse_mode == OTG_MOUSE_ABSOLUTE) {
+        send_mouse_state(b, 0, 0); /* end hover after releasing buttons */
     }
     if (b->have_mouse_pos) {
         /* mouse_x/mouse_y still hold the server's cursor position at the
@@ -322,6 +445,8 @@ void otg_bridge_leave(struct otg_bridge *b)
         LOG_DBG("leave (cursor position unknown)\n");
     }
     b->have_mouse_pos = false;
+    b->residual_hscroll = 0;
+    b->residual_vscroll = 0;
 }
 
 void otg_bridge_key(struct otg_bridge *b, uint32_t keyid, bool down)
@@ -350,6 +475,9 @@ void otg_bridge_key(struct otg_bridge *b, uint32_t keyid, bool down)
 
 void otg_bridge_mouse_button(struct otg_bridge *b, uint8_t button, bool press)
 {
+    if (!b->active) {
+        return;
+    }
     /* deskflow ButtonID -> HID button bit
      * kButtonLeft=1, Middle=2, Right=3, Extra0=4, Extra1=5. */
     uint8_t bit;
@@ -366,34 +494,30 @@ void otg_bridge_mouse_button(struct otg_bridge *b, uint8_t button, bool press)
     } else {
         b->mouse_buttons &= (uint8_t)~bit;
     }
-    if (b->active) {
-        send_mouse_report(b, b->mouse_buttons, 0, 0, 0, 0);
-    }
+    send_mouse_state(b, 0, 0);
 }
 
 void otg_bridge_mouse_move(struct otg_bridge *b, int16_t x, int16_t y)
 {
-    /* Absolute move: convert to a relative delta (AOA mouse is relative).
-     * The delta base was placed on the enter position by mouse_warp(), and the
-     * server clamps its cursor to the same rectangle the device clamps its
-     * pointer to, so from here on the device pointer follows 1:1. */
-    int32_t dx = 0;
-    int32_t dy = 0;
-    if (b->have_mouse_pos) {
-        dx = (int32_t)x - b->mouse_x;
-        dy = (int32_t)y - b->mouse_y;
-    }
-    b->mouse_x = x;
-    b->mouse_y = y;
-    b->have_mouse_pos = true;
-
-    /* Drop anything outside the enter/leave window: the server only sends
-     * motion to the active screen, but a packet may still be in flight when it
-     * switches away. */
-    if (!b->active || (dx == 0 && dy == 0)) {
+    if (!b->active) {
         return;
     }
-    send_mouse_move(b, dx, dy);
+    int32_t tx = clamp_position(x, b->screen_w);
+    int32_t ty = clamp_position(y, b->screen_h);
+    int32_t dx = tx - b->mouse_x;
+    int32_t dy = ty - b->mouse_y;
+    bool had_position = b->have_mouse_pos;
+    b->mouse_x = tx;
+    b->mouse_y = ty;
+    b->have_mouse_pos = true;
+
+    if (b->mouse_mode == OTG_MOUSE_ABSOLUTE) {
+        send_mouse_state(b, 0, 0);
+    } else if (!had_position) {
+        mouse_warp(b, tx, ty);
+    } else {
+        send_mouse_move(b, dx, dy);
+    }
 }
 
 void otg_bridge_mouse_rel_move(struct otg_bridge *b, int16_t dx, int16_t dy)
@@ -401,14 +525,16 @@ void otg_bridge_mouse_rel_move(struct otg_bridge *b, int16_t dx, int16_t dy)
     if (!b->active) {
         return;
     }
-    /* The server does not advance its cursor for relative moves, so keep the
-     * absolute base in step here; otherwise an absolute move arriving later
-     * would be turned into a bogus delta. */
-    if (b->have_mouse_pos) {
-        b->mouse_x += dx;
-        b->mouse_y += dy;
+    /* Locked-screen DMRM has no absolute target. Accumulate within the screen
+     * so reversing after an overshoot responds immediately. The next DMMV
+     * provides the authoritative position again. */
+    b->mouse_x = clamp_position(b->mouse_x + dx, b->screen_w);
+    b->mouse_y = clamp_position(b->mouse_y + dy, b->screen_h);
+    if (b->mouse_mode == OTG_MOUSE_ABSOLUTE) {
+        send_mouse_state(b, 0, 0);
+    } else {
+        send_mouse_move(b, dx, dy);
     }
-    send_mouse_move(b, dx, dy);
 }
 
 void otg_bridge_mouse_wheel(struct otg_bridge *b, int16_t x, int16_t y)
@@ -429,5 +555,5 @@ void otg_bridge_mouse_wheel(struct otg_bridge *b, int16_t x, int16_t y)
     if (hs == 0 && vs == 0) {
         return;
     }
-    send_mouse_report(b, b->mouse_buttons, 0, 0, vs, hs);
+    send_mouse_state(b, vs, hs);
 }
