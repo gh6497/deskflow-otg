@@ -42,11 +42,15 @@ static void usage(const char *prog)
             "  -p, --port PORT       Deskflow server port (default %u)\n"
             "  -n, --name NAME       Screen name reported to the server (default %s)\n"
             "  -s, --serial SERIAL   Android USB device serial (auto-detect if omitted)\n"
-            "      --width W         Virtual screen width in pixels (default %d)\n"
-            "      --height H        Virtual screen height in pixels (default %d)\n"
-            "  -h, --help            Show this help\n",
+            "      --width W         Phone screen width in pixels (default %d)\n"
+            "      --height H        Phone screen height in pixels (default %d)\n"
+            "  -h, --help            Show this help\n"
+            "\n"
+            "--width/--height must match the phone's real display resolution,\n"
+            "and must match the \"halfwidths/halfheights\" of the \"%s\" screen\n"
+            "in the deskflow server layout.\n",
             prog, DEFAULT_HOST, (unsigned)DEFAULT_PORT, DEFAULT_NAME,
-            DEFAULT_WIDTH, DEFAULT_HEIGHT);
+            DEFAULT_WIDTH, DEFAULT_HEIGHT, DEFAULT_NAME);
 }
 
 /* ---- deskflow callbacks -> bridge --------------------------------------- */
@@ -180,7 +184,7 @@ int main(int argc, char **argv)
     state.serial = serial;
 
     /* 1. Open the Android device and register the AOA HID keyboard + mouse. */
-    if (otg_bridge_open(&state.bridge, serial) != 0) {
+    if (otg_bridge_open(&state.bridge, serial, width, height) != 0) {
         return 1;
     }
     fprintf(stderr, "INFO:  AOA HID keyboard + mouse ready\n");

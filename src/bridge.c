@@ -148,11 +148,12 @@ static void send_keyboard_report(struct otg_bridge *b)
     }
 }
 
-static void send_mouse_report(struct otg_bridge *b, int8_t dx, int8_t dy,
-                              int8_t vscroll, int8_t hscroll)
+static void send_mouse_report(struct otg_bridge *b, uint8_t buttons,
+                              int8_t dx, int8_t dy, int8_t vscroll,
+                              int8_t hscroll)
 {
     uint8_t report[AOA_MOUSE_REPORT_SIZE];
-    report[0] = b->mouse_buttons;
+    report[0] = buttons;
     report[1] = (uint8_t)dx;
     report[2] = (uint8_t)dy;
     report[3] = (uint8_t)vscroll;
@@ -162,9 +163,91 @@ static void send_mouse_report(struct otg_bridge *b, int8_t dx, int8_t dy,
     }
 }
 
-int otg_bridge_open(struct otg_bridge *b, const char *serial)
+/*
+ * Walk the device's relative pointer by (dx, dy), splitting the travel over
+ * as many reports as needed since one report carries at most 127 per axis.
+ * `buttons` is sent with every report, so a caller can keep a button released
+ * for the whole move.
+ */
+static void mouse_travel(struct otg_bridge *b, int32_t dx, int32_t dy,
+                         uint8_t buttons)
+{
+    while (dx != 0 || dy != 0) {
+        int8_t sx = clamp_i8(dx);
+        int8_t sy = clamp_i8(dy);
+        send_mouse_report(b, buttons, sx, sy, 0, 0);
+        dx -= sx;
+        dy -= sy;
+    }
+}
+
+/* Send a mouse report carrying the current button state. */
+static void send_mouse_move(struct otg_bridge *b, int32_t dx, int32_t dy)
+{
+    /* A single report can only carry +/-127 per axis, and the server's cursor
+     * can jump much further than that between two packets (a fast flick on a
+     * high-poll-rate mouse easily spans >1000px).  Split the travel so no
+     * motion is dropped, otherwise the device pointer silently falls behind
+     * and eventually sticks to a screen edge. */
+    mouse_travel(b, dx, dy, b->mouse_buttons);
+}
+
+/*
+ * Force the device pointer to exactly (tx, ty) -- the equivalent of the
+ * XWarpPointer() the real deskflow client does on enter (deskflow's
+ * Client::enter() calls Screen::mouseMove() to place the local cursor on the
+ * enter coordinates before any delta is applied).
+ *
+ * The AOA mouse is relative only, so there is no way to address an absolute
+ * position directly.  Instead:
+ *
+ *   1. Travel by a full screen width/height towards the *minimum* edge.  Any
+ *      starting point clamps onto 0, so afterwards the position is known for
+ *      certain -- it is exactly (0, 0) regardless of where the pointer had
+ *      been left, whether Android reset it, or whether it got stuck.
+ *   2. Travel by the remaining offset to reach the target.  Both the target
+ *      and the origin are inside the reported screen, so this leg never
+ *      clamps and lands exactly.
+ *
+ * The buttons are held released for the whole warp so that entering the phone
+ * mid-gesture cannot turn into a click or a drag smeared across the screen;
+ * the previous state is restored afterwards.
+ */
+static void mouse_warp(struct otg_bridge *b, int32_t tx, int32_t ty)
+{
+    int32_t maxx = b->screen_w - 1;
+    int32_t maxy = b->screen_h - 1;
+    if (maxx < 0) {
+        maxx = 0;
+    }
+    if (maxy < 0) {
+        maxy = 0;
+    }
+    if (tx < 0) {
+        tx = 0;
+    } else if (tx > maxx) {
+        tx = maxx;
+    }
+    if (ty < 0) {
+        ty = 0;
+    } else if (ty > maxy) {
+        ty = maxy;
+    }
+
+    mouse_travel(b, -b->screen_w, -b->screen_h, 0); /* -> (0, 0), known good */
+    mouse_travel(b, tx, ty, 0);                     /* -> (tx, ty) exactly  */
+
+    if (b->mouse_buttons) {
+        send_mouse_report(b, b->mouse_buttons, 0, 0, 0, 0);
+    }
+}
+
+int otg_bridge_open(struct otg_bridge *b, const char *serial,
+                    int32_t screen_w, int32_t screen_h)
 {
     memset(b, 0, sizeof(*b));
+    b->screen_w = screen_w > 0 ? screen_w : 1;
+    b->screen_h = screen_h > 0 ? screen_h : 1;
 
     if (!aoa_hid_init(&b->aoa)) {
         return -1;
@@ -204,16 +287,31 @@ void otg_bridge_enter(struct otg_bridge *b, int16_t x, int16_t y, uint16_t mask)
     /* Seed modifier state from the server's reported active-modifier mask;
      * subsequent modifier key events will refine it. */
     b->hid_mods = modmask_to_hid(mask);
+
+    /* The server's cursor is absolute and clamped to the screen rectangle,
+     * while the device pointer is relative and clamped to the same rectangle.
+     * Differencing the absolute positions is only correct if both pointers
+     * currently sit at the same spot, and on enter the device pointer is
+     * wherever the last visit stranded it.  Put the device pointer on the
+     * enter position first, so from here on the two advance together. */
+    mouse_warp(b, x, y);
+
     b->mouse_x = x;
     b->mouse_y = y;
     b->have_mouse_pos = true;
+    b->active = true;
     send_keyboard_report(b);
     LOG_DBG("enter at %d,%d mask=0x%04x\n", x, y, mask);
 }
 
 void otg_bridge_leave(struct otg_bridge *b)
 {
-    b->mouse_buttons = 0;
+    b->active = false;
+    if (b->mouse_buttons) {
+        /* Never leave a button stuck down on the device. */
+        b->mouse_buttons = 0;
+        send_mouse_report(b, 0, 0, 0, 0, 0);
+    }
     b->have_mouse_pos = false;
     LOG_DBG("leave\n");
 }
@@ -260,29 +358,56 @@ void otg_bridge_mouse_button(struct otg_bridge *b, uint8_t button, bool press)
     } else {
         b->mouse_buttons &= (uint8_t)~bit;
     }
-    send_mouse_report(b, 0, 0, 0, 0);
+    if (b->active) {
+        send_mouse_report(b, b->mouse_buttons, 0, 0, 0, 0);
+    }
 }
 
 void otg_bridge_mouse_move(struct otg_bridge *b, int16_t x, int16_t y)
 {
-    /* Absolute move: convert to a relative delta (AOA mouse is relative). */
+    /* Absolute move: convert to a relative delta (AOA mouse is relative).
+     * The delta base was placed on the enter position by mouse_warp(), and the
+     * server clamps its cursor to the same rectangle the device clamps its
+     * pointer to, so from here on the device pointer follows 1:1. */
+    int32_t dx = 0;
+    int32_t dy = 0;
     if (b->have_mouse_pos) {
-        int32_t dx = (int32_t)x - b->mouse_x;
-        int32_t dy = (int32_t)y - b->mouse_y;
-        send_mouse_report(b, clamp_i8(dx), clamp_i8(dy), 0, 0);
+        dx = (int32_t)x - b->mouse_x;
+        dy = (int32_t)y - b->mouse_y;
     }
     b->mouse_x = x;
     b->mouse_y = y;
     b->have_mouse_pos = true;
+
+    /* Drop anything outside the enter/leave window: the server only sends
+     * motion to the active screen, but a packet may still be in flight when it
+     * switches away. */
+    if (!b->active || (dx == 0 && dy == 0)) {
+        return;
+    }
+    send_mouse_move(b, dx, dy);
 }
 
 void otg_bridge_mouse_rel_move(struct otg_bridge *b, int16_t dx, int16_t dy)
 {
-    send_mouse_report(b, clamp_i8(dx), clamp_i8(dy), 0, 0);
+    if (!b->active) {
+        return;
+    }
+    /* The server does not advance its cursor for relative moves, so keep the
+     * absolute base in step here; otherwise an absolute move arriving later
+     * would be turned into a bogus delta. */
+    if (b->have_mouse_pos) {
+        b->mouse_x += dx;
+        b->mouse_y += dy;
+    }
+    send_mouse_move(b, dx, dy);
 }
 
 void otg_bridge_mouse_wheel(struct otg_bridge *b, int16_t x, int16_t y)
 {
+    if (!b->active) {
+        return;
+    }
     /* Mirror scrcpy's sc_hid_mouse_generate_input_from_scroll: accumulate
      * fractional scroll and emit an event once a whole notch accumulates. */
     b->residual_hscroll += (float)x / WHEEL_DELTA;
@@ -296,5 +421,5 @@ void otg_bridge_mouse_wheel(struct otg_bridge *b, int16_t x, int16_t y)
     if (hs == 0 && vs == 0) {
         return;
     }
-    send_mouse_report(b, 0, 0, vs, hs);
+    send_mouse_report(b, b->mouse_buttons, 0, 0, vs, hs);
 }

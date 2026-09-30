@@ -27,15 +27,31 @@ struct otg_bridge {
     uint8_t mouse_buttons;    /* HID button byte */
     int32_t mouse_x, mouse_y; /* last absolute cursor position */
     bool have_mouse_pos;
+    /*
+     * True between "enter" and "leave", i.e. while the phone is the screen
+     * the server is sending mouse events for.  Motion received outside that
+     * window is dropped instead of being replayed to the device.
+     */
+    bool active;
+    /* virtual screen size reported to the server; also the assumed bounds of
+     * the device's own relative pointer, which is what makes the abs -> rel
+     * conversion in otg_bridge_enter() exact. */
+    int32_t screen_w, screen_h;
     float residual_hscroll;
     float residual_vscroll;
 };
 
 /*
  * Open the Android device over USB and register the HID keyboard + mouse.
- * Returns 0 on success, non-zero on failure.
+ *
+ * `screen_w`/`screen_h` must match the phone's real display resolution: the
+ * server clamps its virtual cursor to that rectangle, and the device clamps
+ * the relative HID pointer to the same rectangle, so the two only stay in
+ * lock-step when the numbers agree.  Returns 0 on success, non-zero on
+ * failure.
  */
-int otg_bridge_open(struct otg_bridge *b, const char *serial);
+int otg_bridge_open(struct otg_bridge *b, const char *serial,
+                    int32_t screen_w, int32_t screen_h);
 
 void otg_bridge_close(struct otg_bridge *b);
 
