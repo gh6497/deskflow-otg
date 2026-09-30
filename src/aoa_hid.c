@@ -66,6 +66,16 @@ static char *read_string(libusb_device_handle *handle, uint8_t index)
     return s;
 }
 
+/*
+ * One eligible USB device (has a readable serial number).
+ */
+struct usb_candidate {
+    libusb_device *device;
+    char *serial;
+    uint16_t vid;
+    uint16_t pid;
+};
+
 bool aoa_hid_open(struct aoa_hid *a, const char *serial)
 {
     libusb_device **list = NULL;
@@ -75,9 +85,12 @@ bool aoa_hid_open(struct aoa_hid *a, const char *serial)
         return false;
     }
 
-    libusb_device *chosen = NULL;
-    char *chosen_serial = NULL;
-    bool multiple = false;
+    struct usb_candidate *cands = calloc((size_t)count, sizeof(*cands));
+    size_t ncand = 0;
+    if (!cands) {
+        libusb_free_device_list(list, 1);
+        return false;
+    }
 
     for (ssize_t i = 0; i < count; ++i) {
         libusb_device *dev = list[i];
@@ -98,44 +111,57 @@ bool aoa_hid_open(struct aoa_hid *a, const char *serial)
             continue;
         }
 
-        if (serial) {
-            if (strcmp(serial, s) == 0) {
-                chosen = dev;
-                chosen_serial = s;
+        cands[ncand].device = libusb_ref_device(dev);
+        cands[ncand].serial = s;
+        cands[ncand].vid = desc.idVendor;
+        cands[ncand].pid = desc.idProduct;
+        ++ncand;
+    }
+
+    /* Log every candidate so the user can pick a serial with -s. */
+    for (size_t i = 0; i < ncand; ++i) {
+        LOG_INFO("USB device: serial=%s  vid=0x%04x  pid=0x%04x\n",
+                 cands[i].serial, (unsigned)cands[i].vid,
+                 (unsigned)cands[i].pid);
+    }
+
+    struct usb_candidate *chosen = NULL;
+    if (serial) {
+        for (size_t i = 0; i < ncand; ++i) {
+            if (strcmp(serial, cands[i].serial) == 0) {
+                chosen = &cands[i];
                 break;
             }
-            free(s);
-        } else {
-            if (!chosen) {
-                chosen = dev;
-                chosen_serial = s;
-            } else {
-                multiple = true;
-                free(s);
-            }
         }
+        if (!chosen) {
+            LOG_ERR("no USB device with serial \"%s\"\n", serial);
+        }
+    } else if (ncand == 1) {
+        chosen = &cands[0];
+    } else if (ncand == 0) {
+        LOG_ERR("could not find any Android USB device\n");
+    } else {
+        LOG_ERR("multiple USB devices found, select one with -s/--serial "
+                "(see the list above)\n");
     }
 
     bool ok = false;
-    if (multiple && !serial) {
-        LOG_ERR("multiple USB devices found, select one with -s/--serial\n");
-    } else if (chosen) {
-        int r = libusb_open(chosen, &a->handle);
+    if (chosen) {
+        int r = libusb_open(chosen->device, &a->handle);
         if (r < 0) {
-            LOG_ERR("open device '%s': %s\n", chosen_serial,
+            LOG_ERR("open device '%s': %s\n", chosen->serial,
                     libusb_strerror(r));
         } else {
-            LOG_INFO("opened device %04x:%04x serial=%s\n",
-                     libusb_get_bus_number(chosen),
-                     libusb_get_device_address(chosen), chosen_serial);
+            LOG_INFO("opened device serial=%s\n", chosen->serial);
             ok = true;
         }
-    } else {
-        LOG_ERR("could not find any Android USB device%s%s\n",
-                serial ? " with serial " : "", serial ? serial : "");
     }
 
-    free(chosen_serial);
+    for (size_t i = 0; i < ncand; ++i) {
+        libusb_unref_device(cands[i].device);
+        free(cands[i].serial);
+    }
+    free(cands);
     libusb_free_device_list(list, 1);
     return ok;
 }
