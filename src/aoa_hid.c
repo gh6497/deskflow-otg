@@ -40,6 +40,10 @@ void aoa_hid_destroy(struct aoa_hid *a)
         libusb_close(a->handle);
         a->handle = NULL;
     }
+    if (a->device) {
+        libusb_unref_device(a->device);
+        a->device = NULL;
+    }
     if (a->ctx) {
         libusb_exit(a->ctx);
         a->ctx = NULL;
@@ -152,6 +156,7 @@ bool aoa_hid_open(struct aoa_hid *a, const char *serial)
             LOG_ERR("open device '%s': %s\n", chosen->serial,
                     libusb_strerror(r));
         } else {
+            a->device = libusb_ref_device(chosen->device);
             LOG_INFO("opened device serial=%s\n", chosen->serial);
             ok = true;
         }
@@ -171,6 +176,10 @@ void aoa_hid_close(struct aoa_hid *a)
     if (a->handle) {
         libusb_close(a->handle);
         a->handle = NULL;
+    }
+    if (a->device) {
+        libusb_unref_device(a->device);
+        a->device = NULL;
     }
 }
 
@@ -230,6 +239,9 @@ bool aoa_hid_register(struct aoa_hid *a, uint16_t id,
 bool aoa_hid_send(struct aoa_hid *a, uint16_t id,
                   const uint8_t *data, uint16_t size)
 {
+    if (a->disconnected || !a->handle) {
+        return false;
+    }
     uint8_t bmRequestType = LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR;
     int r = libusb_control_transfer(a->handle, bmRequestType,
                                     AOA_REQUEST_SEND_HID_EVENT,
@@ -237,6 +249,49 @@ bool aoa_hid_send(struct aoa_hid *a, uint16_t id,
                                     AOA_TIMEOUT_MS);
     if (r < 0) {
         LOG_ERR("SEND_HID_EVENT(%u): %s\n", id, libusb_strerror(r));
+        if (r == LIBUSB_ERROR_NO_DEVICE || r == LIBUSB_ERROR_NOT_FOUND) {
+            a->disconnected = true;
+            LOG_INFO("USB device disconnected\n");
+        }
+        return false;
+    }
+    return true;
+}
+
+bool aoa_hid_is_disconnected(const struct aoa_hid *a)
+{
+    return a->disconnected;
+}
+
+bool aoa_hid_poll(struct aoa_hid *a)
+{
+    if (a->disconnected) {
+        return false;
+    }
+    if (!a->device || !a->ctx) {
+        return true; /* nothing to check */
+    }
+
+    libusb_device **list = NULL;
+    ssize_t count = libusb_get_device_list(a->ctx, &list);
+    if (count < 0) {
+        /* could not enumerate; assume still connected rather than
+         * tearing down a working session on a transient error. */
+        return true;
+    }
+
+    bool found = false;
+    for (ssize_t i = 0; i < count; ++i) {
+        if (list[i] == a->device) {
+            found = true;
+            break;
+        }
+    }
+    libusb_free_device_list(list, 1);
+
+    if (!found) {
+        a->disconnected = true;
+        LOG_INFO("USB device disconnected\n");
         return false;
     }
     return true;

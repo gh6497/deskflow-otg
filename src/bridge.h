@@ -48,4 +48,12 @@ void otg_bridge_mouse_move(struct otg_bridge *b, int16_t x, int16_t y);
 void otg_bridge_mouse_rel_move(struct otg_bridge *b, int16_t dx, int16_t dy);
 void otg_bridge_mouse_wheel(struct otg_bridge *b, int16_t x, int16_t y);
 
+/*
+ * Periodic health check: returns true if the USB device is still connected.
+ * Called from the event-loop idle callback so a phone unplug is noticed and
+ * the connection to the deskflow server can be torn down (which lets the
+ * server return the cursor to the primary screen).
+ */
+bool otg_bridge_check(struct otg_bridge *b);
+
 #endif /* DESKFLOW_OTG_BRIDGE_H */

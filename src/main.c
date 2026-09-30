@@ -129,6 +129,16 @@ static void cb_disconnected(void *ud)
     g_stop = 1;
 }
 
+static int cb_idle(void *ud)
+{
+    /* Detect a USB unplug even while no HID event is in flight.  Returning
+     * non-zero stops the loop, which closes the TCP connection so the deskflow
+     * server notices the client is gone and returns the cursor to the primary
+     * screen. */
+    app_state *s = ud;
+    return otg_bridge_check(&s->bridge) ? 0 : 1;
+}
+
 int main(int argc, char **argv)
 {
     const char *host = DEFAULT_HOST;
@@ -188,6 +198,7 @@ int main(int argc, char **argv)
         .on_mouse_rel_move = cb_mouse_rel_move,
         .on_mouse_wheel = cb_mouse_wheel,
         .on_disconnected = cb_disconnected,
+        .on_idle = cb_idle,
     };
 
     df_client *client = df_client_connect(host, (uint16_t)port, name,
@@ -199,7 +210,9 @@ int main(int argc, char **argv)
     fprintf(stderr, "INFO:  connected to deskflow server %s:%u as \"%s\"\n",
             host, port, name);
     fprintf(stderr, "INFO:  move the cursor onto the \"%s\" screen to control "
-                    "the phone (Ctrl+C to quit)\n", name);
+                    "the phone; move it back across the edge to return\n", name);
+    fprintf(stderr, "INFO:  to quit, first move the cursor back to this screen, "
+                    "then press Ctrl+C (or just unplug the phone)\n");
 
     /* 3. Run the event loop. */
     int ret = df_client_run(client, &g_stop);

@@ -194,6 +194,11 @@ void otg_bridge_close(struct otg_bridge *b)
     aoa_hid_destroy(&b->aoa);
 }
 
+bool otg_bridge_check(struct otg_bridge *b)
+{
+    return aoa_hid_poll(&b->aoa);
+}
+
 void otg_bridge_enter(struct otg_bridge *b, int16_t x, int16_t y, uint16_t mask)
 {
     /* Seed modifier state from the server's reported active-modifier mask;

@@ -33,6 +33,8 @@
 struct aoa_hid {
     libusb_context *ctx;
     libusb_device_handle *handle;
+    libusb_device *device;  /* ref'd; used to detect unplug */
+    bool disconnected;      /* set once the device is gone */
 };
 
 /*
@@ -69,5 +71,19 @@ bool aoa_hid_register(struct aoa_hid *a, uint16_t id,
  */
 bool aoa_hid_send(struct aoa_hid *a, uint16_t id,
                   const uint8_t *data, uint16_t size);
+
+/*
+ * True if the device has been detected as unplugged.
+ */
+bool aoa_hid_is_disconnected(const struct aoa_hid *a);
+
+/*
+ * Re-check whether the device is still present (re-reads the libusb device
+ * list).  Returns true if it is still connected; if the device is gone it
+ * marks the handle disconnected and returns false.  Call this periodically
+ * (e.g. from the event-loop idle callback) so an unplug is noticed even when
+ * no HID report happens to be in flight.
+ */
+bool aoa_hid_poll(struct aoa_hid *a);
 
 #endif /* DESKFLOW_OTG_AOA_HID_H */

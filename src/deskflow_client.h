@@ -28,6 +28,14 @@ typedef struct df_client_callbacks {
     void (*on_mouse_rel_move)(void *ud, int16_t dx, int16_t dy);
     void (*on_mouse_wheel)(void *ud, int16_t x, int16_t y);
     void (*on_disconnected)(void *ud);
+
+    /*
+     * Optional periodic hook, invoked every time the event loop times out
+     * waiting for data (every poll interval, ~500ms).  Return non-zero to
+     * stop the loop cleanly.  Used to notice external conditions such as the
+     * USB device being unplugged.
+     */
+    int (*on_idle)(void *ud);
 } df_client_callbacks;
 
 typedef struct df_client df_client;

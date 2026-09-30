@@ -564,6 +564,10 @@ int df_client_run(df_client *c, volatile sig_atomic_t *stop)
             break;
         }
         if (pr == 0) {
+            if (c->cbs.on_idle && c->cbs.on_idle(c->ud)) {
+                result = 0;
+                break;
+            }
             continue; /* timeout, loop to check stop flag */
         }
 
