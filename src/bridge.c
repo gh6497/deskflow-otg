@@ -312,8 +312,16 @@ void otg_bridge_leave(struct otg_bridge *b)
         b->mouse_buttons = 0;
         send_mouse_report(b, 0, 0, 0, 0, 0);
     }
+    if (b->have_mouse_pos) {
+        /* mouse_x/mouse_y still hold the server's cursor position at the
+         * moment the cursor left the screen (they are only cleared just
+         * below), so log where it exited from. */
+        LOG_DBG("leave at %d,%d (screen %dx%d)\n", b->mouse_x, b->mouse_y,
+                b->screen_w, b->screen_h);
+    } else {
+        LOG_DBG("leave (cursor position unknown)\n");
+    }
     b->have_mouse_pos = false;
-    LOG_DBG("leave\n");
 }
 
 void otg_bridge_key(struct otg_bridge *b, uint32_t keyid, bool down)
