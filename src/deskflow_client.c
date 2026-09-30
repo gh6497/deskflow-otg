@@ -1,11 +1,14 @@
 /*
  * deskflow_client.c - see deskflow_client.h.
  *
- * Wire format notes (from deskflow ProtocolUtil.cpp):
- *   - integers are big-endian, 1/2/4 bytes (%i / %2i / %4i)
- *   - strings are length-prefixed: 4-byte big-endian length + bytes (%s);
+ * Wire format notes (from deskflow ProtocolUtil.cpp and PacketStreamFilter.cpp):
+ *   - EVERY message is framed with a 4-byte big-endian length prefix:
+ *       [uint32 length][payload]
+ *     This framing is added by deskflow's PacketStreamFilter on both ends.
+ *   - Within the payload, integers are big-endian, 1/2/4 bytes (%i / %2i / %4i).
+ *   - Strings are length-prefixed: 4-byte big-endian length + bytes (%s);
  *     %1s / %2s use 1 / 2-byte length prefixes.
- *   - every message begins with a 4-byte code.
+ *   - Every message payload begins with a 4-byte code.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -14,7 +17,6 @@
 
 #include "deskflow_client.h"
 
-#include <arpa/inet.h>
 #include <errno.h>
 #include <netdb.h>
 #include <poll.h>
@@ -26,6 +28,7 @@
 
 #define DF_PROTOCOL_MAJOR 1
 #define DF_PROTOCOL_MINOR 8
+#define DF_MAX_MESSAGE    (4 * 1024 * 1024) /* PROTOCOL_MAX_MESSAGE_LENGTH */
 
 #define LOG_ERR(...)  fprintf(stderr, "ERROR: " __VA_ARGS__)
 #define LOG_INFO(...) fprintf(stderr, "INFO:  " __VA_ARGS__)
@@ -40,7 +43,7 @@ struct df_client {
     void *ud;
 };
 
-/* ---- low-level I/O ------------------------------------------------------ */
+/* ---- low-level socket I/O ----------------------------------------------- */
 
 static int io_read_full(int fd, void *buf, size_t n)
 {
@@ -79,116 +82,156 @@ static int io_write_full(int fd, const void *buf, size_t n)
     return 0;
 }
 
-static int read_u16(int fd, uint16_t *out)
+/* ---- packet framing (deskflow PacketStreamFilter) ------------------------ */
+
+/* Send one length-prefixed packet. */
+static int send_packet(int fd, const void *payload, uint32_t len)
 {
-    uint8_t b[2];
-    if (io_read_full(fd, b, 2) != 1) {
+    uint8_t hdr[4];
+    hdr[0] = (uint8_t)(len >> 24);
+    hdr[1] = (uint8_t)(len >> 16);
+    hdr[2] = (uint8_t)(len >> 8);
+    hdr[3] = (uint8_t)(len & 0xff);
+    if (io_write_full(fd, hdr, 4) != 0) {
         return -1;
     }
-    *out = (uint16_t)((b[0] << 8) | b[1]);
-    return 0;
-}
-
-static int read_u32(int fd, uint32_t *out)
-{
-    uint8_t b[4];
-    if (io_read_full(fd, b, 4) != 1) {
-        return -1;
-    }
-    *out = ((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16) |
-           ((uint32_t)b[2] << 8) | (uint32_t)b[3];
-    return 0;
-}
-
-/* Append a big-endian 2-byte / 4-byte integer to a growing buffer. */
-static void put_u16(uint8_t **p, uint16_t v)
-{
-    (*p)[0] = (uint8_t)(v >> 8);
-    (*p)[1] = (uint8_t)(v & 0xff);
-    *p += 2;
-}
-
-static void put_u32(uint8_t **p, uint32_t v)
-{
-    (*p)[0] = (uint8_t)(v >> 24);
-    (*p)[1] = (uint8_t)(v >> 16);
-    (*p)[2] = (uint8_t)(v >> 8);
-    (*p)[3] = (uint8_t)(v & 0xff);
-    *p += 4;
+    return io_write_full(fd, payload, len);
 }
 
 /*
- * Read a length-prefixed string and discard it (the language code and
- * clipboard payload are not needed by this bridge).
+ * Read one length-prefixed packet into a freshly malloc'd buffer.
+ * Returns the payload length, or -1 on error, or 0 on EOF.  *out is set to
+ * the allocated buffer (caller frees) on success.
  */
-static int read_and_discard_string(int fd)
+static int recv_packet(int fd, uint8_t **out)
 {
-    uint32_t len;
-    if (read_u32(fd, &len) != 0) {
+    uint8_t hdr[4];
+    int r = io_read_full(fd, hdr, 4);
+    if (r <= 0) {
+        return r; /* 0 = EOF, -1 = error */
+    }
+    uint32_t len = ((uint32_t)hdr[0] << 24) | ((uint32_t)hdr[1] << 16) |
+                   ((uint32_t)hdr[2] << 8) | (uint32_t)hdr[3];
+    if (len == 0 || len > DF_MAX_MESSAGE) {
+        LOG_ERR("invalid packet length %u\n", len);
         return -1;
     }
-    if (len > 1024 * 1024) {
+    uint8_t *buf = malloc(len);
+    if (!buf) {
         return -1;
     }
-    char buf[512];
-    uint32_t left = len;
-    while (left > 0) {
-        uint32_t chunk = left < sizeof(buf) ? left : (uint32_t)sizeof(buf);
-        if (io_read_full(fd, buf, chunk) != 1) {
-            return -1;
-        }
-        left -= chunk;
+    if (io_read_full(fd, buf, len) != 1) {
+        free(buf);
+        return -1;
     }
+    *out = buf;
+    return (int)len;
+}
+
+/* ---- in-memory message parser ------------------------------------------- */
+
+struct msg {
+    const uint8_t *data;
+    size_t len;
+    size_t pos;
+};
+
+static int msg_read_u8(struct msg *m, uint8_t *out)
+{
+    if (m->pos + 1 > m->len) {
+        return -1;
+    }
+    *out = m->data[m->pos++];
     return 0;
 }
 
-/* ---- message senders ---------------------------------------------------- */
+static int msg_read_u16(struct msg *m, uint16_t *out)
+{
+    if (m->pos + 2 > m->len) {
+        return -1;
+    }
+    *out = (uint16_t)((m->data[m->pos] << 8) | m->data[m->pos + 1]);
+    m->pos += 2;
+    return 0;
+}
+
+static int msg_read_u32(struct msg *m, uint32_t *out)
+{
+    if (m->pos + 4 > m->len) {
+        return -1;
+    }
+    *out = ((uint32_t)m->data[m->pos] << 24) |
+           ((uint32_t)m->data[m->pos + 1] << 16) |
+           ((uint32_t)m->data[m->pos + 2] << 8) |
+           (uint32_t)m->data[m->pos + 3];
+    m->pos += 4;
+    return 0;
+}
+
+/* Skip a length-prefixed string (%s: 4-byte length + bytes). */
+static int msg_skip_string(struct msg *m)
+{
+    uint32_t n;
+    if (msg_read_u32(m, &n) != 0) {
+        return -1;
+    }
+    if (m->pos + n > m->len) {
+        return -1;
+    }
+    m->pos += n;
+    return 0;
+}
+
+/* ---- message builders ---------------------------------------------------- */
 
 static int send_hello_back(int fd, const char *protocol, const char *name,
                            uint16_t minor)
 {
-    /* kMsgHelloBack = "%7s%2i%2i%s" */
     size_t name_len = strlen(name);
-    uint8_t buf[7 + 2 + 2 + 4 + name_len];
-    uint8_t *p = buf;
+    uint8_t *buf = malloc(7 + 2 + 2 + 4 + name_len);
+    if (!buf) {
+        return -1;
+    }
+    size_t p = 0;
+    memcpy(buf + p, protocol, 7); p += 7;
+    buf[p++] = (uint8_t)(DF_PROTOCOL_MAJOR >> 8);
+    buf[p++] = (uint8_t)(DF_PROTOCOL_MAJOR & 0xff);
+    buf[p++] = (uint8_t)(minor >> 8);
+    buf[p++] = (uint8_t)(minor & 0xff);
+    buf[p++] = (uint8_t)(name_len >> 24);
+    buf[p++] = (uint8_t)(name_len >> 16);
+    buf[p++] = (uint8_t)(name_len >> 8);
+    buf[p++] = (uint8_t)(name_len & 0xff);
+    memcpy(buf + p, name, name_len); p += name_len;
 
-    memcpy(p, protocol, 7);
-    p += 7;
-    put_u16(&p, DF_PROTOCOL_MAJOR);
-    put_u16(&p, minor);
-    put_u32(&p, (uint32_t)name_len);
-    memcpy(p, name, name_len);
-    p += name_len;
-
-    return io_write_full(fd, buf, (size_t)(p - buf));
+    int r = send_packet(fd, buf, (uint32_t)p);
+    free(buf);
+    return r;
 }
 
 static int send_dinfo(int fd, int32_t w, int32_t h)
 {
-    /* kMsgDInfo = "DINF%2i%2i%2i%2i%2i%2i%2i"
-     * x=0, y=0, w, h, warp=0, mx=w/2, my=h/2 */
     uint8_t buf[4 + 7 * 2];
-    uint8_t *p = buf;
-    memcpy(p, "DINF", 4);
-    p += 4;
-    put_u16(&p, 0);
-    put_u16(&p, 0);
-    put_u16(&p, (uint16_t)w);
-    put_u16(&p, (uint16_t)h);
-    put_u16(&p, 0);
-    put_u16(&p, (uint16_t)(w / 2));
-    put_u16(&p, (uint16_t)(h / 2));
-    return io_write_full(fd, buf, sizeof(buf));
+    size_t p = 0;
+    memcpy(buf, "DINF", 4); p += 4;
+    /* x, y, w, h, warp(obsolete), mx, my */
+    uint16_t vals[7] = { 0, 0, (uint16_t)w, (uint16_t)h, 0,
+                         (uint16_t)(w / 2), (uint16_t)(h / 2) };
+    for (int i = 0; i < 7; ++i) {
+        buf[p++] = (uint8_t)(vals[i] >> 8);
+        buf[p++] = (uint8_t)(vals[i] & 0xff);
+    }
+    return send_packet(fd, buf, (uint32_t)p);
 }
 
 static int send_noop(int fd)
 {
-    return io_write_full(fd, "CNOP", 4);
+    return send_packet(fd, "CNOP", 4);
 }
 
 static int send_keepalive(int fd)
 {
-    return io_write_full(fd, "CALV", 4);
+    return send_packet(fd, "CALV", 4);
 }
 
 /* ---- connect + handshake ------------------------------------------------ */
@@ -251,16 +294,20 @@ df_client *df_client_connect(const char *host, uint16_t port, const char *name,
     c->cbs = *cbs;
     c->ud = ud;
 
-    /* 1. server -> hello: "%7s%2i%2i" */
-    char protocol[8];
-    uint16_t server_major = 0, server_minor = 0;
-    if (io_read_full(fd, protocol, 7) != 1 ||
-        read_u16(fd, &server_major) != 0 ||
-        read_u16(fd, &server_minor) != 0) {
+    /* 1. server -> hello packet: "%7s%2i%2i" (protocol name + major + minor). */
+    uint8_t *hello = NULL;
+    int hello_len = recv_packet(fd, &hello);
+    if (hello_len < 11) {
         LOG_ERR("failed to read server hello\n");
         goto fail;
     }
+
+    char protocol[8];
+    memcpy(protocol, hello, 7);
     protocol[7] = '\0';
+    uint16_t server_major = (uint16_t)((hello[7] << 8) | hello[8]);
+    uint16_t server_minor = (uint16_t)((hello[9] << 8) | hello[10]);
+    free(hello);
 
     if (strncmp(protocol, "Synergy", 7) != 0 &&
         strncmp(protocol, "Barrier", 7) != 0) {
@@ -273,19 +320,17 @@ df_client *df_client_connect(const char *host, uint16_t port, const char *name,
     }
     LOG_INFO("server protocol %s %u.%u\n", protocol, server_major, server_minor);
 
-    /* Negotiate the minor version (must match the deskflow client's
-     * downgrade rule). */
+    /* Negotiate the minor version (deskflow's downgrade rule). */
     uint16_t minor = server_minor < DF_PROTOCOL_MINOR ? server_minor
                                                       : DF_PROTOCOL_MINOR;
 
-    /* 2. client -> hello back (echo the server's protocol name) */
+    /* 2. client -> hello back packet (echo the server's protocol name). */
     if (send_hello_back(fd, protocol, name, minor) != 0) {
         LOG_ERR("failed to send hello back\n");
         goto fail;
     }
     c->proto_minor = minor;
 
-    /* 3. server -> QInfo, client -> DInfo happens in the message loop. */
     return c;
 
 fail:
@@ -294,15 +339,14 @@ fail:
     return NULL;
 }
 
-/* ---- message loop ------------------------------------------------------- */
+/* ---- message dispatch ---------------------------------------------------- */
 
-static int handle_message(df_client *c, const char code[4])
+static int handle_message(df_client *c, const char code[4], struct msg *m)
 {
-    int fd = c->fd;
     uint16_t a, b, ctr;
 
     if (memcmp(code, "QINF", 4) == 0) {
-        return send_dinfo(fd, c->screen_w, c->screen_h);
+        return send_dinfo(c->fd, c->screen_w, c->screen_h);
     }
     if (memcmp(code, "CIAK", 4) == 0) {
         return 0;
@@ -310,12 +354,12 @@ static int handle_message(df_client *c, const char code[4])
     if (memcmp(code, "DSOP", 4) == 0) {
         /* set options: "%4I" = 4-byte count + count*4 bytes */
         uint32_t n;
-        if (read_u32(fd, &n) != 0) {
+        if (msg_read_u32(m, &n) != 0) {
             return -1;
         }
-        char skip[256];
         for (uint32_t i = 0; i < n; ++i) {
-            if (io_read_full(fd, skip, 4) != 1) {
+            uint32_t opt;
+            if (msg_read_u32(m, &opt) != 0) {
                 return -1;
             }
         }
@@ -325,7 +369,7 @@ static int handle_message(df_client *c, const char code[4])
         return 0; /* reset options */
     }
     if (memcmp(code, "CALV", 4) == 0) {
-        return send_keepalive(fd); /* echo keep-alive */
+        return send_keepalive(c->fd); /* echo keep-alive */
     }
     if (memcmp(code, "CNOP", 4) == 0) {
         return 0;
@@ -336,8 +380,8 @@ static int handle_message(df_client *c, const char code[4])
     if (memcmp(code, "CINN", 4) == 0) {
         uint16_t x, y, mask;
         uint32_t seq;
-        if (read_u16(fd, &x) != 0 || read_u16(fd, &y) != 0 ||
-            read_u32(fd, &seq) != 0 || read_u16(fd, &mask) != 0) {
+        if (msg_read_u16(m, &x) != 0 || msg_read_u16(m, &y) != 0 ||
+            msg_read_u32(m, &seq) != 0 || msg_read_u16(m, &mask) != 0) {
             return -1;
         }
         if (c->cbs.on_enter) {
@@ -353,8 +397,8 @@ static int handle_message(df_client *c, const char code[4])
     }
     if (memcmp(code, "DKDN", 4) == 0) {
         /* key down 1.1-1.7: "%2i%2i%2i" */
-        if (read_u16(fd, &a) != 0 || read_u16(fd, &b) != 0 ||
-            read_u16(fd, &ctr) != 0) {
+        if (msg_read_u16(m, &a) != 0 || msg_read_u16(m, &b) != 0 ||
+            msg_read_u16(m, &ctr) != 0) {
             return -1;
         }
         if (c->cbs.on_key_down) {
@@ -364,8 +408,8 @@ static int handle_message(df_client *c, const char code[4])
     }
     if (memcmp(code, "DKDL", 4) == 0) {
         /* key down 1.8: "%2i%2i%2i%s" */
-        if (read_u16(fd, &a) != 0 || read_u16(fd, &b) != 0 ||
-            read_u16(fd, &ctr) != 0 || read_and_discard_string(fd) != 0) {
+        if (msg_read_u16(m, &a) != 0 || msg_read_u16(m, &b) != 0 ||
+            msg_read_u16(m, &ctr) != 0 || msg_skip_string(m) != 0) {
             return -1;
         }
         if (c->cbs.on_key_down) {
@@ -374,8 +418,8 @@ static int handle_message(df_client *c, const char code[4])
         return 0;
     }
     if (memcmp(code, "DKUP", 4) == 0) {
-        if (read_u16(fd, &a) != 0 || read_u16(fd, &b) != 0 ||
-            read_u16(fd, &ctr) != 0) {
+        if (msg_read_u16(m, &a) != 0 || msg_read_u16(m, &b) != 0 ||
+            msg_read_u16(m, &ctr) != 0) {
             return -1;
         }
         if (c->cbs.on_key_up) {
@@ -386,11 +430,11 @@ static int handle_message(df_client *c, const char code[4])
     if (memcmp(code, "DKRP", 4) == 0) {
         /* key repeat: "%2i%2i%2i%2i" (1.1-1.7) or "%2i%2i%2i%2i%s" (1.8). */
         uint16_t count;
-        if (read_u16(fd, &a) != 0 || read_u16(fd, &b) != 0 ||
-            read_u16(fd, &count) != 0 || read_u16(fd, &ctr) != 0) {
+        if (msg_read_u16(m, &a) != 0 || msg_read_u16(m, &b) != 0 ||
+            msg_read_u16(m, &count) != 0 || msg_read_u16(m, &ctr) != 0) {
             return -1;
         }
-        if (c->proto_minor >= 8 && read_and_discard_string(fd) != 0) {
+        if (c->proto_minor >= 8 && msg_skip_string(m) != 0) {
             return -1;
         }
         if (c->cbs.on_key_repeat) {
@@ -400,7 +444,7 @@ static int handle_message(df_client *c, const char code[4])
     }
     if (memcmp(code, "DMDN", 4) == 0) {
         uint8_t btn;
-        if (io_read_full(fd, &btn, 1) != 1) {
+        if (msg_read_u8(m, &btn) != 0) {
             return -1;
         }
         if (c->cbs.on_mouse_down) {
@@ -410,7 +454,7 @@ static int handle_message(df_client *c, const char code[4])
     }
     if (memcmp(code, "DMUP", 4) == 0) {
         uint8_t btn;
-        if (io_read_full(fd, &btn, 1) != 1) {
+        if (msg_read_u8(m, &btn) != 0) {
             return -1;
         }
         if (c->cbs.on_mouse_up) {
@@ -419,7 +463,7 @@ static int handle_message(df_client *c, const char code[4])
         return 0;
     }
     if (memcmp(code, "DMMV", 4) == 0) {
-        if (read_u16(fd, &a) != 0 || read_u16(fd, &b) != 0) {
+        if (msg_read_u16(m, &a) != 0 || msg_read_u16(m, &b) != 0) {
             return -1;
         }
         if (c->cbs.on_mouse_move) {
@@ -428,7 +472,7 @@ static int handle_message(df_client *c, const char code[4])
         return 0;
     }
     if (memcmp(code, "DMRM", 4) == 0) {
-        if (read_u16(fd, &a) != 0 || read_u16(fd, &b) != 0) {
+        if (msg_read_u16(m, &a) != 0 || msg_read_u16(m, &b) != 0) {
             return -1;
         }
         if (c->cbs.on_mouse_rel_move) {
@@ -437,7 +481,7 @@ static int handle_message(df_client *c, const char code[4])
         return 0;
     }
     if (memcmp(code, "DMWM", 4) == 0) {
-        if (read_u16(fd, &a) != 0 || read_u16(fd, &b) != 0) {
+        if (msg_read_u16(m, &a) != 0 || msg_read_u16(m, &b) != 0) {
             return -1;
         }
         if (c->cbs.on_mouse_wheel) {
@@ -449,7 +493,7 @@ static int handle_message(df_client *c, const char code[4])
         /* grab clipboard: "%1i%4i" */
         uint8_t id;
         uint32_t seq;
-        if (io_read_full(fd, &id, 1) != 1 || read_u32(fd, &seq) != 0) {
+        if (msg_read_u8(m, &id) != 0 || msg_read_u32(m, &seq) != 0) {
             return -1;
         }
         return 0;
@@ -458,24 +502,23 @@ static int handle_message(df_client *c, const char code[4])
         /* set clipboard: "%1i%4i%1i%s" */
         uint8_t id, marker;
         uint32_t seq;
-        if (io_read_full(fd, &id, 1) != 1 || read_u32(fd, &seq) != 0 ||
-            io_read_full(fd, &marker, 1) != 1 ||
-            read_and_discard_string(fd) != 0) {
+        if (msg_read_u8(m, &id) != 0 || msg_read_u32(m, &seq) != 0 ||
+            msg_read_u8(m, &marker) != 0 || msg_skip_string(m) != 0) {
             return -1;
         }
         return 0;
     }
     if (memcmp(code, "CSEC", 4) == 0) {
         uint8_t on;
-        if (io_read_full(fd, &on, 1) != 1) {
+        if (msg_read_u8(m, &on) != 0) {
             return -1;
         }
         return 0; /* screensaver, ignore */
     }
     if (memcmp(code, "EICV", 4) == 0) {
         uint16_t maj, min;
-        read_u16(fd, &maj);
-        read_u16(fd, &min);
+        msg_read_u16(m, &maj);
+        msg_read_u16(m, &min);
         LOG_ERR("server reports incompatible version %u.%u\n", maj, min);
         return -1;
     }
@@ -506,8 +549,6 @@ int df_client_run(df_client *c, volatile sig_atomic_t *stop)
             break;
         }
 
-        /* Wait for the next message (with a timeout so a stop request can be
-         * honored promptly). */
         struct pollfd pfd = { .fd = fd, .events = POLLIN };
         int pr = poll(&pfd, 1, 500);
         if (pr < 0) {
@@ -522,27 +563,37 @@ int df_client_run(df_client *c, volatile sig_atomic_t *stop)
             continue; /* timeout, loop to check stop flag */
         }
 
-        char code[4];
-        int r = io_read_full(fd, code, 4);
-        if (r == 0) {
+        uint8_t *pkt = NULL;
+        int plen = recv_packet(fd, &pkt);
+        if (plen == 0) {
             LOG_INFO("server closed the connection\n");
             result = 0;
             break;
         }
-        if (r < 0) {
+        if (plen < 0) {
             LOG_ERR("read error: %s\n", strerror(errno));
             result = -1;
             break;
         }
 
-        int h = handle_message(c, code);
+        if (plen < 4) {
+            free(pkt);
+            result = -1;
+            break;
+        }
+        char code[4];
+        memcpy(code, pkt, 4);
+        struct msg m = { .data = pkt, .len = (size_t)plen, .pos = 4 };
+
+        int h = handle_message(c, code, &m);
+        free(pkt);
+
         if (h < 0) {
             result = -1;
             break;
         }
         if (h > 0) {
-            /* server asked us to close (CBYE) */
-            result = 0;
+            result = 0; /* server asked us to close (CBYE) */
             break;
         }
 

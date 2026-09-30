@@ -135,8 +135,15 @@ src/
 
 scrcpy 的相关代码采用 Apache-2.0，本仓库亦采用 Apache-2.0（见 `LICENSE`）。
 
+## TLS 说明
+
+deskflow 1.26+ 默认开启 TLS（`security/tlsEnabled`）。本桥接程序目前**只支持明文协议**，
+如果 server 开了 TLS，连接会卡住或报错。需要在 Deskflow 设置里把 **TLS 关掉**（Security → TLS，
+或者配置文件里 `security/tlsEnabled=false`）再使用。
+
 ## 当前限制
 
+- 只支持**明文协议**，不支持 deskflow 的 TLS（见上文）。
 - 键盘映射按 **US 布局**（其它布局下部分符号键可能错位）。
 - 不支持剪贴板同步、文件拖放、屏幕截图（这些与"操控手机"无关）。
 - 只支持键盘 + 鼠标，不支持游戏手柄（AOA gamepad 未实现）。
