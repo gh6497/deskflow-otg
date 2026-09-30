@@ -535,8 +535,12 @@ static int handle_message(df_client *c, const char code[4], struct msg *m)
         return -1;
     }
 
-    LOG_DBG("ignoring unknown message %.4s\n", code);
-    return -1;
+    /* Ignore anything else (language sync "LSYN", secure-input "SECN", file
+     * transfer "DFTR", drag info "DDRG", future extensions, ...).  The whole
+     * packet has already been read, so the stream stays in sync; we simply
+     * acknowledge with a no-op like the real deskflow client does. */
+    LOG_DBG("ignoring message %.4s\n", code);
+    return 0;
 }
 
 int df_client_run(df_client *c, volatile sig_atomic_t *stop)
