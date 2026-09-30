@@ -98,28 +98,49 @@ AOAv2 HID（无 adb、无 accessory-mode 握手，直接对已打开设备发 ve
 
 ### 6. 鼠标模型
 
-- AOA 鼠标是**相对模式**。绝对 `DMMV(x,y)` 会被换算成增量（`bridge.c` 里记录上次坐标求差）。
+AOA 鼠标是**相对模式**，而 deskflow 的光标是**绝对坐标**并被 server 钳制在手机屏幕矩形内。
+两者要 1:1 对应，必须满足两件事，`bridge.c` 里都做了：
+
+1. **进入时必须把设备指针"warp"到 enter 坐标**（`mouse_warp()`）。
+   真正的 deskflow 客户端在 `Client::enter()` 里会调 `Screen::mouseMove()`（X11 下就是
+   `XWarpPointer`），把本机光标放到 enter 坐标再开始算增量。AOA HID 鼠标只有相对模式，
+   没有绝对寻址，所以用两步模拟：先朝**最小边**走一整个屏幕宽/高（必然被钳到 0，位置就确定了），
+   再走精确的剩余位移到目标。**warp 期间按键强制松开**，避免进手机时把一次点击/拖拽抹在屏幕上。
+   不做这一步：设备指针停在上次离开的位置，和 server 光标差一个未知常量偏移 →
+   屏幕一侧永远够不到，另一侧指针先撞到 Android 边缘卡死，server 光标还在继续走。
+   这就是"部分区域无法到达 + 到某个位置就到底"的成因。
+
+2. **超过 ±127 的位移必须拆成多个报告**（`mouse_travel()`）。
+   一个 HID 报告每轴最多带 127，而两个 `DMMV` 之间 server 光标可以跳几百上千像素
+   （高回报率鼠标的一次快速甩动）。只发一个钳到 127 的报告会**静默丢掉剩下的位移**，
+   设备指针越落越远，最后卡在边缘。
+
 - 滚轮 delta 以 120/格 为单位（`WHEEL_DELTA`），除以 120 后累加、凑整再发。
 - 按钮映射（deskflow ButtonID → HID bit）：1=左(bit0) 2=中(bit2) 3=右(bit1) 4=bit3 5=bit4。
+- `active` 标志（enter→leave 之间为真）用来丢弃窗口外的 move/wheel/button 事件。
+- `--width/--height` **必须等于手机真实分辨率**（也要和 server 布局里该屏幕的
+  `halfwidths/halfheights` 一致）：server 把光标钳到 `--width/--height` 矩形，
+  Android 把设备指针钳到真实显示矩形，两者相等时增量才不会被截断。
 
 ## 如何验证（无需真机/真 server）
 
-仓库没有测试目录，本地验证用两个临时文件（在 `/tmp/opencode/`，未入库）：
+仓库没有测试目录，本地验证用临时文件（在 `/tmp/opencode/`，未入库）：
 
 1. `stub libusb`：`/tmp/opencode/libusbstub/`（`libusb-1.0/libusb.h` + `stub.c`），
-   返回一个假设备 + 打印每次 `SEND_HID_EVENT` 的字节，用来验证 HID 报告。
-2. `mock_deskflow.py`：`/tmp/opencode/mock_deskflow.py`，一个带 PacketStreamFilter
-   帧格式的假 server，验证握手/事件流/keep-alive。
+   返回一个假设备并**记录每次 `SEND_HID_EVENT` 的字节**。
+2. `testsim.c` + `run.sh`：一个内含 mock deskflow server（fork + 127.0.0.1 socket）的
+   端到端仿真。它按脚本发 `CINN`（5 种进入位置/5 种上次停留位置）、连续 `DMMV` 扫过
+   四个角、`COUT`，最后再做一次 20px 步进的连续拖拽；把录到的 HID 报告回放进一个
+   "模拟 Android 相对指针"（按屏幕矩形钳位），逐步断言**设备指针坐标 == server 光标坐标**。
 
 ```bash
-# 用 stub libusb + mock server 全链路验证
-gcc -std=c11 -g -I/tmp/opencode/libusbstub -Isrc \
-    src/aoa_hid.c src/bridge.c src/deskflow_client.c src/keymap.c src/main.c \
-    /tmp/opencode/libusbstub/stub.c -o /tmp/opencode/deskflow-otg
-python3 /tmp/opencode/mock_deskflow.py 24809 &
-./deskflow-otg -H 127.0.0.1 -p 24809 -n android
-# 期望 mock 输出 "[mock] handshake + events OK"
+/tmp/opencode/run.sh
+# 期望: "136 samples, 0 failures" + "REACHABILITY: ok" + "DRAG: ok" + "PASS"
+# 回归对照：把 HEAD 的 bridge.c/h 拿来跑同一个 testsim，会看到
+#   "131 failures" + "DRAG: FAIL (pointer is up to 832px away ...)"
 ```
+
+warp 的开销是每次 enter 18~33 个 HID 报告（几十毫秒的 USB 控制传输），只在切屏时发生一次。
 
 所有源文件应保持 `-Wall -Wextra -Werror` 干净：
 
