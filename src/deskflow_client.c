@@ -13,7 +13,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#define _GNU_SOURCE 1
+#define _POSIX_C_SOURCE 200809L
+#ifdef __APPLE__
+#define _DARWIN_C_SOURCE 1
+#endif
 
 #include "deskflow_client.h"
 
@@ -45,6 +48,18 @@ struct df_client {
 
 /* ---- low-level socket I/O ----------------------------------------------- */
 
+static int socket_suppress_sigpipe(int fd)
+{
+#ifdef SO_NOSIGPIPE
+    /* Darwin uses a socket option instead of Linux's MSG_NOSIGNAL. */
+    int enabled = 1;
+    return setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &enabled, sizeof(enabled));
+#else
+    (void)fd;
+    return 0;
+#endif
+}
+
 static int io_read_full(int fd, void *buf, size_t n)
 {
     uint8_t *p = buf;
@@ -70,11 +85,19 @@ static int io_write_full(int fd, const void *buf, size_t n)
     const uint8_t *p = buf;
     size_t sent = 0;
     while (sent < n) {
-        ssize_t r = write(fd, p + sent, n - sent);
+#ifdef MSG_NOSIGNAL
+        ssize_t r = send(fd, p + sent, n - sent, MSG_NOSIGNAL);
+#else
+        ssize_t r = send(fd, p + sent, n - sent, 0);
+#endif
         if (r < 0) {
             if (errno == EINTR) {
                 continue;
             }
+            return -1;
+        }
+        if (r == 0) {
+            errno = EPIPE;
             return -1;
         }
         sent += (size_t)r;
@@ -257,6 +280,12 @@ static int tcp_connect(const char *host, uint16_t port)
     for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
         fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
         if (fd < 0) {
+            continue;
+        }
+        if (socket_suppress_sigpipe(fd) != 0) {
+            LOG_ERR("could not disable socket SIGPIPE: %s\n", strerror(errno));
+            close(fd);
+            fd = -1;
             continue;
         }
         if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0) {
@@ -517,8 +546,9 @@ static int handle_message(df_client *c, const char code[4], struct msg *m)
     }
     if (memcmp(code, "EICV", 4) == 0) {
         uint16_t maj, min;
-        msg_read_u16(m, &maj);
-        msg_read_u16(m, &min);
+        if (msg_read_u16(m, &maj) != 0 || msg_read_u16(m, &min) != 0) {
+            return -1;
+        }
         LOG_ERR("server reports incompatible version %u.%u\n", maj, min);
         return -1;
     }

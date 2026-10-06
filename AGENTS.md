@@ -22,6 +22,9 @@
 ```bash
 # 依赖：gcc/clang (C11)、cmake、libusb-1.0（开发包）
 sudo apt install build-essential cmake libusb-1.0-0-dev
+# macOS（Intel / Apple Silicon）
+# xcode-select --install
+# brew install cmake libusb
 
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
@@ -33,7 +36,9 @@ sudo ./build/deskflow-otg --host 127.0.0.1 --port 24800 --name android \
 ```
 
 CMakeLists.txt 用 `find_path`/`find_library` 直接找 libusb，**不依赖 pkg-config**。
-只有 `src/*.c` 是源码，没有第三方 vendored 代码。
+支持 Linux 和 macOS；macOS 默认查找 `/opt/homebrew`、`/usr/local` 及 libusb opt 前缀，
+自定义路径可用 `-DCMAKE_PREFIX_PATH=...`。macOS 通常不需要 sudo，也不使用 udev。
+程序源码在 `src/*.c`，回归测试在 `tests/`，没有第三方 vendored 代码。
 
 ## 源码结构（每个文件干什么）
 
@@ -130,7 +135,11 @@ server 到达 y=0 而手机指针还在屏幕中间的情况。AOA 本身并不�
 
 ## 如何验证（无需真机/真 server）
 
-仓库没有测试目录，本地验证用 `/tmp/opencode/mouse-regression/` 中的临时文件（未入库）：
+`tests/test_socket.c` 验证协议包帧、EOF、断连写入不会触发 SIGPIPE；Darwin 使用
+`SO_NOSIGPIPE`，Linux 使用 `MSG_NOSIGNAL`。执行 `ctest --test-dir build --output-on-failure`。
+`.github/workflows/build.yml` 覆盖 Linux、Intel macOS 和 Apple Silicon macOS 的构建与测试。
+
+鼠标本地验证用 `/tmp/opencode/mouse-regression/` 中的临时文件（未入库）：
 
 1. `test_mouse.c` stub AOA 层，解析实际注册的 HID 描述符，再按字段回放报告。
    相对模式施加随位移变化的速度增益；绝对模式按 Android 数位板轴范围缩放。
@@ -157,7 +166,7 @@ for f in src/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only -Isrc "$f"
 - **只支持明文协议**，不支持 deskflow 的 TLS（deskflow 1.26 默认开 TLS，需在 server 侧关闭）。
 - 键盘 **US 布局**（其它布局符号键可能错位）。
 - 只支持键盘 + 鼠标，不支持游戏手柄、剪贴板、文件拖放、视频。
-- 需要 root 或 udev 规则才能访问 USB。
+- Linux 需要 root 或 udev 规则才能访问 USB；macOS 需允许配件连接，Deskflow 需辅助功能权限。
 
 ## 当前状态 / 待办
 

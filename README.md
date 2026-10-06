@@ -38,7 +38,7 @@
 
 ## 依赖
 
-- Linux（本项目目标平台）
+- Linux 或 macOS（Intel / Apple Silicon）
 - GCC / Clang（C11）
 - CMake ≥ 3.16
 - libusb-1.0（开发包）
@@ -46,6 +46,10 @@
 ```bash
 # Debian / Ubuntu
 sudo apt install build-essential cmake libusb-1.0-0-dev
+
+# macOS（先安装 Homebrew）
+xcode-select --install
+brew install cmake libusb
 ```
 
 不需要 Qt、不需要 FFmpeg、不需要 SDL —— 这就是本程序相对于"直接链接 deskflow/scrcpy
@@ -60,6 +64,18 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 # 产物: build/deskflow-otg
 ```
+
+macOS 构建命令相同，默认会查找 Apple Silicon 的 `/opt/homebrew` 和 Intel 的
+`/usr/local` 下的 libusb。使用自定义 Homebrew 安装路径、或提示找不到 libusb 时：
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix libusb)"
+cmake --build build
+```
+
+编译器与 libusb 必须使用相同架构；不要混用 Rosetta 下的 Intel Homebrew 与原生
+Apple Silicon 编译器。构建和 socket 回归测试可用 `ctest --test-dir build --output-on-failure`
+验证；CI 覆盖 Linux、Intel macOS 和 Apple Silicon macOS，不包含手机 USB 真机测试。
 
 ## 使用
 
@@ -83,8 +99,27 @@ sudo ./build/deskflow-otg \
     --width 1080 --height 1920
 ```
 
-> 需要 root 或 udev 规则才能访问 USB 设备（和 `scrcpy --otg` 一样）。不想要 `sudo`
-> 的话，配置一条 udev 规则即可（见下文）。
+> **Linux**：需要 root 或 udev 规则才能访问 USB 设备。不想要 `sudo` 的话，配置一条
+> udev 规则即可（见下文）。**macOS**：先不带 `sudo` 运行；不使用 udev，见下面的说明。
+
+### macOS 运行与权限
+
+```bash
+./build/deskflow-otg --host 127.0.0.1 --name android \
+    --width 1080 --height 1920 -s <手机USB序列号>
+```
+
+- 在“系统设置 → 隐私与安全性”中允许 **Deskflow** 的辅助功能权限；如果系统提示需要
+  输入监控权限，也应允许。这些权限用于 Deskflow 捕获主机键鼠，本程序只接收 TCP 事件。
+- 使用支持数据传输的 USB 线；Mac 提示是否允许配件连接时，解锁 Mac 并选择允许。
+  不需要开启手机 USB 调试。
+- Mac 的其它 USB 设备也可能带序列号，建议通过 `-s` 指定手机；未指定时程序会列出
+  候选设备，多个候选时不会自动选择。
+- 遇到 USB 打开失败或 `ACCESS/BUSY` 错误时，先关闭其它占用手机的程序
+  （例如 scrcpy、Android 文件传输工具），重新插拔后重试。`sudo` 不能解决所有设备
+  占用或 macOS 配件授权问题，不需要关闭 SIP 或卸载系统驱动。
+- macOS 的构建与运行路径已适配，但具体手机的 AOA HID、拔线检测和绝对指针兼容性
+  仍需真机验证。
 
 ### 3. 操控手机
 
@@ -124,7 +159,7 @@ Android 会把它识别为带鼠标按键的数位板/笔，个别应用对笔�
 如果设备不支持该模式，可加 `--mouse-mode relative` 使用原有相对鼠标；该模式仍受
 Android 加速影响，不能保证指针与 Deskflow 边界一致。
 
-## 免 root 访问 USB（udev 规则）
+## Linux 免 root 访问 USB（udev 规则）
 
 `/etc/udev/rules.d/51-android.rules`：
 
@@ -172,4 +207,4 @@ deskflow 1.26+ 默认开启 TLS（`security/tlsEnabled`）。本桥接程序目�
 - 只支持键盘 + 鼠标，不支持游戏手柄（AOA gamepad 未实现）。
 - 默认绝对指针依赖 Android 的 HID 数位板支持，具体设备兼容性需真机验证。
 - `--mouse-mode relative` 为兼容模式，Android 鼠标加速可能造成漂移、提前碰边。
-- 需要先能访问 USB 设备（root 或 udev 规则）。
+- 需要先能访问 USB 设备（Linux 使用 root 或 udev 规则；macOS 需允许 USB 配件连接）。
