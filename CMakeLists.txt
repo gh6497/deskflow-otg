@@ -30,6 +30,24 @@ find_library(LIBUSB_LIBRARY
   PATH_SUFFIXES lib
 )
 
+# vcpkg exposes both debug/lib and lib on multi-config Windows generators.
+# Do not accidentally link the Debug library into a Release executable.
+if(WIN32 AND VCPKG_INSTALLED_DIR AND VCPKG_TARGET_TRIPLET)
+  find_library(LIBUSB_RELEASE_LIBRARY
+    NAMES libusb-1.0 usb-1.0
+    PATHS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib"
+    NO_DEFAULT_PATH
+  )
+  find_library(LIBUSB_DEBUG_LIBRARY
+    NAMES libusb-1.0 usb-1.0
+    PATHS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/debug/lib"
+    NO_DEFAULT_PATH
+  )
+  if(LIBUSB_RELEASE_LIBRARY)
+    set(LIBUSB_LIBRARY "${LIBUSB_RELEASE_LIBRARY}")
+  endif()
+endif()
+
 if(NOT LIBUSB_INCLUDE_DIR OR NOT LIBUSB_LIBRARY)
   message(FATAL_ERROR
     "libusb-1.0 not found.\n"
@@ -53,12 +71,19 @@ target_include_directories(deskflow-otg PRIVATE
   ${LIBUSB_INCLUDE_DIR}
 )
 
-target_link_libraries(deskflow-otg PRIVATE
-  ${LIBUSB_LIBRARY}
-)
+if(LIBUSB_RELEASE_LIBRARY AND LIBUSB_DEBUG_LIBRARY)
+  target_link_libraries(deskflow-otg PRIVATE
+    optimized "${LIBUSB_RELEASE_LIBRARY}" debug "${LIBUSB_DEBUG_LIBRARY}")
+else()
+  target_link_libraries(deskflow-otg PRIVATE ${LIBUSB_LIBRARY})
+endif()
 if(WIN32)
   # The vcpkg static libusb package does not supply transitive link metadata.
   target_link_libraries(deskflow-otg PRIVATE ws2_32 setupapi cfgmgr32 advapi32 ole32)
+  if(VCPKG_TARGET_TRIPLET MATCHES "-static$")
+    set_property(TARGET deskflow-otg PROPERTY MSVC_RUNTIME_LIBRARY
+      "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  endif()
 endif()
 
 include(CTest)
@@ -67,6 +92,10 @@ if(BUILD_TESTING)
   target_include_directories(test_socket PRIVATE src)
   if(WIN32)
     target_link_libraries(test_socket PRIVATE ws2_32)
+    if(VCPKG_TARGET_TRIPLET MATCHES "-static$")
+      set_property(TARGET test_socket PROPERTY MSVC_RUNTIME_LIBRARY
+        "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    endif()
   endif()
   add_test(NAME socket_io COMMAND test_socket)
 endif()

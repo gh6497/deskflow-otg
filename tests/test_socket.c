@@ -57,13 +57,11 @@ int main(void)
     free(payload);
 
     /* Shut down the writer while keeping the peer open for an EOF check. */
-    CHECK(shutdown(fds[1],
 #ifdef _WIN32
-                   SD_SEND
+    CHECK(shutdown(fds[1], SD_SEND) == 0);
 #else
-                   SHUT_WR
+    CHECK(shutdown(fds[1], SHUT_WR) == 0);
 #endif
-                   ) == 0);
     CHECK(io_read_full(fds[0], wire, 1) == 0);
 #ifndef _WIN32
     close(fds[1]);

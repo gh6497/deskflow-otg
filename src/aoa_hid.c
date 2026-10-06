@@ -15,6 +15,7 @@
 #define AOA_REQUEST_UNREGISTER_HID      55
 #define AOA_REQUEST_SET_HID_REPORT_DESC 56
 #define AOA_REQUEST_SEND_HID_EVENT      57
+#define AOA_HID_REQUEST_TYPE ((uint8_t)((int)LIBUSB_ENDPOINT_OUT | (int)LIBUSB_REQUEST_TYPE_VENDOR))
 
 #define AOA_TIMEOUT_MS 1000
 
@@ -188,7 +189,7 @@ void aoa_hid_close(struct aoa_hid *a)
  */
 static bool register_hid(struct aoa_hid *a, uint16_t id, uint16_t report_size)
 {
-    uint8_t bmRequestType = LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR;
+    uint8_t bmRequestType = AOA_HID_REQUEST_TYPE;
     int r = libusb_control_transfer(a->handle, bmRequestType,
                                     AOA_REQUEST_REGISTER_HID,
                                     id,        /* wValue: accessory HID id */
@@ -207,7 +208,7 @@ static bool register_hid(struct aoa_hid *a, uint16_t id, uint16_t report_size)
 static bool set_hid_report_desc(struct aoa_hid *a, uint16_t id,
                                 const uint8_t *desc, uint16_t desc_size)
 {
-    uint8_t bmRequestType = LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR;
+    uint8_t bmRequestType = AOA_HID_REQUEST_TYPE;
     /* libusb handles multi-packet splitting internally. */
     int r = libusb_control_transfer(
         a->handle, bmRequestType, AOA_REQUEST_SET_HID_REPORT_DESC,
@@ -228,7 +229,7 @@ bool aoa_hid_register(struct aoa_hid *a, uint16_t id,
     if (!set_hid_report_desc(a, id, report_desc, report_desc_size)) {
         /* best-effort cleanup, matching scrcpy */
         libusb_control_transfer(a->handle,
-                                LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR,
+                                 AOA_HID_REQUEST_TYPE,
                                 AOA_REQUEST_UNREGISTER_HID, id, 0, NULL, 0,
                                 AOA_TIMEOUT_MS);
         return false;
@@ -242,7 +243,7 @@ bool aoa_hid_send(struct aoa_hid *a, uint16_t id,
     if (a->disconnected || !a->handle) {
         return false;
     }
-    uint8_t bmRequestType = LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR;
+    uint8_t bmRequestType = AOA_HID_REQUEST_TYPE;
     int r = libusb_control_transfer(a->handle, bmRequestType,
                                     AOA_REQUEST_SEND_HID_EVENT,
                                     id, 0, (unsigned char *)data, size,
