@@ -13,7 +13,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#ifndef _WIN32
 #define _POSIX_C_SOURCE 200809L
+#endif
 #ifdef __APPLE__
 #define _DARWIN_C_SOURCE 1
 #endif
@@ -21,13 +23,18 @@
 #include "deskflow_client.h"
 
 #include <errno.h>
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <netdb.h>
 #include <poll.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <unistd.h>
 
 #define DF_PROTOCOL_MAJOR 1
 #define DF_PROTOCOL_MINOR 8
@@ -37,8 +44,59 @@
 #define LOG_INFO(...) fprintf(stderr, "INFO:  " __VA_ARGS__)
 #define LOG_DBG(...)  fprintf(stderr, "DEBUG: " __VA_ARGS__)
 
+#ifdef _WIN32
+typedef SOCKET df_socket;
+#define DF_INVALID_SOCKET INVALID_SOCKET
+#define df_close_socket closesocket
+
+static int df_socket_init(void)
+{
+    WSADATA data;
+    int r = WSAStartup(MAKEWORD(2, 2), &data);
+    if (r != 0) {
+        LOG_ERR("WSAStartup failed: %d\n", r);
+    }
+    return r == 0 ? 0 : -1;
+}
+
+static void df_socket_cleanup(void)
+{
+    WSACleanup();
+}
+
+static int df_socket_interrupted(void)
+{
+    return WSAGetLastError() == WSAEINTR;
+}
+
+static int df_socket_error(void) { return WSAGetLastError(); }
+
+static int df_socket_wait(df_socket fd)
+{
+    WSAPOLLFD pfd = {0};
+    pfd.fd = fd;
+    pfd.events = POLLRDNORM;
+    return WSAPoll(&pfd, 1, 500);
+}
+#else
+typedef int df_socket;
+#define DF_INVALID_SOCKET (-1)
+#define df_close_socket close
+
+static int df_socket_init(void) { return 0; }
+static void df_socket_cleanup(void) { }
+static int df_socket_interrupted(void) { return errno == EINTR; }
+static int df_socket_error(void) { return errno; }
+
+static int df_socket_wait(df_socket fd)
+{
+    struct pollfd pfd = { .fd = fd, .events = POLLIN };
+    return poll(&pfd, 1, 500);
+}
+#endif
+
 struct df_client {
-    int fd;
+    df_socket fd;
     int32_t screen_w;
     int32_t screen_h;
     uint16_t proto_minor;   /* negotiated protocol minor version */
@@ -48,7 +106,7 @@ struct df_client {
 
 /* ---- low-level socket I/O ----------------------------------------------- */
 
-static int socket_suppress_sigpipe(int fd)
+static int socket_suppress_sigpipe(df_socket fd)
 {
 #ifdef SO_NOSIGPIPE
     /* Darwin uses a socket option instead of Linux's MSG_NOSIGNAL. */
@@ -60,14 +118,14 @@ static int socket_suppress_sigpipe(int fd)
 #endif
 }
 
-static int io_read_full(int fd, void *buf, size_t n)
+static int io_read_full(df_socket fd, void *buf, size_t n)
 {
     uint8_t *p = buf;
     size_t got = 0;
     while (got < n) {
-        ssize_t r = read(fd, p + got, n - got);
+        int r = recv(fd, (char *)p + got, (int)(n - got), 0);
         if (r < 0) {
-            if (errno == EINTR) {
+            if (df_socket_interrupted()) {
                 continue;
             }
             return -1;
@@ -80,24 +138,26 @@ static int io_read_full(int fd, void *buf, size_t n)
     return 1;
 }
 
-static int io_write_full(int fd, const void *buf, size_t n)
+static int io_write_full(df_socket fd, const void *buf, size_t n)
 {
     const uint8_t *p = buf;
     size_t sent = 0;
     while (sent < n) {
 #ifdef MSG_NOSIGNAL
-        ssize_t r = send(fd, p + sent, n - sent, MSG_NOSIGNAL);
+        int r = send(fd, (const char *)p + sent, (int)(n - sent), MSG_NOSIGNAL);
 #else
-        ssize_t r = send(fd, p + sent, n - sent, 0);
+        int r = send(fd, (const char *)p + sent, (int)(n - sent), 0);
 #endif
         if (r < 0) {
-            if (errno == EINTR) {
+            if (df_socket_interrupted()) {
                 continue;
             }
             return -1;
         }
         if (r == 0) {
+#ifndef _WIN32
             errno = EPIPE;
+#endif
             return -1;
         }
         sent += (size_t)r;
@@ -108,7 +168,7 @@ static int io_write_full(int fd, const void *buf, size_t n)
 /* ---- packet framing (deskflow PacketStreamFilter) ------------------------ */
 
 /* Send one length-prefixed packet. */
-static int send_packet(int fd, const void *payload, uint32_t len)
+static int send_packet(df_socket fd, const void *payload, uint32_t len)
 {
     uint8_t hdr[4];
     hdr[0] = (uint8_t)(len >> 24);
@@ -126,7 +186,7 @@ static int send_packet(int fd, const void *payload, uint32_t len)
  * Returns the payload length, or -1 on error, or 0 on EOF.  *out is set to
  * the allocated buffer (caller frees) on success.
  */
-static int recv_packet(int fd, uint8_t **out)
+static int recv_packet(df_socket fd, uint8_t **out)
 {
     uint8_t hdr[4];
     int r = io_read_full(fd, hdr, 4);
@@ -207,7 +267,7 @@ static int msg_skip_string(struct msg *m)
 
 /* ---- message builders ---------------------------------------------------- */
 
-static int send_hello_back(int fd, const char *protocol, const char *name,
+static int send_hello_back(df_socket fd, const char *protocol, const char *name,
                            uint16_t minor)
 {
     size_t name_len = strlen(name);
@@ -232,7 +292,7 @@ static int send_hello_back(int fd, const char *protocol, const char *name,
     return r;
 }
 
-static int send_dinfo(int fd, int32_t w, int32_t h)
+static int send_dinfo(df_socket fd, int32_t w, int32_t h)
 {
     uint8_t buf[4 + 7 * 2];
     size_t p = 0;
@@ -247,19 +307,19 @@ static int send_dinfo(int fd, int32_t w, int32_t h)
     return send_packet(fd, buf, (uint32_t)p);
 }
 
-static int send_noop(int fd)
+static int send_noop(df_socket fd)
 {
     return send_packet(fd, "CNOP", 4);
 }
 
-static int send_keepalive(int fd)
+static int send_keepalive(df_socket fd)
 {
     return send_packet(fd, "CALV", 4);
 }
 
 /* ---- connect + handshake ------------------------------------------------ */
 
-static int tcp_connect(const char *host, uint16_t port)
+static df_socket tcp_connect(const char *host, uint16_t port)
 {
     char portstr[8];
     snprintf(portstr, sizeof(portstr), "%u", (unsigned)port);
@@ -272,33 +332,33 @@ static int tcp_connect(const char *host, uint16_t port)
     struct addrinfo *res = NULL;
     int g = getaddrinfo(host, portstr, &hints, &res);
     if (g != 0) {
-        LOG_ERR("getaddrinfo(%s): %s\n", host, gai_strerror(g));
-        return -1;
+        LOG_ERR("getaddrinfo(%s) failed: %d\n", host, g);
+        return DF_INVALID_SOCKET;
     }
 
-    int fd = -1;
+    df_socket fd = DF_INVALID_SOCKET;
     for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
         fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-        if (fd < 0) {
+        if (fd == DF_INVALID_SOCKET) {
             continue;
         }
         if (socket_suppress_sigpipe(fd) != 0) {
-            LOG_ERR("could not disable socket SIGPIPE: %s\n", strerror(errno));
-            close(fd);
-            fd = -1;
+            LOG_ERR("could not disable socket SIGPIPE: %d\n", df_socket_error());
+            df_close_socket(fd);
+            fd = DF_INVALID_SOCKET;
             continue;
         }
         if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0) {
             break;
         }
-        close(fd);
-        fd = -1;
+        df_close_socket(fd);
+        fd = DF_INVALID_SOCKET;
     }
     freeaddrinfo(res);
 
-    if (fd < 0) {
+    if (fd == DF_INVALID_SOCKET) {
         LOG_ERR("could not connect to %s:%u\n", host, (unsigned)port);
-        return -1;
+        return DF_INVALID_SOCKET;
     }
     return fd;
 }
@@ -307,14 +367,19 @@ df_client *df_client_connect(const char *host, uint16_t port, const char *name,
                              int32_t screen_w, int32_t screen_h,
                              const df_client_callbacks *cbs, void *ud)
 {
-    int fd = tcp_connect(host, port);
-    if (fd < 0) {
+    if (df_socket_init() != 0) {
+        return NULL;
+    }
+    df_socket fd = tcp_connect(host, port);
+    if (fd == DF_INVALID_SOCKET) {
+        df_socket_cleanup();
         return NULL;
     }
 
     df_client *c = calloc(1, sizeof(*c));
     if (!c) {
-        close(fd);
+        df_close_socket(fd);
+        df_socket_cleanup();
         return NULL;
     }
     c->fd = fd;
@@ -363,7 +428,8 @@ df_client *df_client_connect(const char *host, uint16_t port, const char *name,
     return c;
 
 fail:
-    close(fd);
+    df_close_socket(fd);
+    df_socket_cleanup();
     free(c);
     return NULL;
 }
@@ -575,7 +641,7 @@ static int handle_message(df_client *c, const char code[4], struct msg *m)
 
 int df_client_run(df_client *c, volatile sig_atomic_t *stop)
 {
-    int fd = c->fd;
+    df_socket fd = c->fd;
     int result = 0;
 
     for (;;) {
@@ -583,13 +649,12 @@ int df_client_run(df_client *c, volatile sig_atomic_t *stop)
             break;
         }
 
-        struct pollfd pfd = { .fd = fd, .events = POLLIN };
-        int pr = poll(&pfd, 1, 500);
+        int pr = df_socket_wait(fd);
         if (pr < 0) {
-            if (errno == EINTR) {
+            if (df_socket_interrupted()) {
                 continue;
             }
-            LOG_ERR("poll error: %s\n", strerror(errno));
+            LOG_ERR("socket wait failed: %d\n", df_socket_error());
             result = -1;
             break;
         }
@@ -609,7 +674,7 @@ int df_client_run(df_client *c, volatile sig_atomic_t *stop)
             break;
         }
         if (plen < 0) {
-            LOG_ERR("read error: %s\n", strerror(errno));
+            LOG_ERR("socket read failed: %d\n", df_socket_error());
             result = -1;
             break;
         }
@@ -654,9 +719,10 @@ void df_client_disconnect(df_client *c)
     if (!c) {
         return;
     }
-    if (c->fd >= 0) {
-        close(c->fd);
-        c->fd = -1;
+    if (c->fd != DF_INVALID_SOCKET) {
+        df_close_socket(c->fd);
+        c->fd = DF_INVALID_SOCKET;
     }
+    df_socket_cleanup();
     free(c);
 }

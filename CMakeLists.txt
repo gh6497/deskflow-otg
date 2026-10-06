@@ -25,7 +25,7 @@ find_path(LIBUSB_INCLUDE_DIR
 )
 
 find_library(LIBUSB_LIBRARY
-  NAMES usb-1.0
+  NAMES usb-1.0 libusb-1.0
   HINTS ${LIBUSB_ROOT_HINTS}
   PATH_SUFFIXES lib
 )
@@ -36,6 +36,7 @@ if(NOT LIBUSB_INCLUDE_DIR OR NOT LIBUSB_LIBRARY)
     "Install the development package, e.g.:\n"
     "    Linux: sudo apt install libusb-1.0-0-dev\n"
     "    macOS: brew install libusb\n"
+    "    Windows: vcpkg install libusb:x64-windows-static\n"
     "For a custom prefix, set -DCMAKE_PREFIX_PATH=<libusb-prefix>.")
 endif()
 
@@ -55,11 +56,18 @@ target_include_directories(deskflow-otg PRIVATE
 target_link_libraries(deskflow-otg PRIVATE
   ${LIBUSB_LIBRARY}
 )
+if(WIN32)
+  # The vcpkg static libusb package does not supply transitive link metadata.
+  target_link_libraries(deskflow-otg PRIVATE ws2_32 setupapi cfgmgr32 advapi32 ole32)
+endif()
 
 include(CTest)
 if(BUILD_TESTING)
   add_executable(test_socket tests/test_socket.c)
   target_include_directories(test_socket PRIVATE src)
+  if(WIN32)
+    target_link_libraries(test_socket PRIVATE ws2_32)
+  endif()
   add_test(NAME socket_io COMMAND test_socket)
 endif()
 

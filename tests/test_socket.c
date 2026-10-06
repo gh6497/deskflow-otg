@@ -12,8 +12,29 @@
 
 int main(void)
 {
-    int fds[2];
+    CHECK(df_socket_init() == 0);
+    df_socket fds[2];
+#ifdef _WIN32
+    /* Winsock has no socketpair(): connect two TCP sockets via loopback. */
+    df_socket listener = socket(AF_INET, SOCK_STREAM, 0);
+    CHECK(listener != DF_INVALID_SOCKET);
+    struct sockaddr_in addr = {0};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = 0;
+    CHECK(bind(listener, (struct sockaddr *)&addr, sizeof(addr)) == 0);
+    CHECK(listen(listener, 1) == 0);
+    int addrlen = sizeof(addr);
+    CHECK(getsockname(listener, (struct sockaddr *)&addr, &addrlen) == 0);
+    fds[0] = socket(AF_INET, SOCK_STREAM, 0);
+    CHECK(fds[0] != DF_INVALID_SOCKET);
+    CHECK(connect(fds[0], (struct sockaddr *)&addr, sizeof(addr)) == 0);
+    fds[1] = accept(listener, NULL, NULL);
+    CHECK(fds[1] != DF_INVALID_SOCKET);
+    df_close_socket(listener);
+#else
     CHECK(socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
+#endif
     CHECK(socket_suppress_sigpipe(fds[0]) == 0);
     CHECK(socket_suppress_sigpipe(fds[1]) == 0);
 
@@ -35,13 +56,29 @@ int main(void)
     CHECK(memcmp(payload, "CNOP", 4) == 0);
     free(payload);
 
-    close(fds[1]);
+    /* Shut down the writer while keeping the peer open for an EOF check. */
+    CHECK(shutdown(fds[1],
+#ifdef _WIN32
+                   SD_SEND
+#else
+                   SHUT_WR
+#endif
+                   ) == 0);
     CHECK(io_read_full(fds[0], wire, 1) == 0);
+#ifndef _WIN32
+    close(fds[1]);
     /* Keep SIGPIPE at its default: a regression terminates this test. */
     CHECK(signal(SIGPIPE, SIG_DFL) != SIG_ERR);
     CHECK(send_packet(fds[0], "CNOP", 4) == -1);
     CHECK(errno == EPIPE);
-    close(fds[0]);
+#else
+    /* Windows reports a socket error instead of raising SIGPIPE. */
+    CHECK(shutdown(fds[0], SD_SEND) == 0);
+    CHECK(send_packet(fds[0], "CNOP", 4) == -1);
+    df_close_socket(fds[1]);
+#endif
+    df_close_socket(fds[0]);
+    df_socket_cleanup();
     puts("PASS: packet framing, EOF and disconnected socket writes");
     return 0;
 }

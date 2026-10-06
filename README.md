@@ -38,8 +38,8 @@
 
 ## 依赖
 
-- Linux 或 macOS（Intel / Apple Silicon）
-- GCC / Clang（C11）
+- Linux、macOS（Intel / Apple Silicon）或 Windows（x64）
+- GCC / Clang / MSVC（C11）
 - CMake ≥ 3.16
 - libusb-1.0（开发包）
 
@@ -50,6 +50,9 @@ sudo apt install build-essential cmake libusb-1.0-0-dev
 # macOS（先安装 Homebrew）
 xcode-select --install
 brew install cmake libusb
+
+# Windows：Visual Studio C++ 工具链、CMake、vcpkg
+vcpkg install libusb:x64-windows-static
 ```
 
 不需要 Qt、不需要 FFmpeg、不需要 SDL —— 这就是本程序相对于"直接链接 deskflow/scrcpy
@@ -75,7 +78,16 @@ cmake --build build
 
 编译器与 libusb 必须使用相同架构；不要混用 Rosetta 下的 Intel Homebrew 与原生
 Apple Silicon 编译器。构建和 socket 回归测试可用 `ctest --test-dir build --output-on-failure`
-验证；CI 覆盖 Linux、Intel macOS 和 Apple Silicon macOS，不包含手机 USB 真机测试。
+验证；CI 覆盖 Linux、Intel macOS、Apple Silicon macOS 和 Windows，不包含手机 USB 真机测试。
+
+Windows（PowerShell，使用 Visual Studio x64 工具链；`VCPKG_ROOT` 指向 vcpkg 目录）：
+
+```powershell
+cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
+./build/Release/deskflow-otg.exe --help
+```
 
 ## 使用
 
@@ -101,6 +113,11 @@ sudo ./build/deskflow-otg \
 
 > **Linux**：需要 root 或 udev 规则才能访问 USB 设备。不想要 `sudo` 的话，配置一条
 > udev 规则即可（见下文）。**macOS**：先不带 `sudo` 运行；不使用 udev，见下面的说明。
+
+**Windows**：在 PowerShell 中运行 `./build/Release/deskflow-otg.exe --host 127.0.0.1
+--name android --width 1080 --height 1920 -s <手机USB序列号>`。需安装可供 libusb 使用的
+USB 驱动（例如通过 Zadig 将手机对应 USB 接口绑定 WinUSB）；更换驱动可能影响 MTP/ADB，
+请确认选中的设备/接口并备份原驱动。Deskflow 的 TLS 仍需关闭。Windows USB 真机行为尚未验证。
 
 ### macOS 运行与权限
 
@@ -207,4 +224,4 @@ deskflow 1.26+ 默认开启 TLS（`security/tlsEnabled`）。本桥接程序目�
 - 只支持键盘 + 鼠标，不支持游戏手柄（AOA gamepad 未实现）。
 - 默认绝对指针依赖 Android 的 HID 数位板支持，具体设备兼容性需真机验证。
 - `--mouse-mode relative` 为兼容模式，Android 鼠标加速可能造成漂移、提前碰边。
-- 需要先能访问 USB 设备（Linux 使用 root 或 udev 规则；macOS 需允许 USB 配件连接）。
+- 需要先能访问 USB 设备（Linux 使用 root 或 udev 规则；macOS 需允许 USB 配件连接；Windows 需兼容 libusb 的驱动）。
