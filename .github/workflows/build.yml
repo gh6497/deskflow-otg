@@ -2,14 +2,29 @@ name: Build
 
 on:
   push:
+    branches:
+      - '**'
+    tags:
+      - 'v*'
   pull_request:
+
+permissions:
+  contents: read
 
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14, macos-15-intel, windows-latest]
+        include:
+          - os: ubuntu-latest
+            asset: linux-x86_64
+          - os: macos-14
+            asset: macos-arm64
+          - os: macos-15-intel
+            asset: macos-x86_64
+          - os: windows-latest
+            asset: windows-x86_64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -38,3 +53,40 @@ jobs:
       - name: Check CLI (Windows)
         if: runner.os == 'Windows'
         run: ./build/Release/deskflow-otg.exe --help
+      - name: Package (Linux / macOS)
+        if: startsWith(github.ref, 'refs/tags/v') && runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          tar -czf "dist/deskflow-otg-${{ matrix.asset }}.tar.gz" -C build deskflow-otg
+      - name: Package (Windows)
+        if: startsWith(github.ref, 'refs/tags/v') && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist
+          Compress-Archive -Path build/Release/deskflow-otg.exe -DestinationPath "dist/deskflow-otg-${{ matrix.asset }}.zip"
+      - name: Save release package
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.asset }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag --title "$GITHUB_REF_NAME" --generate-notes

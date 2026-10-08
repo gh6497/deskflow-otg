@@ -80,6 +80,20 @@ cmake --build build
 Apple Silicon 编译器。构建和 socket 回归测试可用 `ctest --test-dir build --output-on-failure`
 验证；CI 覆盖 Linux、Intel macOS、Apple Silicon macOS 和 Windows，不包含手机 USB 真机测试。
 
+### 发布预编译包
+
+推送以 `v` 开头的版本标签后，GitHub Actions 会在四个平台构建、测试、打包，全部成功后
+自动创建对应的 [Release](https://github.com/gh6497/deskflow-otg/releases)，并将 Linux x86_64、
+macOS arm64 / x86_64 和 Windows x86_64 的包放在 **Assets** 中。例如：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+普通分支提交和 PR 只构建测试，不会创建 Release。Linux 包运行时需要安装 libusb-1.0
+运行库；macOS 包运行时需要先 `brew install libusb`。Windows 包使用静态链接的 libusb。
+
 Windows（PowerShell，使用 Visual Studio x64 工具链；`VCPKG_ROOT` 指向 vcpkg 目录）：
 
 ```powershell
