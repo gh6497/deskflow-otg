@@ -126,11 +126,12 @@ python scripts/fetch_adb.py --output adb-bundle
 cmake -S . -B build-gui -DBUILD_GUI=ON \
     -DADB_BUNDLE_DIR="$PWD/adb-bundle/platform-tools"
 cmake --build build-gui --config Release --parallel
-cmake --install build-gui --config Release --prefix stage
+cmake --install build-gui --config Release --prefix "$PWD/stage"
 python scripts/fetch_licenses.py --output stage/share/deskflow-otg/licenses
 ```
 
 发布的是可解压运行的目录包；Windows 入口在 `stage/bin`，macOS 入口为 `stage/*.app`。
+安装前缀需为绝对路径（Qt 生成 `qt.conf` 的要求）；PowerShell 可使用 `--prefix "$pwd/stage"`。
 Linux 还需系统 libusb、桌面图形库，Wayland 桌面可通过 XWayland 运行 GUI。macOS 桌面包
 部署桥接依赖的 libusb。第三方说明见 [THIRD_PARTY.md](THIRD_PARTY.md)。
 

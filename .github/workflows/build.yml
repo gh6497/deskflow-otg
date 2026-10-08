@@ -64,7 +64,8 @@ jobs:
         if: runner.os == 'Windows'
         run: ./build/Release/deskflow-otg.exe --help
       - name: Stage desktop distribution
-        run: cmake --install build --config Release --prefix stage
+        # Qt's qt.conf generator requires an absolute install prefix.
+        run: cmake --install build --config Release --prefix "${{ github.workspace }}/stage"
       - name: Include dependency licenses
         run: python scripts/fetch_licenses.py --output stage/share/deskflow-otg/licenses
       - name: Package (Linux / macOS)
