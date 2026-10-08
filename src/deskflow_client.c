@@ -29,6 +29,7 @@
 #else
 #include <netdb.h>
 #include <poll.h>
+#include <netinet/tcp.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #endif
@@ -116,6 +117,16 @@ static int socket_suppress_sigpipe(df_socket fd)
     (void)fd;
     return 0;
 #endif
+}
+
+/* Mouse motion is latency-sensitive.  Without this, Nagle can leave a burst
+ * of tiny Deskflow packets waiting for an ACK while the USB side is already
+ * processing an older cursor position. */
+static void socket_enable_low_latency(df_socket fd)
+{
+    int enabled = 1;
+    (void)setsockopt(fd, IPPROTO_TCP, TCP_NODELAY,
+                     (const char *)&enabled, sizeof(enabled));
 }
 
 static int io_read_full(df_socket fd, void *buf, size_t n)
@@ -349,6 +360,7 @@ static df_socket tcp_connect(const char *host, uint16_t port)
             continue;
         }
         if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0) {
+            socket_enable_low_latency(fd);
             break;
         }
         df_close_socket(fd);
