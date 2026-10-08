@@ -1,4 +1,14 @@
+# CMake build outputs
 build/
+build-*/
+cmake-build-*/
+stage/
+adb-bundle/
 *.o
 *.a
 compile_commands.json
+
+# Local editor and machine-specific configuration
+.idea/
+opencode.json
+.DS_Store
