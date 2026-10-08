@@ -13,6 +13,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <poll.h>
+#include <unistd.h>
+#endif
 
 #include "bridge.h"
 #include "deskflow_client.h"
@@ -24,6 +30,43 @@
 #define DEFAULT_HEIGHT 1920
 
 static volatile sig_atomic_t g_stop = 0;
+static int g_gui = 0;
+
+/* GUI owns stdin. A byte or EOF requests graceful shutdown, including when
+ * the parent crashes. PeekNamedPipe avoids blocking on Windows console stdin. */
+static int gui_stop_check(void)
+{
+    if (g_stop) {
+        return 1;
+    }
+#ifdef _WIN32
+    HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD available = 0;
+    if (!PeekNamedPipe(input, NULL, 0, NULL, &available, NULL) || available) {
+        g_stop = 1;
+    }
+#else
+    struct pollfd input = { .fd = STDIN_FILENO, .events = POLLIN };
+    if (poll(&input, 1, 0) > 0) {
+        g_stop = 1;
+    }
+#endif
+    return g_stop != 0;
+}
+
+static void gui_event(const char *event)
+{
+    if (g_gui) {
+        printf("{\"event\":\"%s\"}\n", event);
+        fflush(stdout);
+    }
+}
+
+static void cb_connected(void *ud)
+{
+    (void)ud;
+    gui_event("connected");
+}
 
 static void on_signal(int sig)
 {
@@ -46,6 +89,7 @@ static void usage(const char *prog)
             "      --width W         Virtual screen width, 1..32767 (default %d)\n"
             "      --height H        Virtual screen height, 1..32767 (default %d)\n"
             "      --mouse-mode MODE absolute (default) or relative (compatibility)\n"
+            "      --gui             JSON status on stdout; stdin byte/EOF stops\n"
             "  -h, --help            Show this help\n"
             "\n"
             "Absolute mode maps the virtual screen to the full phone display.\n"
@@ -183,6 +227,8 @@ int main(int argc, char **argv)
             width = parse_screen_size(argv[++i]);
         } else if (strcmp(a, "--height") == 0 && i + 1 < argc) {
             height = parse_screen_size(argv[++i]);
+        } else if (strcmp(a, "--gui") == 0) {
+            g_gui = 1;
         } else if (strcmp(a, "--mouse-mode") == 0 && i + 1 < argc) {
             const char *mode = argv[++i];
             if (strcmp(mode, "absolute") == 0) {
@@ -207,6 +253,17 @@ int main(int argc, char **argv)
 
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
+    if (g_gui) {
+#ifndef _WIN32
+        /* A vanished GUI closes stdout as well as stdin. Let the cancellation
+         * path release HID state rather than exiting on a broken status pipe. */
+        signal(SIGPIPE, SIG_IGN);
+#endif
+        df_client_set_stop_check(gui_stop_check);
+        if (gui_stop_check()) {
+            return 0;
+        }
+    }
 
     app_state state;
     memset(&state, 0, sizeof(state));
@@ -218,9 +275,15 @@ int main(int argc, char **argv)
     }
     fprintf(stderr, "INFO:  AOA HID keyboard + %s pointer ready (screen %dx%d)\n",
             mouse_mode == OTG_MOUSE_ABSOLUTE ? "absolute" : "relative", width, height);
+    gui_event("usb-ready");
+    if (g_gui && gui_stop_check()) {
+        otg_bridge_close(&state.bridge);
+        return 0;
+    }
 
     /* 2. Connect to the Deskflow server. */
     df_client_callbacks cbs = {
+        .on_connected = cb_connected,
         .on_enter = cb_enter,
         .on_leave = cb_leave,
         .on_key_down = cb_key_down,
@@ -253,6 +316,7 @@ int main(int argc, char **argv)
 
     df_client_disconnect(client);
     otg_bridge_close(&state.bridge);
+    gui_event("disconnected");
     (void)g_stop;
     return ret;
 }

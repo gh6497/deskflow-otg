@@ -28,7 +28,9 @@
 #include <ws2tcpip.h>
 #else
 #include <netdb.h>
+#include <fcntl.h>
 #include <poll.h>
+#include <sys/select.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -103,7 +105,15 @@ struct df_client {
     uint16_t proto_minor;   /* negotiated protocol minor version */
     df_client_callbacks cbs;
     void *ud;
+    int accepted;
 };
+
+static int (*stop_check)(void);
+
+void df_client_set_stop_check(int (*check)(void))
+{
+    stop_check = check;
+}
 
 /* ---- low-level socket I/O ----------------------------------------------- */
 
@@ -134,6 +144,18 @@ static int io_read_full(df_socket fd, void *buf, size_t n)
     uint8_t *p = buf;
     size_t got = 0;
     while (got < n) {
+        if (stop_check) {
+            if (stop_check()) {
+                return -1;
+            }
+            int ready = df_socket_wait(fd);
+            if (ready == 0 || (ready < 0 && df_socket_interrupted())) {
+                continue;
+            }
+            if (ready < 0) {
+                return -1;
+            }
+        }
         int r = recv(fd, (char *)p + got, (int)(n - got), 0);
         if (r < 0) {
             if (df_socket_interrupted()) {
@@ -330,6 +352,75 @@ static int send_keepalive(df_socket fd)
 
 /* ---- connect + handshake ------------------------------------------------ */
 
+/* GUI cancellation must also work while a TCP connection is pending. DNS is
+ * still resolved by the OS; the GUI applies an outer startup deadline. */
+static int socket_connect(df_socket fd, const struct sockaddr *addr, int len)
+{
+    if (!stop_check) {
+        return connect(fd, addr, len);
+    }
+#ifdef _WIN32
+    u_long nonblocking = 1;
+    if (ioctlsocket(fd, FIONBIO, &nonblocking) != 0) {
+        return -1;
+    }
+#else
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+        return -1;
+    }
+#endif
+    int result = connect(fd, addr, len);
+    if (result != 0) {
+        for (int attempt = 0; attempt < 20 && !stop_check(); ++attempt) {
+            fd_set writefds, errors;
+            FD_ZERO(&writefds);
+            FD_ZERO(&errors);
+            FD_SET(fd, &writefds);
+            FD_SET(fd, &errors);
+            struct timeval timeout = {0, 500000};
+#ifdef _WIN32
+            int ready = select(0, NULL, &writefds, &errors, &timeout);
+#else
+            int ready = select(fd + 1, NULL, &writefds, &errors, &timeout);
+#endif
+            if (ready < 0 && df_socket_interrupted()) {
+                continue;
+            }
+            if (ready < 0) {
+                break;
+            }
+            if (ready > 0) {
+                int error = 0;
+#ifdef _WIN32
+                int size = sizeof(error);
+#else
+                socklen_t size = sizeof(error);
+#endif
+                if (getsockopt(fd, SOL_SOCKET, SO_ERROR, (char *)&error, &size) == 0 && !error) {
+                    result = 0;
+                }
+                break;
+            }
+        }
+    }
+#ifdef _WIN32
+    nonblocking = 0;
+    if (ioctlsocket(fd, FIONBIO, &nonblocking) != 0) {
+        return -1;
+    }
+    DWORD send_timeout = 1000;
+#else
+    if (fcntl(fd, F_SETFL, flags) < 0) {
+        return -1;
+    }
+    struct timeval send_timeout = {1, 0};
+#endif
+    (void)setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO,
+                     (const char *)&send_timeout, sizeof(send_timeout));
+    return stop_check() ? -1 : result;
+}
+
 static df_socket tcp_connect(const char *host, uint16_t port)
 {
     char portstr[8];
@@ -349,6 +440,9 @@ static df_socket tcp_connect(const char *host, uint16_t port)
 
     df_socket fd = DF_INVALID_SOCKET;
     for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
+        if (stop_check && stop_check()) {
+            break;
+        }
         fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
         if (fd == DF_INVALID_SOCKET) {
             continue;
@@ -359,7 +453,7 @@ static df_socket tcp_connect(const char *host, uint16_t port)
             fd = DF_INVALID_SOCKET;
             continue;
         }
-        if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0) {
+        if (socket_connect(fd, ai->ai_addr, (int)ai->ai_addrlen) == 0) {
             socket_enable_low_latency(fd);
             break;
         }
@@ -405,6 +499,7 @@ df_client *df_client_connect(const char *host, uint16_t port, const char *name,
     int hello_len = recv_packet(fd, &hello);
     if (hello_len < 11) {
         LOG_ERR("failed to read server hello\n");
+        free(hello);
         goto fail;
     }
 
@@ -468,6 +563,12 @@ static int handle_message(df_client *c, const char code[4], struct msg *m)
             uint32_t opt;
             if (msg_read_u32(m, &opt) != 0) {
                 return -1;
+            }
+        }
+        if (!c->accepted) {
+            c->accepted = 1;
+            if (c->cbs.on_connected) {
+                c->cbs.on_connected(c->ud);
             }
         }
         return 0;
@@ -657,7 +758,7 @@ int df_client_run(df_client *c, volatile sig_atomic_t *stop)
     int result = 0;
 
     for (;;) {
-        if (stop && *stop) {
+        if ((stop && *stop) || (stop_check && stop_check())) {
             break;
         }
 

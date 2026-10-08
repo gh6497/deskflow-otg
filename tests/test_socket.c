@@ -10,6 +10,36 @@
     } \
 } while (0)
 
+static int cancelled(void) { return 1; }
+static int cancel_check_count;
+static int cancel_partial(void) { return ++cancel_check_count > 1; }
+static void accepted(void *ud) { ++*(int *)ud; }
+
+static void check_acceptance(df_socket fd)
+{
+    int count = 0;
+    df_client client = {0};
+    client.fd = fd;
+    client.cbs.on_connected = accepted;
+    client.ud = &count;
+    const uint8_t options[] = {0, 0, 0, 0};
+    struct msg msg = {options, sizeof(options), 0};
+    CHECK(handle_message(&client, "CIAK", &msg) == 0);
+    CHECK(count == 0);
+    CHECK(handle_message(&client, "DSOP", &msg) == 0);
+    CHECK(count == 1);
+    msg.pos = 0;
+    CHECK(handle_message(&client, "DSOP", &msg) == 0);
+    CHECK(count == 1);
+    client.accepted = 0;
+    msg.len = 3;
+    msg.pos = 0;
+    CHECK(handle_message(&client, "DSOP", &msg) == -1);
+    CHECK(count == 1);
+    CHECK(handle_message(&client, "EUNK", &msg) == -1);
+    CHECK(count == 1);
+}
+
 int main(void)
 {
     CHECK(df_socket_init() == 0);
@@ -37,6 +67,20 @@ int main(void)
 #endif
     CHECK(socket_suppress_sigpipe(fds[0]) == 0);
     CHECK(socket_suppress_sigpipe(fds[1]) == 0);
+    check_acceptance(fds[0]);
+    df_client_set_stop_check(cancelled);
+    uint8_t cancelled_byte;
+    CHECK(io_read_full(fds[0], &cancelled_byte, 1) == -1);
+    df_client_set_stop_check(NULL);
+
+    /* A peer that sends only half a header must not prevent GUI cancellation. */
+    const uint8_t partial_header[] = {0, 0};
+    CHECK(io_write_full(fds[1], partial_header, sizeof(partial_header)) == 0);
+    df_client_set_stop_check(cancel_partial);
+    uint8_t *partial_payload = NULL;
+    CHECK(recv_packet(fds[0], &partial_payload) == -1);
+    CHECK(partial_payload == NULL);
+    df_client_set_stop_check(NULL);
 
     CHECK(send_packet(fds[0], "CALV", 4) == 0);
     uint8_t wire[8];

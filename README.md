@@ -7,6 +7,10 @@
 当鼠标滑到"手机"这块屏幕时，就可以用主机的键盘鼠标直接操控安卓手机 ——
 **不需要 adb、不需要开启 USB 调试**（和 `scrcpy --otg` 同理）。
 
+提供命令行和可选的 **Qt 桌面 GUI**。GUI 可以通过 ADB 自动识别设备序列号、宽高和
+方向，配置并启动已安装的 Deskflow，再一键连接手机。只有自动识别需要 USB 调试；
+手动填写设备信息仍可直接使用 AOA。详见[桌面 GUI](#桌面-gui)。
+
 ```
 ┌─────────────────────────────── 主机电脑 ───────────────────────────────┐
 │                                                                        │
@@ -55,8 +59,83 @@ brew install cmake libusb
 vcpkg install libusb:x64-windows-static
 ```
 
-不需要 Qt、不需要 FFmpeg、不需要 SDL —— 这就是本程序相对于"直接链接 deskflow/scrcpy
+命令行桥接不需要 Qt、不需要 FFmpeg、不需要 SDL —— 这就是本程序相对于"直接链接 deskflow/scrcpy
 库"的主要优势（scrcpy 的 `common.h → compat.h` 会拖入 FFmpeg 头文件，deskflow 会拖入 Qt）。
+可选 GUI 另需 C++17 编译器和 Qt 6.8+（Widgets、Network，测试另需 Test 模块）。
+
+## 桌面 GUI
+
+支持 Windows x64、Linux x86_64、macOS Intel / Apple Silicon。GUI 发布包包含桥接程序、
+Qt 运行库和 ADB 36.0.2；**不包含 Deskflow**，请自行安装。GUI 启动时优先发现自带 ADB，
+也可以在界面指定外部 ADB。
+
+### 使用流程
+
+1. 启动 `bin/deskflow-otg-gui`（Windows 为 `.exe`）；macOS 打开 `deskflow-otg-gui.app`。
+2. 手机通过 USB 连接，开启 USB 调试并授权，点击「刷新设备」。启动 GUI 时也会自动读取。
+   列表显示型号、ADB 序列号和在线/授权状态，不选择无线 ADB 或模拟器。
+3. 选择手机，自动读取 `wm size`，优先采用 Override size，并根据屏幕方向交换宽高。
+   方向无法识别时会提示手动调整。识别结果作为「原始屏幕尺寸」，可设置「灵敏度倍率」
+   （1～10×）等比例缩小虚拟尺寸，界面实时显示实际虚拟尺寸；
+   连接期间转屏后需断开、刷新或交换宽高，再重新连接。
+4. 勾选「自动配置并启动本机 Deskflow」，选择手机在电脑的左、右、上、下哪一侧。
+   自动查找常见安装位置；未找到时指定 **deskflow-core / deskflow-server 可执行程序**，
+   不是 Deskflow 的 GUI 程序。macOS 通常位于 `/Applications/Deskflow.app/Contents/MacOS/`。
+5. 点击「连接」。USB HID 初始化且 Deskflow 接受屏幕信息后，状态才变为「已连接」。
+6. 将鼠标移回电脑后，点击「断开」或关闭窗口，GUI 会先释放桥接键鼠，再停止自己启动的 server。
+
+只有一个设备时自动选中；多设备时手动选择。GUI 查询 ADB 设备路径，再将序列号交给
+桥接核心与实际 USB 描述符精确匹配，不回退到任意设备。若厂商的 ADB 与 USB 标识不同，
+根据桥接日志列出的候选 USB 序列号手动修正。未开启 USB 调试时可选择手动模式填写序列号和宽高。
+Windows 原生 ADB USB 后端可能返回 `unknown` 路径，此时继续读取尺寸，并由桥接核心核对 USB 标识。
+
+### Deskflow 启动与版本兼容
+
+- 根据 `--help` 探测实际启动接口，不通过版本号白名单限制协议兼容性。
+- 支持新版 `deskflow-core server --settings`（含 1.26 接口），以及旧版
+  `deskflow-server --no-daemon --name --config --address`；根据实际参数设置明文连接。
+- 自动生成独立的临时设置与屏幕布局，不覆盖用户已有 Deskflow 配置。自动启动的 server
+  只监听 `127.0.0.1`，关闭 TLS；端口被占用时明确报错。
+- 取消「自动配置并启动本机 Deskflow」即可填写服务地址，连接已有 server。这时需要自己
+  配置同名手机屏幕、位置并关闭 TLS；GUI 不会停止外部服务。
+- 新版本如果保持协议、启动参数及设置格式兼容即可继续使用；未知启动接口会提示使用已有服务模式。
+- 设备、尺寸、路径和连接参数自动保存。首次自动启动可能需要授予 Deskflow 键鼠捕获权限；
+  macOS 需辅助功能权限，Wayland 可能需要桌面门户确认。Windows USB 驱动仍须同时满足 ADB
+  与 libusb 的访问要求，不能仅以 ADB 可见判断 AOA 可用。
+
+### 从源码构建 GUI
+
+安装 Qt 6.8+，`CMAKE_PREFIX_PATH` 指向 Qt 安装前缀。保留 `BUILD_GUI=OFF`（默认值）可以
+继续只构建纯 C 命令行程序。
+
+```bash
+cmake -S . -B build-gui -DBUILD_GUI=ON -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_PREFIX_PATH=/path/to/Qt/6.8.3/gcc_64
+cmake --build build-gui --config Release --parallel
+ctest --test-dir build-gui -C Release --output-on-failure
+```
+
+Linux/Windows GUI 与桥接程序位于同一输出目录；macOS 构建产物是 `.app`，桥接复制到
+包内 `Contents/MacOS`。Windows 仍需本 README 中的 vcpkg/libusb 工具链参数；GUI 使用
+动态 Qt 和动态 MSVC 运行库，桥接保持静态 libusb 构建。
+
+打包时下载固定版本并校验 SHA-256，保留 ADB 的许可证与必要 DLL：
+
+```bash
+python scripts/fetch_adb.py --output adb-bundle
+cmake -S . -B build-gui -DBUILD_GUI=ON \
+    -DADB_BUNDLE_DIR="$PWD/adb-bundle/platform-tools"
+cmake --build build-gui --config Release --parallel
+cmake --install build-gui --config Release --prefix stage
+python scripts/fetch_licenses.py --output stage/share/deskflow-otg/licenses
+```
+
+发布的是可解压运行的目录包；Windows 入口在 `stage/bin`，macOS 入口为 `stage/*.app`。
+Linux 还需系统 libusb、桌面图形库，Wayland 桌面可通过 XWayland 运行 GUI。macOS 桌面包
+部署桥接依赖的 libusb。第三方说明见 [THIRD_PARTY.md](THIRD_PARTY.md)。
+
+测试覆盖设备输出解析、分辨率覆盖与方向、布局生成、端口冲突、子进程连接/拒绝/取消/退出、
+外部服务保留，以及完整窗口的模拟 ADB 识别。模拟测试不替代三平台手机 USB 真机验证。
 
 ## 构建
 
@@ -91,7 +170,9 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-普通分支提交和 PR 只构建测试，不会创建 Release。Linux 包运行时需要安装 libusb-1.0
+普通分支提交和 PR 构建 CLI、GUI、测试并检查桌面包部署，不会创建 Release。
+标签发布同时提供 `deskflow-otg-*` 命令行包和 `deskflow-otg-gui-*` 桌面包。
+Linux 包运行时需要安装 libusb-1.0
 运行库；macOS 包运行时需要先 `brew install libusb`。Windows 包使用静态链接的 libusb。
 
 Windows（PowerShell，使用 Visual Studio x64 工具链；`VCPKG_ROOT` 指向 vcpkg 目录）：
@@ -175,10 +256,17 @@ USB 驱动（例如通过 Zadig 将手机对应 USB 接口绑定 WinUSB）；更
       --width W         虚拟屏幕宽度，1..32767 (默认 1080)
       --height H        虚拟屏幕高度，1..32767 (默认 1920)
       --mouse-mode MODE absolute（默认）或 relative（兼容模式）
+      --gui             GUI 子进程模式：stdout 输出 JSON 状态，stdin 字节/EOF 请求退出
   -h, --help            帮助
 ```
 
 ### 鼠标灵敏度偏低、上下移动费手腕
+
+**GUI 操作**：确认「原始屏幕尺寸」后，将「灵敏度倍率」设为 `1.5×` 或 `2×`。
+虚拟宽高按 **原始宽高 ÷ 倍率** 四舍五入计算（最小为 1），始终从原始尺寸计算，
+反复调节不会累计缩放；`1×` 恢复原始尺寸。手动修改原始宽高、交换宽高或重新通过 ADB
+识别尺寸时，会重新应用当前倍率。原始尺寸与倍率分别保存，修改后重新连接生效。
+倍率仅用于绝对坐标模式；相对模式使用原始尺寸，并保留倍率设置供切回绝对模式使用。
 
 如果指针能够到达全屏，但从顶部移到底部需要很大的手腕移动范围，不一定是卡顿或
 延迟，也可能是虚拟屏幕尺寸较大导致灵敏度偏低。默认绝对模式会把虚拟坐标映射到
@@ -229,6 +317,14 @@ src/
   aoa_hid.c           USB AOA HID (libusb 枚举/打开/注册/发送报告)
   bridge.c            键鼠状态机 + HID 报告生成 (对应 scrcpy 的 hid_*)
   keymap.c            deskflow KeyID → USB HID usage 映射
+gui/
+  main_window.cpp     Qt Widgets 界面、ADB 自动识别和设置保存
+  session.cpp         Deskflow 配置/启动、桥接状态及进程生命周期
+  device_info.cpp     设备/尺寸/方向解析、屏幕布局生成
+  process_utils.cpp   异步命令执行、超时、可执行文件发现
+scripts/
+  fetch_adb.py        固定版本 ADB 下载和 SHA-256 校验
+  fetch_licenses.py   发布包依赖许可证收集
 ```
 
 ## 与 scrcpy / deskflow 的关系（出处说明）
