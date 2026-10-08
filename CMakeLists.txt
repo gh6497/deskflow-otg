@@ -101,3 +101,11 @@ if(BUILD_TESTING)
 endif()
 
 install(TARGETS deskflow-otg RUNTIME DESTINATION bin)
+
+option(BUILD_GUI "Build the Qt desktop application" OFF)
+if(BUILD_GUI)
+  enable_language(CXX)
+  set(CMAKE_CXX_STANDARD 17)
+  set(CMAKE_CXX_STANDARD_REQUIRED ON)
+  add_subdirectory(gui)
+endif()

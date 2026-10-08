@@ -178,7 +178,22 @@ for f in src/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only -Isrc "$f"
 
 ## 代码风格约定
 
-- 纯 C11，无 C++、无 Qt/FFmpeg/SDL 依赖。
+- 桥接核心 `src/` 保持纯 C11，无 Qt/FFmpeg/SDL 依赖。可选 `gui/` 使用 C++17、Qt 6.8+。
 - 日志用 `LOG_ERR/LOG_WARN/LOG_INFO/LOG_DBG` 宏（各文件自行 `#define`，输出到 stderr）。
 - 每个 `.c` 顶部注明其对应的 scrcpy/deskflow 上游出处。
 - License：Apache-2.0（HID/AOA 逻辑移植自 scrcpy，同为 Apache-2.0）。
+
+## 可选桌面 GUI
+
+- `-DBUILD_GUI=ON` 启用 Qt Widgets 桌面端；默认 OFF 保留纯 C 构建。GUI 支持 Linux、macOS、Windows。
+- `gui/main_window.cpp` 管理界面、ADB 异步查询和 QSettings；`device_info.cpp` 解析设备/尺寸/方向并生成布局。
+- `gui/session.cpp` 只管理自己创建的 Deskflow 和桥接进程。自动启动生成独立配置、监听回环地址并关闭 TLS；
+  外部服务模式不更改或终止已有 Deskflow。根据 `--help` 区分现代 `deskflow-core server --settings` 与传统 server 参数。
+- `src/main.c --gui` 在 stdout 输出 JSON 行 `usb-ready` / `connected` / `disconnected`；日志仍走 stderr。
+  stdin 任意字节或 EOF 请求优雅退出，Windows 使用 PeekNamedPipe，Unix 使用 poll。
+- `connected` 由首次完整 DSOP 接受触发，而不是 TCP connect/hello 返回；取消检查覆盖消息循环和部分包读取。
+- `scripts/fetch_adb.py` 下载固定 ADB 36.0.2，核验 SHA-256，只保留 adb、Windows DLL 与 notices。
+  `ADB_BUNDLE_DIR` 是提取后的 platform-tools 目录；不提供时开发版使用系统 ADB。
+- 发布包提供 Qt 动态库、桥接与 ADB，不包含 Deskflow。`qt_deploy_runtime_dependencies` 同时检查桥接依赖。
+- Qt 测试：`tests/test_gui.cpp` + `test_peer.cpp` 测试模拟子进程生命周期；`test_window.cpp` 测试模拟 ADB 完整识别。
+  `OTG_TEST_SCREENSHOT=/path/image.png ctest ...` 可保存窗口截图（测试设备为模拟数据）。

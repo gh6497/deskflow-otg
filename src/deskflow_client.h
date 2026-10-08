@@ -17,6 +17,8 @@
 
 /* Event callbacks invoked from the client loop (must be non-blocking). */
 typedef struct df_client_callbacks {
+    /* Called once after the server accepts screen info and sends options. */
+    void (*on_connected)(void *ud);
     void (*on_enter)(void *ud, int16_t x, int16_t y, uint32_t seq, uint16_t mask);
     void (*on_leave)(void *ud);
     void (*on_key_down)(void *ud, uint32_t keyid, uint16_t mask);
@@ -40,8 +42,13 @@ typedef struct df_client_callbacks {
 
 typedef struct df_client df_client;
 
+/* Optional cancellation check for this single-threaded client, including
+ * partial packet reads. Set before connecting; NULL restores CLI behaviour. */
+void df_client_set_stop_check(int (*check)(void));
+
 /*
- * Connect to a Deskflow server and perform the handshake.
+ * Connect to a Deskflow server and exchange the initial hello. Screen acceptance
+ * occurs later in df_client_run() and is reported through on_connected.
  *
  * `name` is the screen name this client reports (must match a screen in the
  * server configuration).  `screen_w`/`screen_h` describe the virtual screen
