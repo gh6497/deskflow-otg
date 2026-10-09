@@ -70,6 +70,37 @@ jobs:
         run: python scripts/fetch_licenses.py --output stage/share/deskflow-otg/licenses
       - name: Test DMG packaging layout
         run: python -m unittest discover -s tests -p test_package_dmg.py
+      - name: Test Windows installer layout
+        run: python -m unittest discover -s tests -p test_package_windows.py
+      - name: Install NSIS (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install nsis --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content $env:GITHUB_PATH (Join-Path ${env:ProgramFiles(x86)} 'NSIS')
+      - name: Package installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.Substring(1) } else { '0.0.0-ci' }
+          python scripts/package_windows.py --stage stage --version $version --output "dist/deskflow-otg-gui-windows-x86_64-setup.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path "dist/deskflow-otg-gui-windows-x86_64-setup.exe")) { throw 'Installer missing' }
+      - name: Smoke test Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installDir = Join-Path $env:LOCALAPPDATA 'Programs/Deskflow OTG'
+          $installer = (Resolve-Path 'dist/deskflow-otg-gui-windows-x86_64-setup.exe').Path
+          $process = Start-Process -FilePath $installer -ArgumentList '/S' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
+          foreach ($file in @('bin/deskflow-otg-gui.exe', 'bin/deskflow-otg.exe', 'bin/platform-tools/adb.exe', 'share/deskflow-otg/licenses/libusb-LGPL-2.1.txt')) {
+            if (-not (Test-Path (Join-Path $installDir $file))) { throw "Missing installed file: $file" }
+          }
+          $process = Start-Process -FilePath (Join-Path $installDir 'Uninstall.exe') -ArgumentList '/S' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Uninstaller failed: $($process.ExitCode)" }
+          if (Test-Path (Join-Path $installDir 'bin/deskflow-otg-gui.exe')) { throw 'Uninstaller left GUI behind' }
       - name: Package DMG (macOS)
         if: runner.os == 'macOS'
         shell: bash
