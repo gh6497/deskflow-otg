@@ -130,7 +130,7 @@ cmake --install build-gui --config Release --prefix "$PWD/stage"
 python scripts/fetch_licenses.py --output stage/share/deskflow-otg/licenses
 ```
 
-发布的是可解压运行的目录包；Windows 入口在 `stage/bin`，macOS 入口为 `stage/*.app`。
+发布的目录包可解压运行；Windows 入口在 `stage/bin`，macOS 入口为 `stage/*.app`。
 安装前缀需为绝对路径（Qt 生成 `qt.conf` 的要求）；PowerShell 可使用 `--prefix "$pwd/stage"`。
 Linux 还需系统 libusb、桌面图形库，Wayland 桌面可通过 XWayland 运行 GUI。macOS 桌面包
 部署桥接依赖的 libusb。第三方说明见 [THIRD_PARTY.md](THIRD_PARTY.md)。
@@ -175,6 +175,18 @@ git push origin v0.1.0
 标签发布同时提供 `deskflow-otg-*` 命令行包和 `deskflow-otg-gui-*` 桌面包。
 Linux CLI 包运行时需要安装 libusb-1.0 运行库；macOS CLI 压缩包运行时需要先
 `brew install libusb`。Windows 包使用静态链接的 libusb。
+
+Windows GUI 发布版另提供 `deskflow-otg-gui-windows-x86_64-setup.exe` 安装包。
+运行后按当前用户安装到 `%LOCALAPPDATA%\Programs\Deskflow OTG`，可通过开始菜单启动或在
+「已安装的应用」卸载，无需管理员权限；同时保留原有的免安装 ZIP。安装包含桥接程序、
+Qt、ADB 和依赖许可证，不包含 Deskflow。Windows USB 驱动仍需自行配置（见下文）。
+安装包尚未签名，Windows 可能提示未知发布者；请核对下载来源。升级时安装程序会先卸载
+旧版本。若 GUI 正在运行，请先退出再安装或卸载。本地制作安装包需在 Windows 上完成
+上文的 GUI 构建、`cmake --install` 和许可证收集，并安装 NSIS（`makensis` 在 PATH 中）：
+
+```powershell
+python scripts/package_windows.py --stage stage --version 0.1.0 --output dist/deskflow-otg-gui-windows-x86_64-setup.exe
+```
 
 macOS GUI 发布版另提供 `deskflow-otg-gui-macos-arm64.dmg` 和
 `deskflow-otg-gui-macos-x86_64.dmg`。选择与 Mac 架构匹配的镜像，打开后将
