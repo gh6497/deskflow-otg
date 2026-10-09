@@ -151,7 +151,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v') && runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path dist
+          New-Item -ItemType Directory -Path dist -Force
           Compress-Archive -Path build/Release/deskflow-otg.exe -DestinationPath "dist/deskflow-otg-${{ matrix.asset }}.zip"
           Compress-Archive -Path stage/* -DestinationPath "dist/deskflow-otg-gui-${{ matrix.asset }}.zip"
       - name: Save release package
