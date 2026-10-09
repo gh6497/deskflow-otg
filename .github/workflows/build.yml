@@ -68,6 +68,31 @@ jobs:
         run: cmake --install build --config Release --prefix "${{ github.workspace }}/stage"
       - name: Include dependency licenses
         run: python scripts/fetch_licenses.py --output stage/share/deskflow-otg/licenses
+      - name: Package Debian (Linux)
+        if: startsWith(github.ref, 'refs/tags/v') && runner.os == 'Linux'
+        shell: bash
+        run: |
+          python scripts/package_deb.py --stage stage --version "${GITHUB_REF_NAME#v}" --output "dist/deskflow-otg-gui-${GITHUB_REF_NAME#v}-linux-amd64.deb"
+          dpkg-deb --field "dist/deskflow-otg-gui-${GITHUB_REF_NAME#v}-linux-amd64.deb" Package Version Architecture Depends
+          dpkg-deb --contents "dist/deskflow-otg-gui-${GITHUB_REF_NAME#v}-linux-amd64.deb" | grep 'opt/deskflow-otg/bin/deskflow-otg-gui'
+      - name: Download verified appimagetool (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          curl -fL --retry 3 -o appimagetool-x86_64.AppImage https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+          echo 'ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  appimagetool-x86_64.AppImage' | sha256sum -c -
+          curl -fL --retry 3 -o runtime-x86_64 https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64
+          echo '156f4bdbde9c52d01814600013e0a273f0118dc2de98975f3c8c63427ec79074  runtime-x86_64' | sha256sum -c -
+          chmod +x appimagetool-x86_64.AppImage
+      - name: Package AppImage (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          python scripts/package_appimage.py --stage stage --appimagetool appimagetool-x86_64.AppImage --runtime runtime-x86_64 --output "dist/deskflow-otg-gui-linux-x86_64.AppImage"
+          ./dist/deskflow-otg-gui-linux-x86_64.AppImage --appimage-extract >/dev/null
+          test -x squashfs-root/AppRun
+          test -f squashfs-root/usr/bin/deskflow-otg-gui
+          test -f squashfs-root/usr/lib/libusb-1.0.so.0
       - name: Package (Linux / macOS)
         if: startsWith(github.ref, 'refs/tags/v') && runner.os != 'Windows'
         shell: bash

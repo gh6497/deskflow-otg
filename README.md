@@ -176,6 +176,45 @@ git push origin v0.1.0
 Linux 包运行时需要安装 libusb-1.0
 运行库；macOS 包运行时需要先 `brew install libusb`。Windows 包使用静态链接的 libusb。
 
+Linux GUI 发布版还提供 `.deb`（amd64），包含 GUI、GUI 必需的桥接程序及发布目录中的 Qt/ADB，
+不单独打包或安装 CLI 命令。安装后可从应用菜单启动，或运行 `deskflow-otg-gui`；仍需自行安装
+Deskflow，USB 访问仍需 root 或 udev 规则。下载 Release 中的 deb 后执行：
+
+```bash
+sudo apt install ./deskflow-otg-gui-<版本>-linux-amd64.deb
+```
+
+也可以从本地 GUI 安装目录制作 deb（需先按上文下载 ADB、以 `BUILD_GUI=ON`
+构建 GUI 并收集许可证；`stage` 必须是 GUI 安装目录）：
+
+```bash
+cmake --install build-gui --prefix "$PWD/stage"
+python3 scripts/package_deb.py --stage stage --version 0.1.0 \
+    --output dist/deskflow-otg-gui-0.1.0-$(dpkg --print-architecture).deb
+```
+
+deb 安装到 `/opt/deskflow-otg` 并在 `/usr/bin` 提供 GUI 入口；不能与手动安装在相同路径
+的版本混用。GUI 打包需要有图形桌面运行时库；包内不包含 Deskflow。
+
+Linux GUI 发布版同时提供无需安装的 `deskflow-otg-gui-linux-x86_64.AppImage`，
+内含桥接程序、Qt、libusb 和 ADB（不含 Deskflow）。下载后执行：
+
+```bash
+chmod +x deskflow-otg-gui-linux-x86_64.AppImage
+./deskflow-otg-gui-linux-x86_64.AppImage
+```
+
+系统需要图形桌面和 FUSE；缺少 FUSE 时可加 `--appimage-extract-and-run`。
+USB 权限规则与 deb 相同。要从本地 GUI 安装目录生成 AppImage，先下载并校验
+`appimagetool-x86_64.AppImage` 与 `runtime-x86_64`（CI 中固定了 SHA-256），然后运行：
+
+```bash
+python3 scripts/package_appimage.py --stage stage \
+    --appimagetool appimagetool-x86_64.AppImage \
+    --runtime runtime-x86_64 \
+    --output dist/deskflow-otg-gui-linux-x86_64.AppImage
+```
+
 Windows（PowerShell，使用 Visual Studio x64 工具链；`VCPKG_ROOT` 指向 vcpkg 目录）：
 
 ```powershell
