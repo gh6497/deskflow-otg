@@ -68,6 +68,22 @@ jobs:
         run: cmake --install build --config Release --prefix "${{ github.workspace }}/stage"
       - name: Include dependency licenses
         run: python scripts/fetch_licenses.py --output stage/share/deskflow-otg/licenses
+      - name: Test DMG packaging layout
+        run: python -m unittest discover -s tests -p test_package_dmg.py
+      - name: Package DMG (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p dist
+          python scripts/package_dmg.py --stage stage --output "dist/deskflow-otg-gui-${{ matrix.asset }}.dmg"
+          hdiutil verify "dist/deskflow-otg-gui-${{ matrix.asset }}.dmg"
+          mount_dir="$(mktemp -d)"
+          trap 'hdiutil detach "$mount_dir" || true; rmdir "$mount_dir"' EXIT
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" "dist/deskflow-otg-gui-${{ matrix.asset }}.dmg"
+          test -L "$mount_dir/Applications"
+          test -x "$mount_dir/deskflow-otg-gui.app/Contents/MacOS/deskflow-otg"
+          test -x "$mount_dir/deskflow-otg-gui.app/Contents/MacOS/platform-tools/adb"
+          test -f "$mount_dir/deskflow-otg-gui.app/Contents/Resources/deskflow-otg/licenses/libusb-LGPL-2.1.txt"
       - name: Package Debian (Linux)
         if: startsWith(github.ref, 'refs/tags/v') && runner.os == 'Linux'
         shell: bash
