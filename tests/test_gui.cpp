@@ -2,9 +2,14 @@
 #include "device_info.h"
 #include "process_utils.h"
 #include "session.h"
+#include "i18n.h"
+#include <QFile>
+#include <QMap>
+#include <QRegularExpression>
 #include <QSignalSpy>
 #include <QTcpServer>
 #include <QScopeGuard>
+#include <QXmlStreamReader>
 #include <QtTest>
 
 static QString peerPath()
@@ -16,9 +21,149 @@ static QString peerPath()
         ;
 }
 
+struct Catalog {
+    QString language, error;
+    QMap<QString, QString> sources, texts;
+};
+
+static Catalog readCatalog(const QString &path)
+{
+    Catalog catalog;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        catalog.error = file.errorString();
+        return catalog;
+    }
+    QXmlStreamReader xml(&file);
+    while (!xml.atEnd()) {
+        xml.readNext();
+        if (!xml.isStartElement())
+            continue;
+        if (xml.name() == QLatin1String("TS"))
+            catalog.language = xml.attributes().value("language").toString();
+        if (xml.name() != QLatin1String("message"))
+            continue;
+        const QString id = xml.attributes().value("id").toString();
+        if (id.isEmpty() || catalog.texts.contains(id)) {
+            xml.raiseError("Missing or duplicate ID: " + id);
+            break;
+        }
+        QString source, translation;
+        while (xml.readNextStartElement()) {
+            if (xml.name() == QLatin1String("source")) {
+                source = xml.readElementText();
+            } else if (xml.name() == QLatin1String("translation")) {
+                if (!xml.attributes().value("type").isEmpty()) {
+                    xml.raiseError("Unfinished or obsolete translation: " + id);
+                    break;
+                }
+                translation = xml.readElementText();
+            } else {
+                xml.skipCurrentElement();
+            }
+        }
+        if (source.isEmpty() || translation.isEmpty()) {
+            xml.raiseError("Empty source or translation: " + id);
+            break;
+        }
+        catalog.sources.insert(id, source);
+        catalog.texts.insert(id, translation);
+    }
+    if (xml.hasError())
+        catalog.error = xml.errorString();
+    return catalog;
+}
+
+static QStringList placeholders(const QString &text)
+{
+    static const QRegularExpression pattern("%L?(?:[1-9][0-9]*|n)");
+    QStringList result;
+    auto matches = pattern.globalMatch(text);
+    while (matches.hasNext())
+        result.append(matches.next().captured());
+    result.sort();
+    return result;
+}
+
 class GuiTest : public QObject {
     Q_OBJECT
 private slots:
+    void initTestCase()
+    {
+        QVERIFY(LanguageManager::instance().setLanguage("zh_CN"));
+    }
+    void translations()
+    {
+        auto &languages = LanguageManager::instance();
+        QVERIFY(languages.setLanguage("en"));
+        QCOMPARE(qtTrId("otg.action.connect"), "Connect");
+        QVERIFY(!languages.setLanguage("unsupported"));
+        QCOMPARE(languages.language(), "en");
+        Session session;
+        ConnectionOptions options;
+        session.start(options);
+        QCOMPARE(session.state(), Session::State::Idle);
+        QCOMPARE(session.statusMessage(), "Invalid device serial number, screen name, host or dimensions.");
+        QVERIFY(languages.setLanguage("zh_CN"));
+        QCOMPARE(session.statusMessage(), "设备序列号、屏幕名称、主机或尺寸无效。");
+        QCOMPARE(qtTrId("otg.action.connect"), "连接");
+    }
+    void catalogs()
+    {
+        const auto english = readCatalog(":/i18n-test/gui/translations/deskflow_otg_en.xml");
+        const auto chinese = readCatalog(":/i18n-test/gui/translations/deskflow_otg_zh_CN.xml");
+        QVERIFY2(english.error.isEmpty(), qPrintable(english.error));
+        QVERIFY2(chinese.error.isEmpty(), qPrintable(chinese.error));
+        QCOMPARE(english.language, "en");
+        QCOMPARE(chinese.language, "zh_CN");
+        QVERIFY(!english.texts.isEmpty());
+        QCOMPARE(english.texts.keys(), chinese.texts.keys());
+        QCOMPARE(english.sources, chinese.sources);
+        QCOMPARE(english.sources, english.texts);
+        for (const auto &id : english.texts.keys())
+            QCOMPARE(placeholders(english.texts[id]), placeholders(chinese.texts[id]));
+
+        // Include indirect ID references in property bindings, states and arrays.
+        QSet<QString> references;
+        const QRegularExpression pattern("\"(otg\\.[a-z0-9_.]+)\"");
+        for (const char *name : {"main_window.cpp", "session.cpp", "process_utils.cpp"}) {
+            QFile source(QString(":/i18n-test/gui/") + name + ".txt");
+            QVERIFY(source.open(QIODevice::ReadOnly));
+            auto matches = pattern.globalMatch(QString::fromUtf8(source.readAll()));
+            while (matches.hasNext())
+                references.insert(matches.next().captured(1));
+        }
+        const auto ids = english.texts.keys();
+        QCOMPARE(references, QSet<QString>(ids.begin(), ids.end()));
+
+        // Also verify actual -idbased QM compilation and resource loading.
+        auto &languages = LanguageManager::instance();
+        const auto restore = qScopeGuard([&languages] { languages.setLanguage("zh_CN"); });
+        QVERIFY(languages.setLanguage("en"));
+        for (auto it = english.texts.cbegin(); it != english.texts.cend(); ++it)
+            QCOMPARE(qtTrId(it.key().toUtf8().constData()), it.value());
+        QVERIFY(languages.setLanguage("zh_CN"));
+        for (auto it = chinese.texts.cbegin(); it != chinese.texts.cend(); ++it)
+            QCOMPARE(qtTrId(it.key().toUtf8().constData()), it.value());
+    }
+    void englishFallback()
+    {
+        class IncompleteTranslator : public QTranslator {
+        public:
+            bool isEmpty() const override { return false; }
+            QString translate(const char *, const char *id, const char *, int) const override
+            {
+                return QByteArray(id) == "otg.action.connect" ? QStringLiteral("连接") : QString();
+            }
+        } partial;
+        auto &languages = LanguageManager::instance();
+        const auto restore = qScopeGuard([&languages] { languages.setLanguage("zh_CN"); });
+        QVERIFY(languages.setLanguage("en"));
+        QVERIFY(QCoreApplication::installTranslator(&partial));
+        QCOMPARE(qtTrId("otg.action.connect"), "连接");
+        QCOMPARE(qtTrId("otg.action.refresh"), "Refresh devices");
+        QCoreApplication::removeTranslator(&partial);
+    }
     void devices()
     {
         auto devices = parseDevices("* daemon started successfully *\nList of devices attached\n"
@@ -85,6 +230,12 @@ private slots:
         options.bridge = "/nonexistent/deskflow-otg";
         session.start(options);
         QTRY_COMPARE(session.state(), Session::State::Idle);
+        const QString detail = session.statusMessage().mid(QString("桥接启动失败：").size());
+        QVERIFY(!detail.isEmpty());
+        QVERIFY(LanguageManager::instance().setLanguage("en"));
+        QCOMPARE(session.statusMessage(), "Failed to start bridge: " + detail);
+        QVERIFY(LanguageManager::instance().setLanguage("zh_CN"));
+        QCOMPARE(session.statusMessage(), "桥接启动失败：" + detail);
     }
     void managedLifecycle_data()
     {
@@ -111,6 +262,10 @@ private slots:
         QSignalSpy logs(&session, &Session::log);
         session.start(options);
         QTRY_COMPARE(session.state(), Session::State::Connected);
+        QVERIFY(LanguageManager::instance().setLanguage("en"));
+        QCOMPARE(session.statusMessage(), "Connected — move the mouse toward the phone to control it");
+        QVERIFY(LanguageManager::instance().setLanguage("zh_CN"));
+        QCOMPARE(session.statusMessage(), "已连接 — 将鼠标移到手机一侧即可控制");
         session.stop();
         QTRY_COMPARE_WITH_TIMEOUT(session.state(), Session::State::Idle, 6000);
         bool released = false;

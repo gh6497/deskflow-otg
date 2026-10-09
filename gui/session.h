@@ -29,6 +29,7 @@ public:
     enum class State { Idle, Starting, Connected, Stopping };
     explicit Session(QObject *parent = nullptr);
     State state() const { return m_state; }
+    QString statusMessage() const;
     void start(const ConnectionOptions &options);
     void stop();
 
@@ -37,8 +38,8 @@ signals:
     void log(const QString &message);
 
 private:
-    void setState(State state, const QString &message);
-    void fail(const QString &message);
+    void setState(State state, const char *id, const QString &detail = {});
+    void fail(const char *id, const QString &detail = {});
     void launchServer(const QString &help);
     void launchBridge();
     void stopServer();
@@ -51,6 +52,7 @@ private:
     QTimer m_retry, m_deadline, m_killBridge, m_killServer;
     QTemporaryDir m_configDir;
     QByteArray m_events;
-    QString m_failure;
+    QByteArray m_failureId, m_statusId;
+    QString m_failureDetail, m_statusDetail;
     quint64 m_generation = 0;
 };

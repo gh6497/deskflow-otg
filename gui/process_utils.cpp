@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "process_utils.h"
+#include "i18n.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -31,7 +32,7 @@ void runCommand(QObject *owner, const QString &program, const QStringList &args,
     QObject::connect(process, &QProcess::readyRead, process, [process, output] {
         output->append(process->readAll());
         if (output->size() > 4 * 1024 * 1024) {
-            process->setProperty("commandError", QStringLiteral("命令输出过大"));
+            process->setProperty("commandError", qtTrId("otg.error.command_output"));
             process->kill();
         }
     });
@@ -46,7 +47,7 @@ void runCommand(QObject *owner, const QString &program, const QStringList &args,
         finish(code == 0 && status == QProcess::NormalExit && error.isEmpty(), error);
     });
     QObject::connect(timer, &QTimer::timeout, process, [process] {
-        process->setProperty("commandError", QStringLiteral("命令超时"));
+        process->setProperty("commandError", qtTrId("otg.error.command_timeout"));
         process->kill();
     });
     timer->start(timeoutMs);

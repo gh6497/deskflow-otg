@@ -2,6 +2,7 @@
 #include "session.h"
 #include "device_info.h"
 #include "process_utils.h"
+#include "i18n.h"
 
 #include <QFile>
 #include <QJsonDocument>
@@ -16,10 +17,10 @@ Session::Session(QObject *parent) : QObject(parent)
     m_killServer.setSingleShot(true);
     m_retry.setInterval(250);
     connect(&m_deadline, &QTimer::timeout, this, [this] {
-        fail("连接超时：请检查 Deskflow 权限、TLS 设置、USB 驱动及日志。");
+        fail("otg.error.connection_timeout");
     });
     connect(&m_killBridge, &QTimer::timeout, this, [this] {
-        emit log("桥接退出超时，强制终止。请检查 USB 设备状态。");
+        emit log(qtTrId("otg.log.bridge_killed"));
         m_bridge.kill();
     });
     connect(&m_killServer, &QTimer::timeout, &m_server, &QProcess::kill);
@@ -47,7 +48,7 @@ Session::Session(QObject *parent) : QObject(parent)
     });
     connect(&m_bridge, &QProcess::readyReadStandardOutput, this, &Session::readBridgeEvents);
     connect(&m_bridge, &QProcess::readyReadStandardError, this, [this] {
-        emit log("[桥接] " + QString::fromUtf8(m_bridge.readAllStandardError()).trimmed());
+        emit log(qtTrId("otg.log.bridge_prefix") + QString::fromUtf8(m_bridge.readAllStandardError()).trimmed());
     });
     m_server.setProcessChannelMode(QProcess::MergedChannels);
     connect(&m_server, &QProcess::readyReadStandardOutput, this, [this] {
@@ -55,13 +56,13 @@ Session::Session(QObject *parent) : QObject(parent)
     });
     connect(&m_bridge, &QProcess::errorOccurred, this, [this](QProcess::ProcessError e) {
         if (e == QProcess::FailedToStart) {
-            fail("桥接启动失败：" + m_bridge.errorString());
+            fail("otg.error.bridge_start", m_bridge.errorString());
             stopServer();
         }
     });
     connect(&m_server, &QProcess::errorOccurred, this, [this](QProcess::ProcessError e) {
         if (e == QProcess::FailedToStart) {
-            fail("Deskflow 启动失败：" + m_server.errorString());
+            fail("otg.error.deskflow_start", m_server.errorString());
             finishStop();
         }
     });
@@ -69,21 +70,31 @@ Session::Session(QObject *parent) : QObject(parent)
         m_killBridge.stop();
         readBridgeEvents();
         if (m_state != State::Stopping)
-            fail(QString("桥接已退出（%1），请查看日志。").arg(code));
+            fail("otg.error.bridge_exited", QString::number(code));
         stopServer();
     });
     connect(&m_server, &QProcess::finished, this, [this](int code, QProcess::ExitStatus) {
         m_killServer.stop();
         if (m_state != State::Stopping)
-            fail(QString("Deskflow 已退出（%1），请查看权限、端口及配置日志。").arg(code));
+            fail("otg.error.deskflow_exited", QString::number(code));
         finishStop();
     });
 }
 
-void Session::setState(State state, const QString &message)
+QString Session::statusMessage() const
+{
+    if (m_statusId.isEmpty())
+        return {};
+    const auto message = qtTrId(m_statusId.constData());
+    return message.contains("%1") ? message.arg(m_statusDetail) : message;
+}
+
+void Session::setState(State state, const char *id, const QString &detail)
 {
     m_state = state;
-    emit changed(state, message);
+    m_statusId = id;
+    m_statusDetail = detail;
+    emit changed(state, statusMessage());
 }
 
 void Session::start(const ConnectionOptions &options)
@@ -91,14 +102,15 @@ void Session::start(const ConnectionOptions &options)
     if (m_state != State::Idle)
         return;
     m_options = options;
-    m_failure.clear();
+    m_failureId.clear();
+    m_failureDetail.clear();
     m_events.clear();
     const auto generation = ++m_generation;
-    setState(State::Starting, "正在连接…");
+    setState(State::Starting, "otg.status.connecting");
     if (options.serial.isEmpty() || !validScreenName(options.phone) ||
         options.host.trimmed().isEmpty() || options.port < 1 || options.port > 65535 ||
         options.width < 1 || options.width > 32767 || options.height < 1 || options.height > 32767) {
-        fail("设备序列号、屏幕名称、主机或尺寸无效。");
+        fail("otg.error.invalid_options");
         return;
     }
     m_deadline.start(30000);
@@ -109,7 +121,7 @@ void Session::start(const ConnectionOptions &options)
     // Bind before spawning; don't accidentally use an already-running server.
     QTcpServer portCheck;
     if (!portCheck.listen(QHostAddress::LocalHost, quint16(options.port))) {
-        fail("端口已被占用：停止原 Deskflow 服务、修改端口，或选择连接已有服务。");
+        fail("otg.error.port_in_use");
         return;
     }
     runCommand(this, options.deskflow, {"--help"},
@@ -117,10 +129,10 @@ void Session::start(const ConnectionOptions &options)
         if (generation != m_generation || m_state != State::Starting)
             return;
         if (!ok) {
-            fail("无法检测 Deskflow 启动参数：" + help);
+            fail("otg.error.deskflow_probe", help);
             return;
         }
-        emit log("[Deskflow 参数检测]\n" + help);
+        emit log(qtTrId("otg.log.deskflow_probe") + help);
         launchServer(help);
     });
 }
@@ -130,14 +142,14 @@ void Session::launchServer(const QString &help)
     const auto config = serverConfiguration(m_options.computer, m_options.phone,
                                             m_options.direction);
     if (config.isEmpty() || !m_configDir.isValid()) {
-        fail("电脑/手机名称必须不同，且仅包含字母、数字、下划线、点或连字符。");
+        fail("otg.error.screen_names");
         return;
     }
     const QString layout = m_configDir.filePath("screens.conf");
     QFile file(layout);
     const auto bytes = config.toUtf8();
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) || file.write(bytes) != bytes.size()) {
-        fail("无法写入 Deskflow 屏幕配置：" + file.errorString());
+        fail("otg.error.write_layout", file.errorString());
         return;
     }
     file.close();
@@ -157,7 +169,7 @@ void Session::launchServer(const QString &help)
     settings.setValue("log/level", 3); // INFO
     settings.sync();
     if (settings.status() != QSettings::NoError) {
-        fail("无法写入 Deskflow 启动设置。");
+        fail("otg.error.write_settings");
         return;
     }
     QStringList args;
@@ -176,14 +188,14 @@ void Session::launchServer(const QString &help)
             // with --enable-crypto. Its ArgsBase::m_enableCrypto is false.
         }
         else {
-            fail("此 Deskflow 启动接口无法显式关闭 TLS，请使用连接已有服务模式。");
+            fail("otg.error.disable_tls");
             return;
         }
     } else {
-        fail("未识别的 Deskflow 启动接口。请选择 deskflow-core / deskflow-server，或连接已有服务。");
+        fail("otg.error.deskflow_interface");
         return;
     }
-    emit log("使用独立屏幕配置：\n" + config);
+    emit log(qtTrId("otg.log.screen_config") + config);
     m_server.start(m_options.deskflow, args);
 }
 
@@ -191,7 +203,7 @@ void Session::launchBridge()
 {
     if (m_bridge.state() != QProcess::NotRunning)
         return;
-    emit log("正在初始化 USB HID 并等待 Deskflow 接受屏幕…");
+    emit log(qtTrId("otg.log.usb_initializing"));
     m_bridge.start(m_options.bridge,
                   {"--gui", "--host", m_options.manageServer ? "127.0.0.1" : m_options.host,
                    "--port", QString::number(m_options.port), "--name", m_options.phone,
@@ -203,7 +215,7 @@ void Session::readBridgeEvents()
 {
     m_events += m_bridge.readAllStandardOutput();
     if (m_events.size() > 65536) {
-        fail("桥接状态输出无效。");
+        fail("otg.error.bridge_output");
         m_events.clear();
         return;
     }
@@ -214,18 +226,21 @@ void Session::readBridgeEvents()
         const auto event = QJsonDocument::fromJson(line).object().value("event").toString();
         if (event == "connected" && m_state == State::Starting) {
             m_deadline.stop();
-            setState(State::Connected, "已连接 — 将鼠标移到手机一侧即可控制");
+            setState(State::Connected, "otg.status.connected");
         } else if (event == "usb-ready") {
-            emit log("USB HID 已就绪。");
+            emit log(qtTrId("otg.log.usb_ready"));
         }
     }
 }
 
-void Session::fail(const QString &message)
+void Session::fail(const char *id, const QString &detail)
 {
-    if (m_failure.isEmpty())
-        m_failure = message;
-    emit log(message);
+    if (m_failureId.isEmpty()) {
+        m_failureId = id;
+        m_failureDetail = detail;
+    }
+    const auto text = qtTrId(id);
+    emit log(text.contains("%1") ? text.arg(detail) : text);
     stop();
 }
 
@@ -237,7 +252,7 @@ void Session::stop()
     m_retry.stop();
     m_deadline.stop();
     m_probe.abort();
-    setState(State::Stopping, "正在释放键鼠并断开…");
+    setState(State::Stopping, "otg.status.disconnecting");
     if (m_bridge.state() != QProcess::NotRunning) {
         m_bridge.write("stop\n");
         m_bridge.closeWriteChannel();
@@ -264,5 +279,5 @@ void Session::finishStop()
         return;
     m_killBridge.stop();
     m_killServer.stop();
-    setState(State::Idle, m_failure.isEmpty() ? "已断开" : m_failure);
+    setState(State::Idle, m_failureId.isEmpty() ? "otg.status.disconnected" : m_failureId.constData(), m_failureDetail);
 }

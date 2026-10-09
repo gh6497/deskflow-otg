@@ -61,13 +61,27 @@ vcpkg install libusb:x64-windows-static
 
 命令行桥接不需要 Qt、不需要 FFmpeg、不需要 SDL —— 这就是本程序相对于"直接链接 deskflow/scrcpy
 库"的主要优势（scrcpy 的 `common.h → compat.h` 会拖入 FFmpeg 头文件，deskflow 会拖入 Qt）。
-可选 GUI 另需 C++17 编译器和 Qt 6.8+（Widgets、Network，测试另需 Test 模块）。
+可选 GUI 另需 C++17 编译器和 Qt 6.8+（Widgets、Network、LinguistTools，测试另需 Test 模块）。
 
 ## 桌面 GUI
 
 支持 Windows x64、Linux x86_64、macOS Intel / Apple Silicon。GUI 发布包包含桥接程序、
 Qt 运行库和 ADB 36.0.2；**不包含 Deskflow**，请自行安装。GUI 启动时优先发现自带 ADB，
 也可以在界面指定外部 ADB。
+
+GUI 支持中文和英文，可在窗口右上角切换，立即生效并自动保存。首次启动跟随系统语言
+（中文系统使用中文，其他系统使用英文）。切换语言不会改变设备、连接参数或中断连接；
+已有日志和 ADB / Deskflow / 桥接子进程的原始输出不重新翻译。
+使用 Qt 官方 ID 式国际化，代码通过 `qtTrId("otg.action.connect")` 等稳定 ID 引用文案。
+中英文分别维护在 `gui/translations/deskflow_otg_zh_CN.xml` 和 `deskflow_otg_en.xml`，
+构建时使用 `lrelease -idbased -nounfinished` 编译并嵌入程序，无需额外复制翻译文件。
+英文目录始终作为回退层，中文翻译缺失时显示英文，而不是直接显示 ID。
+
+文件内容仍采用 Qt TS XML 格式，使用 `.xml` 后缀以避免 IDE 将其误识别为 TypeScript。
+新增文案时，在两个 `.xml` 中添加相同的 `<message id="otg.…">`，`<source>` 统一使用英文，
+`<translation>` 分别填写中英文；修改文案不需要修改 ID。目录直接维护或用 Qt Linguist 编辑，
+不从代码运行 `lupdate` 重新生成（代码不包含源文案）。`gui_logic` 测试检查 ID 唯一性、
+双语覆盖、代码引用、占位符和编译后实际查找结果。
 
 ### 使用流程
 
