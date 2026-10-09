@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE TS>
+<TS version="2.1" language="en" sourcelanguage="en">
+<context>
+  <name></name>
+  <message id="otg.label.language"><source>Language</source><translation>Language</translation></message>
+  <message id="otg.language.chinese"><source>中文</source><translation>中文</translation></message>
+  <message id="otg.language.english"><source>English</source><translation>English</translation></message>
+  <message id="otg.action.browse"><source>Browse…</source><translation>Browse…</translation></message>
+  <message id="otg.dialog.select_executable"><source>Select executable</source><translation>Select executable</translation></message>
+  <message id="otg.window.title"><source>Deskflow OTG · Android keyboard and mouse bridge</source><translation>Deskflow OTG · Android keyboard and mouse bridge</translation></message>
+  <message id="otg.window.intro"><source>Share your computer's keyboard and mouse with Android over USB</source><translation>Share your computer's keyboard and mouse with Android over USB</translation></message>
+  <message id="otg.section.device"><source>1  Select phone</source><translation>1  Select phone</translation></message>
+  <message id="otg.device.manual"><source>Enter USB serial number manually</source><translation>Enter USB serial number manually</translation></message>
+  <message id="otg.action.refresh"><source>Refresh devices</source><translation>Refresh devices</translation></message>
+  <message id="otg.label.device"><source>Device</source><translation>Device</translation></message>
+  <message id="otg.label.usb_serial"><source>USB serial number</source><translation>USB serial number</translation></message>
+  <message id="otg.device.debugging_required"><source>Automatic detection requires USB debugging and authorization on your phone.</source><translation>Automatic detection requires USB debugging and authorization on your phone.</translation></message>
+  <message id="otg.action.swap_dimensions"><source>Swap dimensions</source><translation>Swap dimensions</translation></message>
+  <message id="otg.label.original_size"><source>Original screen size</source><translation>Original screen size</translation></message>
+  <message id="otg.sensitivity.tooltip"><source>Virtual size = original size ÷ multiplier (rounded). Higher values reduce mouse travel; 1× restores the original size. Applies only to absolute mode.</source><translation>Virtual size = original size ÷ multiplier (rounded). Higher values reduce mouse travel; 1× restores the original size. Applies only to absolute mode.</translation></message>
+  <message id="otg.label.sensitivity"><source>Sensitivity multiplier</source><translation>Sensitivity multiplier</translation></message>
+  <message id="otg.label.virtual_size"><source>Effective virtual size</source><translation>Effective virtual size</translation></message>
+  <message id="otg.section.connection"><source>2  Deskflow connection</source><translation>2  Deskflow connection</translation></message>
+  <message id="otg.server.manage"><source>Configure and start local Deskflow automatically</source><translation>Configure and start local Deskflow automatically</translation></message>
+  <message id="otg.position.right"><source>Phone to the right of computer</source><translation>Phone to the right of computer</translation></message>
+  <message id="otg.position.left"><source>Phone to the left of computer</source><translation>Phone to the left of computer</translation></message>
+  <message id="otg.position.up"><source>Phone above computer</source><translation>Phone above computer</translation></message>
+  <message id="otg.position.down"><source>Phone below computer</source><translation>Phone below computer</translation></message>
+  <message id="otg.label.position"><source>Screen position</source><translation>Screen position</translation></message>
+  <message id="otg.label.computer_name"><source>Computer screen name</source><translation>Computer screen name</translation></message>
+  <message id="otg.label.phone_name"><source>Phone screen name</source><translation>Phone screen name</translation></message>
+  <message id="otg.label.server_address"><source>Server address</source><translation>Server address</translation></message>
+  <message id="otg.label.server_port"><source>Server port</source><translation>Server port</translation></message>
+  <message id="otg.section.programs"><source>Programs and mode</source><translation>Programs and mode</translation></message>
+  <message id="otg.path.adb_hint"><source>Use bundled ADB by default, or select an external executable</source><translation>Use bundled ADB by default, or select an external executable</translation></message>
+  <message id="otg.path.deskflow_hint"><source>Select an installed deskflow-core or deskflow-server</source><translation>Select an installed deskflow-core or deskflow-server</translation></message>
+  <message id="otg.mouse.absolute"><source>Absolute (recommended)</source><translation>Absolute (recommended)</translation></message>
+  <message id="otg.mouse.relative"><source>Relative (compatibility mode)</source><translation>Relative (compatibility mode)</translation></message>
+  <message id="otg.label.mouse_mode"><source>Mouse mode</source><translation>Mouse mode</translation></message>
+  <message id="otg.status.not_connected"><source>Not connected</source><translation>Not connected</translation></message>
+  <message id="otg.action.connect"><source>Connect</source><translation>Connect</translation></message>
+  <message id="otg.action.disconnect"><source>Disconnect</source><translation>Disconnect</translation></message>
+  <message id="otg.log.placeholder"><source>Runtime logs will appear here</source><translation>Runtime logs will appear here</translation></message>
+  <message id="otg.size.absolute_note"><source> (original size ÷ multiplier; applied on connection)</source><translation> (original size ÷ multiplier; applied on connection)</translation></message>
+  <message id="otg.size.relative_note"><source> (relative mode uses the original size)</source><translation> (relative mode uses the original size)</translation></message>
+  <message id="otg.device.adb_not_found"><source>ADB not found. Select an ADB executable, or enter the USB serial number and dimensions manually.</source><translation>ADB not found. Select an ADB executable, or enter the USB serial number and dimensions manually.</translation></message>
+  <message id="otg.device.adb_failed"><source>ADB detection failed. Retry or enter device information manually.</source><translation>ADB detection failed. Retry or enter device information manually.</translation></message>
+  <message id="otg.device.manual_hint"><source>Manual mode: enter your phone's USB serial number and dimensions in its current orientation. ADB is not required for control.</source><translation>Manual mode: enter your phone's USB serial number and dimensions in its current orientation. ADB is not required for control.</translation></message>
+  <message id="otg.device.authorize_hint"><source>Unlock your phone and authorize USB debugging, then refresh.</source><translation>Unlock your phone and authorize USB debugging, then refresh.</translation></message>
+  <message id="otg.device.offline_hint"><source>Device offline or access denied. Check the USB connection and ADB permissions, then refresh.</source><translation>Device offline or access denied. Check the USB connection and ADB permissions, then refresh.</translation></message>
+  <message id="otg.device.reading"><source>Reading USB transport information and screen size…</source><translation>Reading USB transport information and screen size…</translation></message>
+  <message id="otg.device.usb_unconfirmed"><source>USB transport could not be confirmed. Connect over USB, or verify the USB serial number manually.</source><translation>USB transport could not be confirmed. Connect over USB, or verify the USB serial number manually.</translation></message>
+  <message id="otg.log.usb_path_unavailable"><source>The ADB backend did not provide a device path; the device will be matched by its exact USB serial number on connection.</source><translation>The ADB backend did not provide a device path; the device will be matched by its exact USB serial number on connection.</translation></message>
+  <message id="otg.device.size_failed"><source>Could not read screen size. Enter width and height manually.</source><translation>Could not read screen size. Enter width and height manually.</translation></message>
+  <message id="otg.device.orientation_unknown"><source>Screen size detected, but orientation is unknown. Swap dimensions to match the current orientation.</source><translation>Screen size detected, but orientation is unknown. Swap dimensions to match the current orientation.</translation></message>
+  <message id="otg.device.ready"><source>USB device and oriented screen size detected. Adjust dimensions if needed, or connect.</source><translation>USB device and oriented screen size detected. Adjust dimensions if needed, or connect.</translation></message>
+  <message id="otg.error.bridge_not_found"><source>The deskflow-otg bridge executable was not found beside the GUI. Check your installation.</source><translation>The deskflow-otg bridge executable was not found beside the GUI. Check your installation.</translation></message>
+  <message id="otg.device.online"><source>Online</source><translation>Online</translation></message>
+  <message id="otg.device.unauthorized"><source>Unauthorized</source><translation>Unauthorized</translation></message>
+  <message id="otg.device.offline"><source>Offline</source><translation>Offline</translation></message>
+  <message id="otg.device.access_denied"><source>Access denied</source><translation>Access denied</translation></message>
+  <message id="otg.error.connection_timeout"><source>Connection timed out. Check Deskflow permissions, TLS settings, USB drivers and logs.</source><translation>Connection timed out. Check Deskflow permissions, TLS settings, USB drivers and logs.</translation></message>
+  <message id="otg.log.bridge_killed"><source>The bridge did not exit in time and will be killed. Check the USB device.</source><translation>The bridge did not exit in time and will be killed. Check the USB device.</translation></message>
+  <message id="otg.log.bridge_prefix"><source>[Bridge] </source><translation>[Bridge] </translation></message>
+  <message id="otg.error.bridge_start"><source>Failed to start bridge: %1</source><translation>Failed to start bridge: %1</translation></message>
+  <message id="otg.error.deskflow_start"><source>Failed to start Deskflow: %1</source><translation>Failed to start Deskflow: %1</translation></message>
+  <message id="otg.error.bridge_exited"><source>Bridge exited (%1). Check the logs.</source><translation>Bridge exited (%1). Check the logs.</translation></message>
+  <message id="otg.error.deskflow_exited"><source>Deskflow exited (%1). Check permissions, port and configuration logs.</source><translation>Deskflow exited (%1). Check permissions, port and configuration logs.</translation></message>
+  <message id="otg.status.connecting"><source>Connecting…</source><translation>Connecting…</translation></message>
+  <message id="otg.error.invalid_options"><source>Invalid device serial number, screen name, host or dimensions.</source><translation>Invalid device serial number, screen name, host or dimensions.</translation></message>
+  <message id="otg.error.port_in_use"><source>Port already in use. Stop the existing Deskflow server, change the port, or connect to an existing server.</source><translation>Port already in use. Stop the existing Deskflow server, change the port, or connect to an existing server.</translation></message>
+  <message id="otg.error.deskflow_probe"><source>Could not detect Deskflow startup arguments: %1</source><translation>Could not detect Deskflow startup arguments: %1</translation></message>
+  <message id="otg.log.deskflow_probe"><source>[Deskflow argument detection]
+</source><translation>[Deskflow argument detection]
+</translation></message>
+  <message id="otg.error.screen_names"><source>Computer and phone names must differ and contain only letters, digits, underscores, dots or hyphens.</source><translation>Computer and phone names must differ and contain only letters, digits, underscores, dots or hyphens.</translation></message>
+  <message id="otg.error.write_layout"><source>Could not write Deskflow screen configuration: %1</source><translation>Could not write Deskflow screen configuration: %1</translation></message>
+  <message id="otg.error.write_settings"><source>Could not write Deskflow startup settings.</source><translation>Could not write Deskflow startup settings.</translation></message>
+  <message id="otg.error.disable_tls"><source>This Deskflow startup interface cannot explicitly disable TLS. Connect to an existing server instead.</source><translation>This Deskflow startup interface cannot explicitly disable TLS. Connect to an existing server instead.</translation></message>
+  <message id="otg.error.deskflow_interface"><source>Unrecognized Deskflow startup interface. Select deskflow-core / deskflow-server, or connect to an existing server.</source><translation>Unrecognized Deskflow startup interface. Select deskflow-core / deskflow-server, or connect to an existing server.</translation></message>
+  <message id="otg.log.screen_config"><source>Using an independent screen configuration:
+</source><translation>Using an independent screen configuration:
+</translation></message>
+  <message id="otg.log.usb_initializing"><source>Initializing USB HID and waiting for Deskflow to accept the screen…</source><translation>Initializing USB HID and waiting for Deskflow to accept the screen…</translation></message>
+  <message id="otg.error.bridge_output"><source>Invalid bridge status output.</source><translation>Invalid bridge status output.</translation></message>
+  <message id="otg.status.connected"><source>Connected — move the mouse toward the phone to control it</source><translation>Connected — move the mouse toward the phone to control it</translation></message>
+  <message id="otg.log.usb_ready"><source>USB HID is ready.</source><translation>USB HID is ready.</translation></message>
+  <message id="otg.status.disconnecting"><source>Releasing keyboard and mouse and disconnecting…</source><translation>Releasing keyboard and mouse and disconnecting…</translation></message>
+  <message id="otg.status.disconnected"><source>Disconnected</source><translation>Disconnected</translation></message>
+  <message id="otg.error.command_output"><source>Command output too large</source><translation>Command output too large</translation></message>
+  <message id="otg.error.command_timeout"><source>Command timed out</source><translation>Command timed out</translation></message>
+</context>
+</TS>

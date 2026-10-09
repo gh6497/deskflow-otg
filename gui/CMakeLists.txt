@@ -1,13 +1,26 @@
-find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets Network)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets Network LinguistTools)
 qt_standard_project_setup()
 
 add_library(otg_gui_support STATIC
   device_info.cpp device_info.h
   process_utils.cpp process_utils.h
   session.cpp session.h
+  i18n.cpp i18n.h
 )
 target_include_directories(otg_gui_support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(otg_gui_support PUBLIC Qt6::Network)
+# Keep all display text in the two catalogs; code references stable IDs only.
+# Catalogs are maintained explicitly, not regenerated from source literals.
+qt_add_lrelease(otg_gui_support
+  TS_FILES translations/deskflow_otg_en.xml translations/deskflow_otg_zh_CN.xml
+  OPTIONS -idbased -nounfinished
+  QM_FILES_OUTPUT_VARIABLE otg_qm_files
+)
+qt_add_resources(otg_gui_support otg_translations
+  PREFIX /i18n
+  BASE "${CMAKE_CURRENT_BINARY_DIR}"
+  FILES ${otg_qm_files}
+)
 
 qt_add_executable(deskflow-otg-gui WIN32 MACOSX_BUNDLE
   main.cpp main_window.cpp main_window.h
@@ -77,6 +90,24 @@ if(BUILD_TESTING)
   target_link_libraries(test_peer PRIVATE Qt6::Network Threads::Threads)
   qt_add_executable(test_gui ../tests/test_gui.cpp)
   target_link_libraries(test_gui PRIVATE otg_gui_support Qt6::Test)
+  qt_add_resources(test_gui i18n_test_inputs
+    PREFIX /i18n-test
+    BASE "${PROJECT_SOURCE_DIR}"
+    FILES translations/deskflow_otg_en.xml translations/deskflow_otg_zh_CN.xml
+  )
+  # Copy reference inputs as text: adding .cpp directly to a resource would mark
+  # those shared sources HEADER_FILE_ONLY and remove them from other targets.
+  set(i18n_test_sources)
+  foreach(name main_window.cpp session.cpp process_utils.cpp)
+    set(input "${CMAKE_CURRENT_BINARY_DIR}/i18n-test/${name}.txt")
+    configure_file("${name}" "${input}" COPYONLY)
+    list(APPEND i18n_test_sources "${input}")
+  endforeach()
+  qt_add_resources(test_gui i18n_test_sources
+    PREFIX /i18n-test/gui
+    BASE "${CMAKE_CURRENT_BINARY_DIR}/i18n-test"
+    FILES ${i18n_test_sources}
+  )
   qt_add_executable(test_window ../tests/test_window.cpp main_window.cpp main_window.h)
   target_link_libraries(test_window PRIVATE otg_gui_support Qt6::Widgets Qt6::Test)
   add_dependencies(test_gui test_peer)

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "main_window.h"
+#include "i18n.h"
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QLabel>
@@ -14,6 +15,76 @@
 class WindowTest : public QObject {
     Q_OBJECT
 private slots:
+    void defaultLanguage_data()
+    {
+        QTest::addColumn<QString>("savedLanguage");
+        QTest::newRow("first-launch") << QString();
+        QTest::newRow("invalid-setting") << QString("unsupported");
+    }
+    void defaultLanguage()
+    {
+        QFETCH(QString, savedLanguage);
+        QTemporaryDir settingsDir;
+        QVERIFY(settingsDir.isValid());
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDir.path());
+        QCoreApplication::setOrganizationName("otg-test");
+        QCoreApplication::setApplicationName("default-language-test");
+        QSettings settings;
+        settings.setValue("adb", "");
+        if (!savedLanguage.isEmpty())
+            settings.setValue("language", savedLanguage);
+        MainWindow window;
+        QCOMPARE(window.findChild<QComboBox *>("languageSelector")->currentData().toString(),
+                 LanguageManager::systemLanguage());
+        window.close();
+    }
+    void languageSwitching()
+    {
+        QTemporaryDir settingsDir;
+        QVERIFY(settingsDir.isValid());
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDir.path());
+        QCoreApplication::setOrganizationName("otg-test");
+        QCoreApplication::setApplicationName("language-test");
+        QSettings settings;
+        settings.setValue("language", "en");
+        settings.setValue("adb", "");
+        MainWindow window;
+        window.show();
+        auto *language = window.findChild<QComboBox *>("languageSelector");
+        auto *button = window.findChild<QPushButton *>("connectButton");
+        auto *width = window.findChild<QSpinBox *>("screenWidth");
+        auto *mode = window.findChild<QComboBox *>("mouseMode");
+        QVERIFY(language && button && width && mode);
+        QCOMPARE(language->currentData().toString(), "en");
+        QCOMPARE(button->text(), "Connect");
+        QTRY_VERIFY(window.findChildren<QLabel *>().size() > 0);
+        width->setValue(1234);
+        mode->setCurrentIndex(mode->findData("relative"));
+        language->setCurrentIndex(language->findData("zh_CN"));
+        QCOMPARE(button->text(), "连接");
+        QCOMPARE(mode->currentText(), "相对坐标（兼容模式）");
+        QCOMPARE(width->value(), 1234);
+        QCOMPARE(mode->currentData().toString(), "relative");
+        QCOMPARE(settings.value("language").toString(), "zh_CN");
+        language->setCurrentIndex(language->findData("en"));
+        QCOMPARE(button->text(), "Connect");
+        QCOMPARE(mode->currentText(), "Relative (compatibility mode)");
+        QTRY_VERIFY([&window] {
+            for (auto *label : window.findChildren<QLabel *>()) {
+                if (label->text().startsWith("ADB not found."))
+                    return true;
+            }
+            return false;
+        }());
+        QCOMPARE(width->value(), 1234);
+        window.close();
+        MainWindow restored;
+        QCOMPARE(restored.findChild<QComboBox *>("languageSelector")->currentData().toString(), "en");
+        QCOMPARE(restored.findChild<QPushButton *>("connectButton")->text(), "Connect");
+        restored.close();
+    }
     void discoverAndRender_data()
     {
         QTest::addColumn<bool>("noDevpath");
@@ -40,6 +111,7 @@ private slots:
         QSettings settings;
         settings.setValue("adb", peer);
         settings.setValue("deskflow", peer);
+        settings.setValue("language", "zh_CN");
         MainWindow window;
         window.show();
         auto *width = window.findChild<QSpinBox *>("screenWidth");
@@ -51,6 +123,24 @@ private slots:
         QCOMPARE(height->value(), 720);
         QCOMPARE(serial->text(), "TEST123");
         QVERIFY(connectButton->isEnabled());
+        auto *language = window.findChild<QComboBox *>("languageSelector");
+        QVERIFY(language);
+        language->setCurrentIndex(language->findData("en"));
+        QCOMPARE(connectButton->text(), "Connect");
+        QCOMPARE(serial->text(), "TEST123");
+        QCOMPARE(width->value(), 1600);
+        QTRY_VERIFY([&window] {
+            for (auto *label : window.findChildren<QLabel *>()) {
+                if (!label->wordWrap() && label->width() < label->minimumSizeHint().width())
+                    return false;
+            }
+            return true;
+        }());
+        const QString englishCapture = qEnvironmentVariable("OTG_TEST_SCREENSHOT_EN");
+        if (!englishCapture.isEmpty())
+            QVERIFY(window.grab().save(englishCapture));
+        language->setCurrentIndex(language->findData("zh_CN"));
+        QCOMPARE(connectButton->text(), "连接");
         auto *multiplier = window.findChild<QDoubleSpinBox *>("sensitivityMultiplier");
         auto *virtualSize = window.findChild<QLabel *>("virtualScreenSize");
         auto *swap = window.findChild<QPushButton *>("swapDimensions");

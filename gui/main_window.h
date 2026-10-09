@@ -4,10 +4,12 @@
 #include "device_info.h"
 #include "session.h"
 #include <QMainWindow>
+#include <QPointer>
 
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
+class QFormLayout;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
@@ -19,7 +21,16 @@ public:
     MainWindow();
 protected:
     void closeEvent(QCloseEvent *event) override;
+    void changeEvent(QEvent *event) override;
 private:
+    void setTranslatedProperty(QObject *object, const char *property, const char *id);
+    template<class T> T *translated(T *object, const char *property, const char *id)
+    {
+        setTranslatedProperty(object, property, id);
+        return object;
+    }
+    void addTranslatedRow(QFormLayout *form, const char *id, QWidget *field);
+    void retranslateUi();
     void refreshDevices();
     void readDevice();
     void connectDevice();
@@ -28,7 +39,14 @@ private:
     QSize virtualScreenSize() const;
     void updateVirtualSize();
     void appendLog(const QString &text);
-    QWidget *pathField(QLineEdit *&field, const QString &placeholder);
+    QWidget *pathField(QLineEdit *&field, const char *placeholderId);
+    struct TextBinding {
+        QPointer<QObject> object;
+        QByteArray property;
+        QByteArray id;
+    };
+    QList<TextBinding> m_textBindings;
+    QComboBox *m_language;
     Session m_session;
     QWidget *m_form;
     QComboBox *m_devices, *m_direction, *m_mouseMode;
@@ -42,6 +60,8 @@ private:
     QPlainTextEdit *m_log;
     QList<AndroidDevice> m_deviceList;
     bool m_scanning = false;
+    bool m_uiReady = false;
+    bool m_sessionStatus = false;
     bool m_closing = false;
     quint64 m_request = 0;
 };
