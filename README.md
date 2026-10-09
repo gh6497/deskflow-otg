@@ -173,8 +173,23 @@ git push origin v0.1.0
 
 普通分支提交和 PR 构建 CLI、GUI、测试并检查桌面包部署，不会创建 Release。
 标签发布同时提供 `deskflow-otg-*` 命令行包和 `deskflow-otg-gui-*` 桌面包。
-Linux 包运行时需要安装 libusb-1.0
-运行库；macOS 包运行时需要先 `brew install libusb`。Windows 包使用静态链接的 libusb。
+Linux CLI 包运行时需要安装 libusb-1.0 运行库；macOS CLI 压缩包运行时需要先
+`brew install libusb`。Windows 包使用静态链接的 libusb。
+
+macOS GUI 发布版另提供 `deskflow-otg-gui-macos-arm64.dmg` 和
+`deskflow-otg-gui-macos-x86_64.dmg`。选择与 Mac 架构匹配的镜像，打开后将
+`deskflow-otg-gui.app` 拖入「Applications」即可安装；App 内含桥接程序、Qt、libusb、
+ADB 和依赖许可证，但不包含 Deskflow。无需为 GUI 安装 Homebrew libusb（单独的 CLI
+压缩包仍需要）。当前镜像未签名、公证，首次打开可能被 macOS Gatekeeper 拦截；确认来源后
+可在「系统设置 → 隐私与安全性」中选择「仍要打开」。本地制作镜像：
+
+```bash
+python3 scripts/package_dmg.py --stage stage \
+    --output dist/deskflow-otg-gui-macos-arm64.dmg
+```
+
+先按上文以 `BUILD_GUI=ON` 构建、安装到 `stage`，下载 ADB 并收集许可证；输出文件名的
+架构应与构建机器一致。镜像仅提供拖拽安装，不会修改系统设置或自动安装 Deskflow。
 
 Linux GUI 发布版还提供 `.deb`（amd64），包含 GUI、GUI 必需的桥接程序及发布目录中的 Qt/ADB，
 不单独打包或安装 CLI 命令。安装后可从应用菜单启动，或运行 `deskflow-otg-gui`；仍需自行安装
