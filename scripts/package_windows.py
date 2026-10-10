@@ -6,6 +6,10 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+if __package__:
+    from .package_version import package_version
+else:
+    from package_version import package_version
 
 
 DOCS = ("LICENSE", "README.md", "THIRD_PARTY.md")
@@ -87,18 +91,20 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--stage', type=pathlib.Path, required=True)
     parser.add_argument('--output', type=pathlib.Path, required=True)
-    parser.add_argument('--version', required=True)
+    parser.add_argument('--version', help='Optional check against the staged build version')
     args = parser.parse_args()
     if sys.platform != 'win32':
         parser.error('NSIS packaging requires Windows')
-    if not args.version or any(c in args.version for c in ('$', '"', '\n', '\r')):
-        parser.error('invalid version')
     stage = args.stage.resolve()
+    try:
+        version = package_version(stage, args.version)
+    except ValueError as exc:
+        parser.error(str(exc))
     output = args.output.resolve()
     if stage == output or stage in output.parents:
         parser.error('--output must be outside --stage')
     try:
-        script = make_script(stage, output, args.version)
+        script = make_script(stage, output, version)
     except ValueError as exc:
         parser.error(str(exc))
     output.parent.mkdir(parents=True, exist_ok=True)

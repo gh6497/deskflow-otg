@@ -3,23 +3,28 @@
 
 import argparse
 import pathlib
-import re
 import shutil
 import subprocess
 import tempfile
+if __package__:
+    from .package_version import package_version
+else:
+    from package_version import package_version
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stage", type=pathlib.Path, required=True,
                         help="absolute-prefix directory produced by cmake --install")
-    parser.add_argument("--version", required=True, help="Debian package version, e.g. 0.1.0")
+    parser.add_argument("--version", help="Optional check against the staged build version")
     parser.add_argument("--output", type=pathlib.Path, required=True, help="output .deb path")
     args = parser.parse_args()
 
-    if not re.fullmatch(r"[0-9][A-Za-z0-9.+:~\-]*", args.version):
-        parser.error("--version must be a valid Debian version starting with a digit")
     stage = args.stage.resolve()
+    try:
+        version = package_version(stage, args.version)
+    except ValueError as exc:
+        parser.error(str(exc))
     if not (stage / "bin/deskflow-otg-gui").is_file() or not (stage / "bin/deskflow-otg").is_file():
         parser.error("--stage must contain bin/deskflow-otg-gui and bin/deskflow-otg "
                      "(build with BUILD_GUI=ON and run cmake --install first)")
@@ -57,7 +62,7 @@ def main():
         dependencies = ("libusb-1.0-0, libc6, libstdc++6, libgl1, libegl1, "
                         "libx11-6, libxcb1, libxkbcommon0, libxcb-cursor0")
         (control / "control").write_text(
-            f"Package: deskflow-otg-gui\nVersion: {args.version}\nArchitecture: {arch}\n"
+            f"Package: deskflow-otg-gui\nVersion: {version}\nArchitecture: {arch}\n"
             "Maintainer: deskflow-otg contributors <noreply@github.com>\n"
             f"Depends: {dependencies}\n"
             "Section: utils\nPriority: optional\n"

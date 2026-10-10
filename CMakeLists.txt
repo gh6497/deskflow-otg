@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.16)
-project(deskflow-otg C)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" OTG_BASE_VERSION)
+string(STRIP "${OTG_BASE_VERSION}" OTG_BASE_VERSION)
+if(NOT OTG_BASE_VERSION MATCHES "^[0-9]+[.][0-9]+[.][0-9]+$")
+  message(FATAL_ERROR "VERSION must contain a major.minor.patch version")
+endif()
+project(deskflow-otg VERSION ${OTG_BASE_VERSION} LANGUAGES C)
+include(cmake/Version.cmake)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -67,6 +73,7 @@ add_executable(deskflow-otg
 )
 
 target_include_directories(deskflow-otg PRIVATE
+  "${PROJECT_BINARY_DIR}/generated"
   src
   ${LIBUSB_INCLUDE_DIR}
 )
@@ -98,9 +105,13 @@ if(BUILD_TESTING)
     endif()
   endif()
   add_test(NAME socket_io COMMAND test_socket)
+  add_test(NAME cli_version COMMAND deskflow-otg --version)
+  set_tests_properties(cli_version PROPERTIES
+    PASS_REGULAR_EXPRESSION "deskflow-otg ${PROJECT_VERSION}")
 endif()
 
 install(TARGETS deskflow-otg RUNTIME DESTINATION bin)
+install(FILES "${PROJECT_BINARY_DIR}/BUILD_VERSION.txt" DESTINATION share/deskflow-otg)
 
 option(BUILD_GUI "Build the Qt desktop application" OFF)
 if(BUILD_GUI)

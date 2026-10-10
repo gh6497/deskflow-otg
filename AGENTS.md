@@ -19,6 +19,11 @@
 
 ## 构建与运行
 
+- CLI/GUI 版本统一来自根目录 `VERSION`，由 `cmake/Version.cmake` 配置生成 `build_version.h`。
+  开发版追加 Git 提交与 tracked dirty 状态，正式版通过 `OTG_RELEASE_TAG` 校验标签与基础版本。
+  修改提交/源码后重新配置 CMake 更新版本。安装 `BUILD_VERSION.txt` 供 DEB/Windows 打包默认读取，
+  手动 `--version` 必须与已安装构建一致。CLI/GUI 均支持 `--version`，GUI 有双语「关于」。
+
 ```bash
 # 依赖：gcc/clang (C11)、cmake、libusb-1.0（开发包）
 sudo apt install build-essential cmake libusb-1.0-0-dev
@@ -158,7 +163,7 @@ sh /tmp/opencode/mouse-regression/run.sh
 所有源文件应保持 `-Wall -Wextra -Werror` 干净：
 
 ```bash
-for f in src/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only -Isrc "$f"; done
+for f in src/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only -Isrc -Ibuild/generated "$f"; done
 ```
 
 ## 约束与已知限制

@@ -3,6 +3,9 @@
 <TS version="2.1" language="zh_CN" sourcelanguage="en">
 <context>
   <name></name>
+  <message id="otg.action.about"><source>About</source><translation>关于</translation></message>
+  <message id="otg.about.title"><source>About Deskflow OTG</source><translation>关于 Deskflow OTG</translation></message>
+  <message id="otg.about.text"><source>Deskflow OTG&#10;Version: %1&#10;Git commit: %2&#10;&#10;Share your keyboard and mouse with Android over USB.&#10;CLI and GUI use the same software version.&#10;License: Apache-2.0</source><translation>Deskflow OTG&#10;版本：%1&#10;Git 提交：%2&#10;&#10;通过 USB 与安卓共享键盘鼠标。&#10;命令行与 GUI 使用相同的软件版本。&#10;许可证：Apache-2.0</translation></message>
   <message id="otg.tray.show"><source>Show window</source><translation>显示窗口</translation></message>
   <message id="otg.tray.quit"><source>Quit</source><translation>退出</translation></message>
   <message id="otg.label.language"><source>Language</source><translation>语言</translation></message>

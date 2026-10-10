@@ -49,10 +49,10 @@ jobs:
         run: python scripts/fetch_adb.py --output adb-bundle
       - name: Configure
         if: runner.os != 'Windows'
-        run: cmake -S . -B build -DBUILD_GUI=ON -DADB_BUNDLE_DIR="$PWD/adb-bundle/platform-tools" -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-Wall -Wextra -Werror" -DCMAKE_CXX_FLAGS="-Wall -Wextra -Werror"
+        run: cmake -S . -B build -DBUILD_GUI=ON -DOTG_RELEASE_TAG="${{ github.ref_type == 'tag' && github.ref_name || '' }}" -DADB_BUNDLE_DIR="$PWD/adb-bundle/platform-tools" -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-Wall -Wextra -Werror" -DCMAKE_CXX_FLAGS="-Wall -Wextra -Werror"
       - name: Configure Windows with vcpkg
         if: runner.os == 'Windows'
-        run: cmake -S . -B build -DBUILD_GUI=ON -DADB_BUNDLE_DIR="$pwd/adb-bundle/platform-tools" -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static
+        run: cmake -S . -B build -DBUILD_GUI=ON -DOTG_RELEASE_TAG="${{ github.ref_type == 'tag' && github.ref_name || '' }}" -DADB_BUNDLE_DIR="$pwd/adb-bundle/platform-tools" -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static
       - name: Build
         run: cmake --build build --config Release --parallel
       - name: Test
@@ -72,6 +72,11 @@ jobs:
         run: python -m unittest discover -s tests -p test_package_dmg.py
       - name: Test Windows installer layout
         run: python -m unittest discover -s tests -p test_package_windows.py
+      - name: Test build version packaging
+        run: python -m unittest discover -s tests -p test_package_version.py
+      - name: Test Debian desktop integration
+        if: runner.os == 'Linux'
+        run: python -m unittest discover -s tests -p test_package_deb.py
       - name: Install NSIS (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -83,8 +88,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.Substring(1) } else { '0.0.0-ci' }
-          python scripts/package_windows.py --stage stage --version $version --output "dist/deskflow-otg-gui-windows-x86_64-setup.exe"
+          python scripts/package_windows.py --stage stage --output "dist/deskflow-otg-gui-windows-x86_64-setup.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (-not (Test-Path "dist/deskflow-otg-gui-windows-x86_64-setup.exe")) { throw 'Installer missing' }
       - name: Smoke test Windows installer
