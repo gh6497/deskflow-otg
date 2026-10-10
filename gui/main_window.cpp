@@ -2,6 +2,7 @@
 #include "main_window.h"
 #include "process_utils.h"
 #include "i18n.h"
+#include "build_version.h"
 
 #include <QCheckBox>
 #include <QAction>
@@ -15,6 +16,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSettings>
@@ -177,6 +179,13 @@ MainWindow::MainWindow() : m_session(this)
     m_language->addItem(qtTrId("otg.language.english"), "en");
     m_language->setCurrentIndex(m_language->findData(languages.language()));
     headingRow->addWidget(m_language);
+    auto *about = translated(new QPushButton, "text", "otg.action.about");
+    about->setObjectName("aboutButton");
+    connect(about, &QPushButton::clicked, this, [this] {
+        QMessageBox::about(this, qtTrId("otg.about.title"),
+            qtTrId("otg.about.text").arg(OTG_VERSION, OTG_COMMIT));
+    });
+    headingRow->addWidget(about);
     root->addLayout(headingRow);
     auto *intro = translated(new QLabel, "text", "otg.window.intro");
     root->addWidget(intro);

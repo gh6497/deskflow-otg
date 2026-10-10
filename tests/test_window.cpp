@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "main_window.h"
 #include "i18n.h"
+#include "build_version.h"
 #include <QAction>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QSettings>
 #include <QScopeGuard>
@@ -24,6 +26,30 @@ protected:
 class WindowTest : public QObject {
     Q_OBJECT
 private slots:
+    void aboutVersion()
+    {
+        QTemporaryDir settingsDir;
+        QVERIFY(settingsDir.isValid());
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDir.path());
+        QSettings().setValue("adb", "");
+        QSettings().setValue("language", "en");
+        MainWindow window;
+        auto *about = window.findChild<QPushButton *>("aboutButton");
+        QVERIFY(about);
+        bool inspected = false;
+        QTimer::singleShot(0, &window, [&] {
+            auto *dialog = window.findChild<QMessageBox *>();
+            if (dialog) {
+                inspected = dialog->text().contains(OTG_VERSION) &&
+                            dialog->text().contains(OTG_COMMIT) &&
+                            dialog->text().contains("\nVersion:");
+                dialog->accept();
+            }
+        });
+        about->click();
+        QVERIFY(inspected);
+    }
     void trayLifecycle_data()
     {
         QTest::addColumn<bool>("available");

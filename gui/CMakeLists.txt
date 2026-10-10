@@ -8,6 +8,7 @@ add_library(otg_gui_support STATIC
   i18n.cpp i18n.h
 )
 target_include_directories(otg_gui_support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(otg_gui_support PUBLIC "${PROJECT_BINARY_DIR}/generated")
 target_link_libraries(otg_gui_support PUBLIC Qt6::Network)
 # Keep all display text in the two catalogs; code references stable IDs only.
 # Catalogs are maintained explicitly, not regenerated from source literals.
@@ -30,6 +31,8 @@ set_target_properties(deskflow-otg-gui PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
   MACOSX_BUNDLE_GUI_IDENTIFIER "io.github.gh6497.deskflow-otg"
   MACOSX_BUNDLE_BUNDLE_NAME "Deskflow OTG"
+  MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+  MACOSX_BUNDLE_BUNDLE_VERSION "${OTG_BUILD_VERSION}"
 )
 add_dependencies(deskflow-otg-gui deskflow-otg)
 qt_add_resources(deskflow-otg-gui otg_app_icon
@@ -130,5 +133,8 @@ if(BUILD_TESTING)
   endif()
   add_test(NAME gui_logic COMMAND test_gui)
   add_test(NAME gui_window COMMAND test_window)
+  add_test(NAME gui_version COMMAND deskflow-otg-gui --version)
+  set_tests_properties(gui_version PROPERTIES
+    PASS_REGULAR_EXPRESSION "deskflow-otg-gui ${PROJECT_VERSION}")
   set_tests_properties(gui_window PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()

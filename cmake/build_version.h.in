@@ -1,0 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+#ifndef OTG_BUILD_VERSION_H
+#define OTG_BUILD_VERSION_H
+#define OTG_VERSION "@OTG_BUILD_VERSION@"
+#define OTG_COMMIT "@OTG_GIT_COMMIT@"
+#endif

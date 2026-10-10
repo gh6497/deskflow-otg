@@ -127,7 +127,7 @@ Windows 原生 ADB USB 后端可能返回 `unknown` 路径，此时继续读取�
 
 ```bash
 cmake -S . -B build-gui -DBUILD_GUI=ON -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_PREFIX_PATH=/path/to/Qt/6.8.3/gcc_64
+    -DCMAKE_PREFIX_PATH=/path正式发布校验 Git 标签与版本一致。/to/Qt/6.8.3/gcc_64
 cmake --build build-gui --config Release --parallel
 ctest --test-dir build-gui -C Release --output-on-failure
 ```
@@ -179,6 +179,19 @@ Apple Silicon 编译器。构建和 socket 回归测试可用 `ctest --test-dir 
 
 ### 发布预编译包
 
+#### 统一版本管理
+
+CLI 和 GUI 共用仓库根目录的 `VERSION`（当前 `0.1.2`），不单独维护版本。
+`deskflow-otg --version`、`deskflow-otg-gui --version` 和 GUI 右上角「关于」显示版本及 Git 提交号。
+开发构建使用 `0.1.2+git.<提交号>`，已跟踪文件有未提交修改时追加 `.dirty`；无 Git 信息时用 `unknown`。
+版本信息在 CMake 配置时生成，切换提交或修改源码后应重新运行 `cmake -S . -B ...`。
+
+发布时先修改并提交 `VERSION`，再创建相同版本的 `vX.Y.Z` 标签。CI 通过
+`-DOTG_RELEASE_TAG=vX.Y.Z` 校验标签与版本文件一致且已跟踪文件干净；正式版使用纯 `X.Y.Z`。
+本地正式构建也需传此参数；开发构建留空。安装目录的 `share/deskflow-otg/BUILD_VERSION.txt`
+记录实际构建版本，DEB 和 Windows 打包脚本默认读取它，`--version` 仅用于一致性检查
+（旧安装目录没有此文件时允许手动指定）。因此不会把新包版本贴到旧二进制上。
+
 推送以 `v` 开头的版本标签后，GitHub Actions 会在四个平台构建、测试、打包，全部成功后
 自动创建对应的 [Release](https://github.com/gh6497/deskflow-otg/releases)，并将 Linux x86_64、
 macOS arm64 / x86_64 和 Windows x86_64 的包放在 **Assets** 中。例如：
@@ -202,7 +215,7 @@ Qt、ADB 和依赖许可证，不包含 Deskflow。Windows USB 驱动仍需自�
 上文的 GUI 构建、`cmake --install` 和许可证收集，并安装 NSIS（`makensis` 在 PATH 中）：
 
 ```powershell
-python scripts/package_windows.py --stage stage --version 0.1.0 --output dist/deskflow-otg-gui-windows-x86_64-setup.exe
+python scripts/package_windows.py --stage stage --output dist/deskflow-otg-gui-windows-x86_64-setup.exe
 ```
 
 macOS GUI 发布版另提供 `deskflow-otg-gui-macos-arm64.dmg` 和
@@ -233,7 +246,7 @@ sudo apt install ./deskflow-otg-gui-<版本>-linux-amd64.deb
 
 ```bash
 cmake --install build-gui --prefix "$PWD/stage"
-python3 scripts/package_deb.py --stage stage --version 0.1.0 \
+python3 scripts/package_deb.py --stage stage \
     --output dist/deskflow-otg-gui-0.1.0-$(dpkg --print-architecture).deb
 ```
 
@@ -341,6 +354,7 @@ USB 驱动（例如通过 Zadig 将手机对应 USB 接口绑定 WinUSB）；更
       --height H        虚拟屏幕高度，1..32767 (默认 1920)
       --mouse-mode MODE absolute（默认）或 relative（兼容模式）
       --gui             GUI 子进程模式：stdout 输出 JSON 状态，stdin 字节/EOF 请求退出
+  -v, --version         软件版本和 Git 提交号
   -h, --help            帮助
 ```
 

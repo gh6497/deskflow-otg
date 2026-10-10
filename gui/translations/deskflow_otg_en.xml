@@ -3,6 +3,9 @@
 <TS version="2.1" language="en" sourcelanguage="en">
 <context>
   <name></name>
+  <message id="otg.action.about"><source>About</source><translation>About</translation></message>
+  <message id="otg.about.title"><source>About Deskflow OTG</source><translation>About Deskflow OTG</translation></message>
+  <message id="otg.about.text"><source>Deskflow OTG&#10;Version: %1&#10;Git commit: %2&#10;&#10;Share your keyboard and mouse with Android over USB.&#10;CLI and GUI use the same software version.&#10;License: Apache-2.0</source><translation>Deskflow OTG&#10;Version: %1&#10;Git commit: %2&#10;&#10;Share your keyboard and mouse with Android over USB.&#10;CLI and GUI use the same software version.&#10;License: Apache-2.0</translation></message>
   <message id="otg.tray.show"><source>Show window</source><translation>Show window</translation></message>
   <message id="otg.tray.quit"><source>Quit</source><translation>Quit</translation></message>
   <message id="otg.label.language"><source>Language</source><translation>Language</translation></message>

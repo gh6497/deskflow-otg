@@ -21,6 +21,7 @@
 #endif
 
 #include "bridge.h"
+#include "build_version.h"
 #include "deskflow_client.h"
 
 #define DEFAULT_PORT   24800
@@ -91,6 +92,7 @@ static void usage(const char *prog)
             "      --mouse-mode MODE absolute (default) or relative (compatibility)\n"
             "      --gui             JSON status on stdout; stdin byte/EOF stops\n"
             "  -h, --help            Show this help\n"
+            "  -v, --version         Show software version and Git commit\n"
             "\n"
             "Absolute mode maps the virtual screen to the full phone display.\n"
             "Use the phone's resolution/aspect ratio for natural movement.\n"
@@ -212,7 +214,10 @@ int main(int argc, char **argv)
 
     for (int i = 1; i < argc; ++i) {
         const char *a = argv[i];
-        if ((strcmp(a, "-h") == 0 || strcmp(a, "--help") == 0)) {
+        if (strcmp(a, "-v") == 0 || strcmp(a, "--version") == 0) {
+            printf("deskflow-otg %s (commit %s)\n", OTG_VERSION, OTG_COMMIT);
+            return 0;
+        } else if ((strcmp(a, "-h") == 0 || strcmp(a, "--help") == 0)) {
             usage(argv[0]);
             return 0;
         } else if ((strcmp(a, "-H") == 0 || strcmp(a, "--host") == 0) && i + 1 < argc) {
