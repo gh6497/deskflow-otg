@@ -32,6 +32,11 @@ set_target_properties(deskflow-otg-gui PROPERTIES
   MACOSX_BUNDLE_BUNDLE_NAME "Deskflow OTG"
 )
 add_dependencies(deskflow-otg-gui deskflow-otg)
+qt_add_resources(deskflow-otg-gui otg_app_icon
+  PREFIX /icons
+  BASE "${PROJECT_SOURCE_DIR}/packaging"
+  FILES "${PROJECT_SOURCE_DIR}/packaging/deskflow-otg.svg"
+)
 if(MSVC)
   target_compile_options(otg_gui_support PRIVATE /utf-8)
   target_compile_options(deskflow-otg-gui PRIVATE /utf-8)
@@ -109,6 +114,11 @@ if(BUILD_TESTING)
     FILES ${i18n_test_sources}
   )
   qt_add_executable(test_window ../tests/test_window.cpp main_window.cpp main_window.h)
+  qt_add_resources(test_window otg_app_icon
+    PREFIX /icons
+    BASE "${PROJECT_SOURCE_DIR}/packaging"
+    FILES "${PROJECT_SOURCE_DIR}/packaging/deskflow-otg.svg"
+  )
   target_link_libraries(test_window PRIVATE otg_gui_support Qt6::Widgets Qt6::Test)
   add_dependencies(test_gui test_peer)
   add_dependencies(test_window test_peer)

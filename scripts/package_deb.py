@@ -40,10 +40,15 @@ def main():
         (bindir / "deskflow-otg-gui").symlink_to("/opt/deskflow-otg/bin/deskflow-otg-gui")
         applications = root / "usr/share/applications"
         applications.mkdir(parents=True)
+        icons = root / "usr/share/icons/hicolor/scalable/apps"
+        icons.mkdir(parents=True)
+        shutil.copyfile(pathlib.Path(__file__).resolve().parent.parent / "packaging/deskflow-otg.svg",
+                        icons / "deskflow-otg.svg")
         (applications / "deskflow-otg.desktop").write_text(
             "[Desktop Entry]\nType=Application\nName=Deskflow OTG\n"
             "Comment=Control an Android device with Deskflow via USB\n"
             "Exec=/opt/deskflow-otg/bin/deskflow-otg-gui\n"
+            "Icon=deskflow-otg\n"
             "Terminal=false\nCategories=Utility;\n", encoding="utf-8")
 
         control = root / "DEBIAN"

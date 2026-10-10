@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "main_window.h"
 #include "i18n.h"
+#include <QAction>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QLabel>
@@ -10,11 +11,114 @@
 #include <QScopeGuard>
 #include <QSpinBox>
 #include <QTemporaryDir>
+#include <QSystemTrayIcon>
 #include <QtTest>
+
+class TrayTestWindow : public MainWindow {
+public:
+    bool available = true;
+protected:
+    bool trayAvailable() const override { return available; }
+};
 
 class WindowTest : public QObject {
     Q_OBJECT
 private slots:
+    void trayLifecycle_data()
+    {
+        QTest::addColumn<bool>("available");
+        QTest::addColumn<bool>("connected");
+        QTest::newRow("tray-idle") << true << false;
+        QTest::newRow("tray-connected") << true << true;
+        QTest::newRow("no-tray-idle") << false << false;
+        QTest::newRow("no-tray-connected") << false << true;
+    }
+    void trayLifecycle()
+    {
+        QFETCH(bool, available);
+        QFETCH(bool, connected);
+        QTemporaryDir settingsDir;
+        QVERIFY(settingsDir.isValid());
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDir.path());
+        QCoreApplication::setOrganizationName("otg-test");
+        QCoreApplication::setApplicationName("tray-test");
+        QSettings settings;
+        settings.setValue("adb", "");
+        settings.setValue("language", "en");
+        TrayTestWindow window;
+        window.available = available;
+        window.show();
+        auto *tray = window.findChild<QSystemTrayIcon *>("systemTray");
+        auto *show = window.findChild<QAction *>("trayShow");
+        auto *disconnect = window.findChild<QAction *>("trayDisconnect");
+        auto *quit = window.findChild<QAction *>("trayQuit");
+        auto *session = window.findChild<Session *>();
+        QVERIFY(tray && show && disconnect && quit && session);
+        QVERIFY(!tray->icon().isNull());
+        QVERIFY(!tray->icon().pixmap(32, 32).isNull());
+        QCOMPARE(tray->icon().cacheKey(), window.windowIcon().cacheKey());
+        QVERIFY(!disconnect->isEnabled());
+        QCOMPARE(show->text(), "Show window");
+        auto *language = window.findChild<QComboBox *>("languageSelector");
+        language->setCurrentIndex(language->findData("zh_CN"));
+        QCOMPARE(show->text(), "显示窗口");
+        QCOMPARE(quit->text(), "退出");
+        language->setCurrentIndex(language->findData("en"));
+        if (connected) {
+            ConnectionOptions options;
+            options.bridge = QCoreApplication::applicationDirPath() + "/test_peer"
+#ifdef Q_OS_WIN
+                ".exe"
+#endif
+                ;
+            options.manageServer = false;
+            options.serial = "TEST123";
+            session->start(options);
+            QTRY_COMPARE(session->state(), Session::State::Connected);
+            QVERIFY(disconnect->isEnabled());
+            QVERIFY(tray->toolTip().contains(session->statusMessage()));
+        }
+        QSignalSpy exited(&window, &MainWindow::exitReady);
+        window.close();
+        if (available) {
+            QVERIFY(!window.isVisible());
+            QCOMPARE(exited.count(), 0);
+            QCOMPARE(session->state(), connected ? Session::State::Connected : Session::State::Idle);
+            show->trigger();
+            QVERIFY(window.isVisible());
+            window.showMinimized();
+            emit tray->activated(QSystemTrayIcon::Trigger);
+            QVERIFY(window.isVisible());
+            QVERIFY(!window.isMinimized());
+            if (connected) {
+                window.close();
+                disconnect->trigger();
+                QTRY_COMPARE(session->state(), Session::State::Idle);
+                QVERIFY(!disconnect->isEnabled());
+                QCOMPARE(exited.count(), 0);
+                // Quit while connected must wait for graceful bridge shutdown.
+                ConnectionOptions options;
+                options.bridge = QCoreApplication::applicationDirPath() + "/test_peer"
+#ifdef Q_OS_WIN
+                    ".exe"
+#endif
+                    ;
+                options.manageServer = false;
+                options.serial = "TEST123";
+                session->start(options);
+                QTRY_COMPARE(session->state(), Session::State::Connected);
+                quit->trigger();
+                QCOMPARE(exited.count(), 0);
+            } else {
+                quit->trigger();
+            }
+        }
+        QTRY_COMPARE(exited.count(), 1);
+        QCOMPARE(session->state(), Session::State::Idle);
+        QVERIFY(!window.isVisible());
+        QVERIFY(!tray->isVisible());
+    }
     void defaultLanguage_data()
     {
         QTest::addColumn<QString>("savedLanguage");
