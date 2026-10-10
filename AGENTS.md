@@ -187,6 +187,11 @@ for f in src/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only -Isrc "$f"
 
 - `-DBUILD_GUI=ON` 启用 Qt Widgets 桌面端；默认 OFF 保留纯 C 构建。GUI 支持 Linux、macOS、Windows。
 - `gui/main_window.cpp` 管理界面、ADB 异步查询和 QSettings；`device_info.cpp` 解析设备/尺寸/方向并生成布局。
+- GUI 提供系统托盘：关闭窗口只隐藏并保留连接，菜单可恢复窗口、断开或退出；无托盘时关闭仍退出。
+  退出沿用 Session 异步停止流程，Idle 后发出 `MainWindow::exitReady`，由入口退出应用；
+  `quitOnLastWindowClosed` 关闭以支持后台运行。托盘菜单与状态提示支持实时语言切换。
+  `test_window.cpp` 模拟托盘可用/不可用，覆盖隐藏、恢复、断开及连接中优雅退出。
+  托盘与窗口统一使用嵌入 Qt 资源的 `packaging/deskflow-otg.svg`，DEB 与 AppImage 桌面入口也使用此图。
 - `gui/session.cpp` 只管理自己创建的 Deskflow 和桥接进程。自动启动生成独立配置、监听回环地址并关闭 TLS；
   外部服务模式不更改或终止已有 Deskflow。根据 `--help` 区分现代 `deskflow-core server --settings` 与传统 server 参数。
 - `src/main.c --gui` 在 stdout 输出 JSON 行 `usb-ready` / `connected` / `disconnected`；日志仍走 stderr。

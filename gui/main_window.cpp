@@ -4,6 +4,7 @@
 #include "i18n.h"
 
 #include <QCheckBox>
+#include <QAction>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDateTime>
@@ -13,12 +14,14 @@
 #include <QGroupBox>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QSplitter>
+#include <QSystemTrayIcon>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -66,6 +69,61 @@ void MainWindow::retranslateUi()
     if (m_sessionStatus)
         m_status->setText(m_session.statusMessage());
     updateVirtualSize();
+    updateTray();
+}
+
+bool MainWindow::trayAvailable() const
+{
+    return QSystemTrayIcon::isSystemTrayAvailable();
+}
+
+void MainWindow::setupTray()
+{
+    const QIcon icon(":/icons/deskflow-otg.svg");
+    setWindowIcon(icon);
+    m_tray = new QSystemTrayIcon(icon, this);
+    m_tray->setObjectName("systemTray");
+    auto *menu = new QMenu(this);
+    auto *restore = translated(menu->addAction(QString()), "text", "otg.tray.show");
+    restore->setObjectName("trayShow");
+    connect(restore, &QAction::triggered, this, &MainWindow::restoreWindow);
+    m_trayDisconnect = translated(menu->addAction(QString()), "text", "otg.action.disconnect");
+    m_trayDisconnect->setObjectName("trayDisconnect");
+    connect(m_trayDisconnect, &QAction::triggered, &m_session, &Session::stop);
+    menu->addSeparator();
+    auto *quit = translated(menu->addAction(QString()), "text", "otg.tray.quit");
+    quit->setObjectName("trayQuit");
+    connect(quit, &QAction::triggered, this, &MainWindow::requestExit);
+    m_tray->setContextMenu(menu);
+    connect(m_tray, &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason reason) {
+        if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::DoubleClick)
+            restoreWindow();
+    });
+    m_tray->show();
+}
+
+void MainWindow::restoreWindow()
+{
+    if (isMinimized())
+        showNormal();
+    else
+        show();
+    raise();
+    activateWindow();
+}
+
+void MainWindow::requestExit()
+{
+    m_closing = true;
+    close();
+}
+
+void MainWindow::updateTray()
+{
+    if (!m_tray)
+        return;
+    m_tray->setToolTip(QString("Deskflow OTG · %1").arg(m_status->text()));
+    m_trayDisconnect->setEnabled(m_disconnect->isEnabled());
 }
 
 void MainWindow::changeEvent(QEvent *event)
@@ -93,7 +151,7 @@ QWidget *MainWindow::pathField(QLineEdit *&field, const char *placeholderId)
     return row;
 }
 
-MainWindow::MainWindow()
+MainWindow::MainWindow() : m_session(this)
 {
     QSettings settings;
     auto &languages = LanguageManager::instance();
@@ -270,6 +328,7 @@ MainWindow::MainWindow()
         }
     });
     m_uiReady = true;
+    setupTray();
     retranslateUi();
     updateEnabled();
     QTimer::singleShot(0, this, &MainWindow::refreshDevices);
@@ -290,6 +349,7 @@ void MainWindow::updateEnabled()
     m_host->setEnabled(!m_manage->isChecked());
     m_direction->setEnabled(m_manage->isChecked());
     m_computer->setEnabled(m_manage->isChecked());
+    updateTray();
 }
 
 QSize MainWindow::virtualScreenSize() const
@@ -446,6 +506,7 @@ void MainWindow::connectDevice()
     if (options.bridge.isEmpty()) {
         m_sessionStatus = false;
         setTranslatedProperty(m_status, "text", "otg.error.bridge_not_found");
+        updateTray();
         return;
     }
     m_session.start(options);
@@ -475,8 +536,16 @@ void MainWindow::saveSettings()
 void MainWindow::closeEvent(QCloseEvent *event)
 {
     saveSettings();
+    if (!m_closing && m_tray->isVisible() && trayAvailable()) {
+        event->ignore();
+        hide();
+        return;
+    }
     if (m_session.state() == Session::State::Idle) {
+        m_closing = true;
+        m_tray->hide();
         event->accept();
+        emit exitReady();
         return;
     }
     m_closing = true;

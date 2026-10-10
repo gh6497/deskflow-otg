@@ -7,6 +7,8 @@
 #include <QPointer>
 
 class QCheckBox;
+class QAction;
+class QSystemTrayIcon;
 class QComboBox;
 class QDoubleSpinBox;
 class QFormLayout;
@@ -17,9 +19,13 @@ class QPushButton;
 class QSpinBox;
 
 class MainWindow : public QMainWindow {
+    Q_OBJECT
 public:
     MainWindow();
+signals:
+    void exitReady();
 protected:
+    virtual bool trayAvailable() const;
     void closeEvent(QCloseEvent *event) override;
     void changeEvent(QEvent *event) override;
 private:
@@ -31,6 +37,10 @@ private:
     }
     void addTranslatedRow(QFormLayout *form, const char *id, QWidget *field);
     void retranslateUi();
+    void setupTray();
+    void restoreWindow();
+    void requestExit();
+    void updateTray();
     void refreshDevices();
     void readDevice();
     void connectDevice();
@@ -48,6 +58,8 @@ private:
     QList<TextBinding> m_textBindings;
     QComboBox *m_language;
     Session m_session;
+    QSystemTrayIcon *m_tray = nullptr;
+    QAction *m_trayDisconnect = nullptr;
     QWidget *m_form;
     QComboBox *m_devices, *m_direction, *m_mouseMode;
     QLineEdit *m_serial, *m_adb, *m_deskflow, *m_host, *m_computer, *m_phone;
