@@ -181,9 +181,9 @@ Apple Silicon 编译器。构建和 socket 回归测试可用 `ctest --test-dir 
 
 #### 统一版本管理
 
-CLI 和 GUI 共用仓库根目录的 `VERSION`（当前 `0.1.2`），不单独维护版本。
+CLI 和 GUI 共用仓库根目录的 `VERSION`（当前 `0.1.3`），不单独维护版本。
 `deskflow-otg --version`、`deskflow-otg-gui --version` 和 GUI 右上角「关于」显示版本及 Git 提交号。
-开发构建使用 `0.1.2+git.<提交号>`，已跟踪文件有未提交修改时追加 `.dirty`；无 Git 信息时用 `unknown`。
+开发构建使用 `0.1.3+git.<提交号>`，已跟踪文件有未提交修改时追加 `.dirty`；无 Git 信息时用 `unknown`。
 版本信息在 CMake 配置时生成，切换提交或修改源码后应重新运行 `cmake -S . -B ...`。
 
 发布时先修改并提交 `VERSION`，再创建相同版本的 `vX.Y.Z` 标签。CI 通过
