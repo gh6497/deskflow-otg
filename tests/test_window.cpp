@@ -38,17 +38,21 @@ private slots:
         auto *about = window.findChild<QPushButton *>("aboutButton");
         QVERIFY(about);
         bool inspected = false;
+        QString aboutText;
         QTimer::singleShot(0, &window, [&] {
             auto *dialog = window.findChild<QMessageBox *>();
             if (dialog) {
-                inspected = dialog->text().contains(OTG_VERSION) &&
-                            dialog->text().contains(OTG_COMMIT) &&
-                            dialog->text().contains("\nVersion:");
+                aboutText = dialog->text();
+                inspected = true;
                 dialog->accept();
             }
         });
         about->click();
-        QVERIFY(inspected);
+        // QMessageBox::about() is non-blocking on macOS; let the timer run there too.
+        QTRY_VERIFY(inspected);
+        QVERIFY(aboutText.contains(OTG_VERSION));
+        QVERIFY(aboutText.contains(OTG_COMMIT));
+        QVERIFY(aboutText.contains("\nVersion:"));
     }
     void trayLifecycle_data()
     {
