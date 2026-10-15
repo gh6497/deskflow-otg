@@ -23,6 +23,7 @@
 #include "bridge.h"
 #include "build_version.h"
 #include "deskflow_client.h"
+#include "usb_scan.h"
 
 #define DEFAULT_PORT   24800
 #define DEFAULT_HOST   "127.0.0.1"
@@ -91,6 +92,8 @@ static void usage(const char *prog)
             "      --height H        Virtual screen height, 1..32767 (default %d)\n"
             "      --mouse-mode MODE absolute (default) or relative (compatibility)\n"
             "      --gui             JSON status on stdout; stdin byte/EOF stops\n"
+            "      --usb-scan        List USB attachments as JSON (no ADB or HID)\n"
+            "      --usb-watch       Watch USB hotplug as JSON lines; stdin/EOF stops\n"
             "  -h, --help            Show this help\n"
             "  -v, --version         Show software version and Git commit\n"
             "\n"
@@ -212,6 +215,19 @@ int main(int argc, char **argv)
     int height = DEFAULT_HEIGHT;
     enum otg_mouse_mode mouse_mode = OTG_MOUSE_ABSOLUTE;
 
+    if (argc == 2 && strcmp(argv[1], "--usb-scan") == 0) {
+        return otg_usb_scan();
+    }
+    if (argc == 2 && strcmp(argv[1], "--usb-watch") == 0) {
+        g_gui = 1;
+        signal(SIGINT, on_signal);
+        signal(SIGTERM, on_signal);
+#ifndef _WIN32
+        signal(SIGPIPE, SIG_IGN);
+#endif
+        return otg_usb_watch(gui_stop_check);
+    }
+
     for (int i = 1; i < argc; ++i) {
         const char *a = argv[i];
         if (strcmp(a, "-v") == 0 || strcmp(a, "--version") == 0) {
@@ -280,7 +296,12 @@ int main(int argc, char **argv)
     }
     fprintf(stderr, "INFO:  AOA HID keyboard + %s pointer ready (screen %dx%d)\n",
             mouse_mode == OTG_MOUSE_ABSOLUTE ? "absolute" : "relative", width, height);
-    gui_event("usb-ready");
+    if (g_gui) {
+        printf("{\"event\":\"usb-ready\",\"usb-id\":\"%u:%u\"}\n",
+               (unsigned)libusb_get_bus_number(state.bridge.aoa.device),
+               (unsigned)libusb_get_device_address(state.bridge.aoa.device));
+        fflush(stdout);
+    }
     if (g_gui && gui_stop_check()) {
         otg_bridge_close(&state.bridge);
         return 0;

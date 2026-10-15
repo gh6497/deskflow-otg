@@ -3,6 +3,13 @@
 <TS version="2.1" language="en" sourcelanguage="en">
 <context>
   <name></name>
+  <message id="otg.auto_connect.hotplug"><source>USB auto-connect is using hotplug event notifications.</source><translation>USB auto-connect is using hotplug event notifications.</translation></message>
+  <message id="otg.auto_connect.polling"><source>USB hotplug notifications are unavailable or stopped; auto-connect is using 2-second polling.</source><translation>USB hotplug notifications are unavailable or stopped; auto-connect is using 2-second polling.</translation></message>
+  <message id="otg.auto_connect.enabled"><source>Automatically connect remembered phones on USB insertion</source><translation>Automatically connect remembered phones on USB insertion</translation></message>
+  <message id="otg.auto_connect.tooltip"><source>No USB debugging required. Remembers each successfully connected phone and its settings. Keep the app running, including in the tray. After a manual disconnect or failure, unplug and reinsert USB to retry.</source><translation>No USB debugging required. Remembers each successfully connected phone and its settings. Keep the app running, including in the tray. After a manual disconnect or failure, unplug and reinsert USB to retry.</translation></message>
+  <message id="otg.auto_connect.connecting"><source>USB phone %1 detected; connecting with remembered settings.</source><translation>USB phone %1 detected; connecting with remembered settings.</translation></message>
+  <message id="otg.auto_connect.scan_failed"><source>USB auto-connect scan failed. Check bridge installation, USB permissions and drivers; scanning will continue.</source><translation>USB auto-connect scan failed. Check bridge installation, USB permissions and drivers; scanning will continue.</translation></message>
+  <message id="otg.auto_connect.restored"><source>Using remembered phone settings without ADB. Adjust dimensions manually if the screen orientation has changed.</source><translation>Using remembered phone settings without ADB. Adjust dimensions manually if the screen orientation has changed.</translation></message>
   <message id="otg.action.about"><source>About</source><translation>About</translation></message>
   <message id="otg.about.title"><source>About Deskflow OTG</source><translation>About Deskflow OTG</translation></message>
   <message id="otg.about.text"><source>Deskflow OTG&#10;Version: %1&#10;Git commit: %2&#10;&#10;Share your keyboard and mouse with Android over USB.&#10;CLI and GUI use the same software version.&#10;License: Apache-2.0</source><translation>Deskflow OTG&#10;Version: %1&#10;Git commit: %2&#10;&#10;Share your keyboard and mouse with Android over USB.&#10;CLI and GUI use the same software version.&#10;License: Apache-2.0</translation></message>
@@ -20,7 +27,7 @@
   <message id="otg.action.refresh"><source>Refresh devices</source><translation>Refresh devices</translation></message>
   <message id="otg.label.device"><source>Device</source><translation>Device</translation></message>
   <message id="otg.label.usb_serial"><source>USB serial number</source><translation>USB serial number</translation></message>
-  <message id="otg.device.debugging_required"><source>Automatic detection requires USB debugging and authorization on your phone.</source><translation>Automatic detection requires USB debugging and authorization on your phone.</translation></message>
+  <message id="otg.device.debugging_required"><source>ADB screen-size detection requires USB debugging and authorization. USB auto-connect does not.</source><translation>ADB screen-size detection requires USB debugging and authorization. USB auto-connect does not.</translation></message>
   <message id="otg.action.swap_dimensions"><source>Swap dimensions</source><translation>Swap dimensions</translation></message>
   <message id="otg.label.original_size"><source>Original screen size</source><translation>Original screen size</translation></message>
   <message id="otg.sensitivity.tooltip"><source>Virtual size = original size ÷ multiplier (rounded). Higher values reduce mouse travel; 1× restores the original size. Applies only to absolute mode.</source><translation>Virtual size = original size ÷ multiplier (rounded). Higher values reduce mouse travel; 1× restores the original size. Applies only to absolute mode.</translation></message>

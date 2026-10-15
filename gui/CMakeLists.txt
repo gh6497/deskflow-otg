@@ -5,6 +5,7 @@ add_library(otg_gui_support STATIC
   device_info.cpp device_info.h
   process_utils.cpp process_utils.h
   session.cpp session.h
+  usb_auto_connect.cpp usb_auto_connect.h
   i18n.cpp i18n.h
 )
 target_include_directories(otg_gui_support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -97,6 +98,9 @@ if(BUILD_TESTING)
   qt_add_executable(test_peer ../tests/test_peer.cpp)
   target_link_libraries(test_peer PRIVATE Qt6::Network Threads::Threads)
   qt_add_executable(test_gui ../tests/test_gui.cpp)
+  qt_add_executable(test_usb_auto_connect ../tests/test_usb_auto_connect.cpp)
+  target_link_libraries(test_usb_auto_connect PRIVATE otg_gui_support Qt6::Test)
+  add_dependencies(test_usb_auto_connect test_peer)
   target_link_libraries(test_gui PRIVATE otg_gui_support Qt6::Test)
   qt_add_resources(test_gui i18n_test_inputs
     PREFIX /i18n-test
@@ -128,10 +132,11 @@ if(BUILD_TESTING)
   if(MSVC)
     target_compile_options(test_gui PRIVATE /utf-8)
     target_compile_options(test_window PRIVATE /utf-8)
-    set_property(TARGET test_gui test_window test_peer PROPERTY
+    set_property(TARGET test_gui test_window test_peer test_usb_auto_connect PROPERTY
       MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
   endif()
   add_test(NAME gui_logic COMMAND test_gui)
+  add_test(NAME usb_auto_connect COMMAND test_usb_auto_connect)
   add_test(NAME gui_window COMMAND test_window)
   add_test(NAME gui_version COMMAND deskflow-otg-gui --version)
   set_tests_properties(gui_version PROPERTIES

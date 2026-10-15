@@ -79,6 +79,11 @@ bool MainWindow::trayAvailable() const
     return QSystemTrayIcon::isSystemTrayAvailable();
 }
 
+QString MainWindow::bridgeExecutable() const
+{
+    return bridgePath();
+}
+
 void MainWindow::setupTray()
 {
     const QIcon icon(":/icons/deskflow-otg.svg");
@@ -153,7 +158,7 @@ QWidget *MainWindow::pathField(QLineEdit *&field, const char *placeholderId)
     return row;
 }
 
-MainWindow::MainWindow() : m_session(this)
+MainWindow::MainWindow() : m_session(this), m_autoConnect(this)
 {
     QSettings settings;
     auto &languages = LanguageManager::instance();
@@ -210,6 +215,10 @@ MainWindow::MainWindow() : m_session(this)
     m_deviceStatus = translated(new QLabel, "text", "otg.device.debugging_required");
     m_deviceStatus->setWordWrap(true);
     deviceForm->addRow(m_deviceStatus);
+    m_autoConnectEnabled = translated(new QCheckBox, "text", "otg.auto_connect.enabled");
+    m_autoConnectEnabled->setObjectName("autoConnectEnabled");
+    setTranslatedProperty(m_autoConnectEnabled, "toolTip", "otg.auto_connect.tooltip");
+    deviceForm->addRow(m_autoConnectEnabled);
     auto *sizeRow = new QWidget;
     auto *sizeLayout = new QHBoxLayout(sizeRow);
     sizeLayout->setContentsMargins(0, 0, 0, 0);
@@ -310,6 +319,34 @@ MainWindow::MainWindow() : m_session(this)
     m_manage->setChecked(settings.value("manageServer", true).toBool());
     m_direction->setCurrentIndex(qMax(0, m_direction->findData(settings.value("direction", "right"))));
     m_mouseMode->setCurrentIndex(qMax(0, m_mouseMode->findData(settings.value("mouseMode", "absolute"))));
+    const int profileCount = settings.beginReadArray("rememberedDevices");
+    for (int i = 0; i < profileCount; ++i) {
+        settings.setArrayIndex(i);
+        const auto profile = settings.value("profile").toMap();
+        const auto serial = profile.value("serial").toString();
+        if (!serial.isEmpty())
+            m_profiles.insert(serial, profile);
+    }
+    settings.endArray();
+    m_autoConnect.setKnownSerials(m_profiles.keys());
+    m_autoConnectEnabled->setChecked(settings.value("autoConnect", false).toBool());
+    connect(m_autoConnectEnabled, &QCheckBox::toggled, this, [this](bool enabled) {
+        QSettings().setValue("autoConnect", enabled);
+        m_autoConnect.setEnabled(enabled);
+    });
+    connect(&m_autoConnect, &UsbAutoConnect::connectRequested, this, [this](const QString &serial) {
+        if (m_closing || m_scanning || m_session.state() != Session::State::Idle || !m_profiles.contains(serial))
+            return;
+        applyDeviceProfile(m_profiles.value(serial));
+        appendLog(qtTrId("otg.auto_connect.connecting").arg(serial));
+        connectDevice();
+    });
+    connect(&m_autoConnect, &UsbAutoConnect::scanFailed, this, [this] {
+        appendLog(qtTrId("otg.auto_connect.scan_failed"));
+    });
+    connect(&m_autoConnect, &UsbAutoConnect::detectionModeChanged, this, [this](bool hotplug) {
+        appendLog(hotplug ? qtTrId("otg.auto_connect.hotplug") : qtTrId("otg.auto_connect.polling"));
+    });
     connect(m_width, &QSpinBox::valueChanged, this, &MainWindow::updateVirtualSize);
     connect(m_height, &QSpinBox::valueChanged, this, &MainWindow::updateVirtualSize);
     connect(m_sensitivity, &QDoubleSpinBox::valueChanged, this, &MainWindow::updateVirtualSize);
@@ -322,9 +359,12 @@ MainWindow::MainWindow() : m_session(this)
     connect(m_connect, &QPushButton::clicked, this, &MainWindow::connectDevice);
     connect(m_disconnect, &QPushButton::clicked, &m_session, &Session::stop);
     connect(&m_session, &Session::log, this, &MainWindow::appendLog);
+    connect(&m_session, &Session::usbAttached, &m_autoConnect, &UsbAutoConnect::suppressAttachment);
     connect(&m_session, &Session::changed, this, [this](Session::State state, const QString &message) {
         m_sessionStatus = true;
         m_status->setText(message);
+        if (state == Session::State::Connected)
+            rememberDevice();
         updateEnabled();
         if (m_closing && state == Session::State::Idle)
             QTimer::singleShot(0, this, &QWidget::close);
@@ -340,7 +380,14 @@ MainWindow::MainWindow() : m_session(this)
     setupTray();
     retranslateUi();
     updateEnabled();
-    QTimer::singleShot(0, this, &MainWindow::refreshDevices);
+    QTimer::singleShot(0, this, [this] {
+        m_autoConnect.setProgram(bridgeExecutable());
+        m_autoConnect.setEnabled(m_autoConnectEnabled->isChecked());
+        // A remembered phone uses its saved dimensions, not ADB. In particular,
+        // do not start ADB or prompt for USB debugging during auto-connect.
+        if (!m_autoConnectEnabled->isChecked() || m_profiles.isEmpty())
+            refreshDevices();
+    });
 }
 
 void MainWindow::appendLog(const QString &text)
@@ -352,6 +399,9 @@ void MainWindow::appendLog(const QString &text)
 void MainWindow::updateEnabled()
 {
     const bool idle = m_session.state() == Session::State::Idle;
+    m_autoConnect.setReady(idle && !m_scanning && !m_closing);
+    if (m_closing)
+        m_autoConnect.setEnabled(false);
     m_form->setEnabled(idle && !m_scanning && !m_closing);
     m_connect->setEnabled(idle && !m_scanning && !m_closing && !m_serial->text().trimmed().isEmpty());
     m_disconnect->setEnabled(!idle && m_session.state() != Session::State::Stopping);
@@ -497,9 +547,11 @@ void MainWindow::readDevice()
 
 void MainWindow::connectDevice()
 {
+    if (m_closing || m_scanning || m_session.state() != Session::State::Idle)
+        return;
     saveSettings();
     ConnectionOptions options;
-    options.bridge = bridgePath();
+    options.bridge = bridgeExecutable();
     options.deskflow = m_deskflow->text().trimmed();
     options.serial = m_serial->text().trimmed();
     options.host = m_host->text().trimmed();
@@ -518,7 +570,58 @@ void MainWindow::connectDevice()
         updateTray();
         return;
     }
+    m_pendingProfile = deviceProfile();
+    m_autoConnect.suppressSerial(options.serial);
     m_session.start(options);
+}
+
+QVariantMap MainWindow::deviceProfile() const
+{
+    return {{"serial", m_serial->text().trimmed()},
+            {"originalWidth", m_width->value()}, {"originalHeight", m_height->value()},
+            {"sensitivityMultiplier", m_sensitivity->value()},
+            {"deskflow", m_deskflow->text()}, {"computer", m_computer->text()},
+            {"phone", m_phone->text()}, {"host", m_host->text()}, {"port", m_port->value()},
+            {"manageServer", m_manage->isChecked()}, {"direction", m_direction->currentData()},
+            {"mouseMode", m_mouseMode->currentData()}};
+}
+
+void MainWindow::applyDeviceProfile(const QVariantMap &profile)
+{
+    ++m_request;
+    const QSignalBlocker blocker(m_devices);
+    m_devices->setCurrentIndex(0);
+    m_serial->setText(profile.value("serial").toString());
+    m_width->setValue(profile.value("originalWidth", 1080).toInt());
+    m_height->setValue(profile.value("originalHeight", 1920).toInt());
+    m_sensitivity->setValue(profile.value("sensitivityMultiplier", 1.0).toDouble());
+    m_deskflow->setText(profile.value("deskflow").toString());
+    m_computer->setText(profile.value("computer", "computer").toString());
+    m_phone->setText(profile.value("phone", "android").toString());
+    m_host->setText(profile.value("host", "127.0.0.1").toString());
+    m_port->setValue(profile.value("port", 24800).toInt());
+    m_manage->setChecked(profile.value("manageServer", true).toBool());
+    m_direction->setCurrentIndex(qMax(0, m_direction->findData(profile.value("direction", "right"))));
+    m_mouseMode->setCurrentIndex(qMax(0, m_mouseMode->findData(profile.value("mouseMode", "absolute"))));
+    setTranslatedProperty(m_deviceStatus, "text", "otg.auto_connect.restored");
+}
+
+void MainWindow::rememberDevice()
+{
+    const auto serial = m_pendingProfile.value("serial").toString();
+    if (serial.isEmpty())
+        return;
+    m_profiles.insert(serial, m_pendingProfile);
+    m_pendingProfile.clear();
+    QSettings settings;
+    settings.beginWriteArray("rememberedDevices", m_profiles.size());
+    int index = 0;
+    for (const auto &profile : m_profiles) {
+        settings.setArrayIndex(index++);
+        settings.setValue("profile", profile);
+    }
+    settings.endArray();
+    m_autoConnect.setKnownSerials(m_profiles.keys());
 }
 
 void MainWindow::saveSettings()
@@ -540,6 +643,7 @@ void MainWindow::saveSettings()
     settings.setValue("manageServer", m_manage->isChecked());
     settings.setValue("direction", m_direction->currentData());
     settings.setValue("mouseMode", m_mouseMode->currentData());
+    settings.setValue("autoConnect", m_autoConnectEnabled->isChecked());
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)
@@ -552,6 +656,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
     }
     if (m_session.state() == Session::State::Idle) {
         m_closing = true;
+        m_autoConnect.setEnabled(false);
         m_tray->hide();
         event->accept();
         emit exitReady();

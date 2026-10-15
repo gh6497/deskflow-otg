@@ -3,6 +3,13 @@
 <TS version="2.1" language="zh_CN" sourcelanguage="en">
 <context>
   <name></name>
+  <message id="otg.auto_connect.hotplug"><source>USB auto-connect is using hotplug event notifications.</source><translation>USB 自动连接已启用热插拔事件通知。</translation></message>
+  <message id="otg.auto_connect.polling"><source>USB hotplug notifications are unavailable or stopped; auto-connect is using 2-second polling.</source><translation>USB 热插拔通知不可用或监听已停止，自动连接已回退为每 2 秒轮询。</translation></message>
+  <message id="otg.auto_connect.enabled"><source>Automatically connect remembered phones on USB insertion</source><translation>USB 插入时自动连接已记住的手机</translation></message>
+  <message id="otg.auto_connect.tooltip"><source>No USB debugging required. Remembers each successfully connected phone and its settings. Keep the app running, including in the tray. After a manual disconnect or failure, unplug and reinsert USB to retry.</source><translation>无需 USB 调试。记住每台成功连接过的手机及其配置。需保持程序运行（可驻留托盘）。手动断开或连接失败后，拔插 USB 才会再次自动连接。</translation></message>
+  <message id="otg.auto_connect.connecting"><source>USB phone %1 detected; connecting with remembered settings.</source><translation>检测到 USB 手机 %1，正在使用已记住的配置连接。</translation></message>
+  <message id="otg.auto_connect.scan_failed"><source>USB auto-connect scan failed. Check bridge installation, USB permissions and drivers; scanning will continue.</source><translation>USB 自动连接扫描失败，请检查桥接程序、USB 权限和驱动；程序将继续检测。</translation></message>
+  <message id="otg.auto_connect.restored"><source>Using remembered phone settings without ADB. Adjust dimensions manually if the screen orientation has changed.</source><translation>已恢复手机配置，无需 ADB。若屏幕方向已改变，请手动调整宽高。</translation></message>
   <message id="otg.action.about"><source>About</source><translation>关于</translation></message>
   <message id="otg.about.title"><source>About Deskflow OTG</source><translation>关于 Deskflow OTG</translation></message>
   <message id="otg.about.text"><source>Deskflow OTG&#10;Version: %1&#10;Git commit: %2&#10;&#10;Share your keyboard and mouse with Android over USB.&#10;CLI and GUI use the same software version.&#10;License: Apache-2.0</source><translation>Deskflow OTG&#10;版本：%1&#10;Git 提交：%2&#10;&#10;通过 USB 与安卓共享键盘鼠标。&#10;命令行与 GUI 使用相同的软件版本。&#10;许可证：Apache-2.0</translation></message>
@@ -20,7 +27,7 @@
   <message id="otg.action.refresh"><source>Refresh devices</source><translation>刷新设备</translation></message>
   <message id="otg.label.device"><source>Device</source><translation>设备</translation></message>
   <message id="otg.label.usb_serial"><source>USB serial number</source><translation>USB 序列号</translation></message>
-  <message id="otg.device.debugging_required"><source>Automatic detection requires USB debugging and authorization on your phone.</source><translation>自动识别需要开启 USB 调试，并在手机上允许授权。</translation></message>
+  <message id="otg.device.debugging_required"><source>ADB screen-size detection requires USB debugging and authorization. USB auto-connect does not.</source><translation>ADB 识别尺寸需要 USB 调试及授权；USB 自动连接不需要。</translation></message>
   <message id="otg.action.swap_dimensions"><source>Swap dimensions</source><translation>交换宽高</translation></message>
   <message id="otg.label.original_size"><source>Original screen size</source><translation>原始屏幕尺寸</translation></message>
   <message id="otg.sensitivity.tooltip"><source>Virtual size = original size ÷ multiplier (rounded). Higher values reduce mouse travel; 1× restores the original size. Applies only to absolute mode.</source><translation>虚拟宽高 = 原始宽高 ÷ 倍率（四舍五入）。倍率越大，移动越省力；1× 恢复原始尺寸。仅用于绝对坐标模式。</translation></message>

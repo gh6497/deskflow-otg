@@ -192,6 +192,15 @@ for f in src/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only -Isrc -Ibu
 
 - `-DBUILD_GUI=ON` 启用 Qt Widgets 桌面端；默认 OFF 保留纯 C 构建。GUI 支持 Linux、macOS、Windows。
 - `gui/main_window.cpp` 管理界面、ADB 异步查询和 QSettings；`device_info.cpp` 解析设备/尺寸/方向并生成布局。
+- GUI 的可选 USB 自动连接默认关闭；成功 Connected 后按 USB 序列号保存独立配置。
+  `usb_auto_connect.cpp` 优先启动桥接 `--usb-watch`（`src/usb_scan.c`），运行时检查 libusb
+  hotplug 能力并注册回调；不支持、启动超时、监听错误/退出时回退到每 2 秒异步 `--usb-scan`。
+  事件模式只在启动、热插拔、就绪/配置变化时扫描，合并通知并有限次重试权限就绪，不做周期枚举。
+  不依赖 ADB、不注册 HID。按 bus/address 记录本次插入是否已尝试，失败/手动断开不重试，拔插后重置；
+  拔出事件立即重置该地址并丢弃旧扫描结果，防止快速同地址重插与扫描竞态。
+  不可读序列号不等于拔出，多台已知设备/重复序列号不自动选择。桥接 `usb-ready` 携带
+  `usb-id`，避免独占 USB 驱动下手动断开立即重连；退出禁用检测并清理扫描子进程。
+  `test_usb_auto_connect.cpp` 和 `test_window.cpp` 覆盖策略、无 ADB、托盘自动连接及配置恢复。
 - GUI 提供系统托盘：关闭窗口只隐藏并保留连接，菜单可恢复窗口、断开或退出；无托盘时关闭仍退出。
   退出沿用 Session 异步停止流程，Idle 后发出 `MainWindow::exitReady`，由入口退出应用；
   `quitOnLastWindowClosed` 关闭以支持后台运行。托盘菜单与状态提示支持实时语言切换。
