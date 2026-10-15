@@ -10,6 +10,10 @@ adb-bundle/
 *.a
 compile_commands.json
 
+# Python cache and Qt installer logs
+__pycache__/
+/aqtinstall.log
+
 # Local editor and machine-specific configuration
 .idea/
 opencode.json
