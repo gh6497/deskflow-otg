@@ -10,6 +10,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSettings>
 #include <QScopeGuard>
@@ -40,6 +41,47 @@ protected:
 class WindowTest : public QObject {
     Q_OBJECT
 private slots:
+    void clearLogs()
+    {
+        QTemporaryDir settingsDir;
+        QVERIFY(settingsDir.isValid());
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDir.path());
+        QSettings settings;
+        settings.setValue("adb", "");
+        settings.setValue("manageServer", false);
+        settings.setValue("language", "zh_CN");
+        AutoConnectTestWindow window;
+        QCoreApplication::processEvents();
+        auto *clear = window.findChild<QPushButton *>("clearLogButton");
+        auto *log = window.findChild<QPlainTextEdit *>("runtimeLog");
+        auto *session = window.findChild<Session *>();
+        auto *language = window.findChild<QComboBox *>("languageSelector");
+        QVERIFY(clear && log && session && language);
+        QCOMPARE(clear->text(), "清除日志");
+        clear->click(); // Clearing an empty log is harmless.
+        QVERIFY(log->toPlainText().isEmpty());
+        window.findChild<QLineEdit *>("usbSerial")->setText("TEST123");
+        window.findChild<QPushButton *>("connectButton")->click();
+        QTRY_COMPARE(session->state(), Session::State::Connected);
+        session->log("first line\nsecond line");
+        QVERIFY(log->toPlainText().contains("first line\nsecond line"));
+        QVERIFY(clear->isEnabled());
+        clear->click();
+        QVERIFY(log->toPlainText().isEmpty());
+        QCOMPARE(session->state(), Session::State::Connected);
+        session->log("new log after clearing");
+        QVERIFY(log->toPlainText().contains("new log after clearing"));
+        QVERIFY(!log->toPlainText().contains("first line"));
+        const QString text = log->toPlainText();
+        language->setCurrentIndex(language->findData("en"));
+        QCOMPARE(clear->text(), "Clear logs");
+        QCOMPARE(log->toPlainText(), text);
+        clear->click();
+        QVERIFY(log->toPlainText().isEmpty());
+        window.findChild<QAction *>("trayQuit")->trigger();
+        QTRY_COMPARE(session->state(), Session::State::Idle);
+    }
     void failedConnectionNotRemembered()
     {
         QTemporaryDir settingsDir;

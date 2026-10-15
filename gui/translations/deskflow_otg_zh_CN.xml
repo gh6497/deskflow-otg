@@ -54,6 +54,8 @@
   <message id="otg.action.connect"><source>Connect</source><translation>连接</translation></message>
   <message id="otg.action.disconnect"><source>Disconnect</source><translation>断开</translation></message>
   <message id="otg.log.placeholder"><source>Runtime logs will appear here</source><translation>运行日志将显示在这里</translation></message>
+  <message id="otg.log.title"><source>Runtime logs</source><translation>运行日志</translation></message>
+  <message id="otg.action.clear_log"><source>Clear logs</source><translation>清除日志</translation></message>
   <message id="otg.size.absolute_note"><source> (original size ÷ multiplier; applied on connection)</source><translation>（原始尺寸 ÷ 倍率，连接时生效）</translation></message>
   <message id="otg.size.relative_note"><source> (relative mode uses the original size)</source><translation>（相对模式使用原始尺寸）</translation></message>
   <message id="otg.device.adb_not_found"><source>ADB not found. Select an ADB executable, or enter the USB serial number and dimensions manually.</source><translation>未找到 ADB，请选择 ADB 程序，或手动填写 USB 序列号和宽高。</translation></message>

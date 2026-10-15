@@ -298,12 +298,20 @@ MainWindow::MainWindow() : m_session(this), m_autoConnect(this)
     buttons->addWidget(m_connect);
     buttons->addWidget(m_disconnect);
     root->addLayout(buttons);
+    auto *logHeader = new QHBoxLayout;
+    logHeader->addWidget(translated(new QLabel, "text", "otg.log.title"), 1);
+    auto *clearLog = translated(new QPushButton, "text", "otg.action.clear_log");
+    clearLog->setObjectName("clearLogButton");
+    logHeader->addWidget(clearLog);
+    root->addLayout(logHeader);
     m_log = new QPlainTextEdit;
+    m_log->setObjectName("runtimeLog");
     m_log->setReadOnly(true);
     m_log->setMaximumBlockCount(1200);
     m_log->setMinimumHeight(100);
     setTranslatedProperty(m_log, "placeholderText", "otg.log.placeholder");
     root->addWidget(m_log, 1);
+    connect(clearLog, &QPushButton::clicked, m_log, &QPlainTextEdit::clear);
     setCentralWidget(central);
 
     m_adb->setText(settings.value("adb", findAdb()).toString());
