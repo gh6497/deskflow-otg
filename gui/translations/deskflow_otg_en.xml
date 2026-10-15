@@ -54,6 +54,8 @@
   <message id="otg.action.connect"><source>Connect</source><translation>Connect</translation></message>
   <message id="otg.action.disconnect"><source>Disconnect</source><translation>Disconnect</translation></message>
   <message id="otg.log.placeholder"><source>Runtime logs will appear here</source><translation>Runtime logs will appear here</translation></message>
+  <message id="otg.log.title"><source>Runtime logs</source><translation>Runtime logs</translation></message>
+  <message id="otg.action.clear_log"><source>Clear logs</source><translation>Clear logs</translation></message>
   <message id="otg.size.absolute_note"><source> (original size ÷ multiplier; applied on connection)</source><translation> (original size ÷ multiplier; applied on connection)</translation></message>
   <message id="otg.size.relative_note"><source> (relative mode uses the original size)</source><translation> (relative mode uses the original size)</translation></message>
   <message id="otg.device.adb_not_found"><source>ADB not found. Select an ADB executable, or enter the USB serial number and dimensions manually.</source><translation>ADB not found. Select an ADB executable, or enter the USB serial number and dimensions manually.</translation></message>
