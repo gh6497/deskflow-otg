@@ -19,6 +19,63 @@ int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
     const auto args = app.arguments();
+    if (args.contains("--usb-watch")) {
+        const auto mode = qEnvironmentVariable("OTG_TEST_USB_WATCH");
+        if (mode == "registration-failure")
+            return 1;
+        if (mode == "timeout")
+            return app.exec();
+        if (mode == "malformed") {
+            output("invalid JSON\n");
+            return app.exec();
+        }
+        if (mode != "events" && mode != "exit-after-ready")
+            return 3; // Default mock backend does not support hotplug.
+        output("{\"event\":\"watch-");
+        QTimer::singleShot(20, &app, [] { output("ready\",\"version\":1}\n"); });
+        if (mode == "exit-after-ready") {
+            QTimer::singleShot(100, &app, &QCoreApplication::quit);
+        } else {
+            // Tests inject notifications through stdin; unlike the real watcher,
+            // this mock deliberately supports arbitrary/malformed event lines.
+            std::thread([&app] {
+                char buffer[4096];
+                while (std::fgets(buffer, sizeof(buffer), stdin)) {
+                    const QByteArray line(buffer);
+                    QMetaObject::invokeMethod(&app, [line] { output(line.constData()); }, Qt::QueuedConnection);
+                }
+                QMetaObject::invokeMethod(&app, &QCoreApplication::quit, Qt::QueuedConnection);
+            }).detach();
+        }
+        return app.exec();
+    }
+    if (args.contains("--usb-scan")) {
+        const auto logPath = qEnvironmentVariable("OTG_TEST_USB_SCAN_LOG");
+        if (!logPath.isEmpty()) {
+            QFile log(logPath);
+            if (log.open(QIODevice::WriteOnly | QIODevice::Append))
+                log.write("scan\n");
+        }
+        const auto path = qEnvironmentVariable("OTG_TEST_USB_SNAPSHOT");
+        if (!path.isEmpty()) {
+            QFile file(path);
+            if (!file.open(QIODevice::ReadOnly))
+                return 7;
+            const auto data = file.readAll();
+            const int delay = qEnvironmentVariableIntValue("OTG_TEST_USB_SCAN_DELAY");
+            if (delay > 0) {
+                QTimer::singleShot(delay, &app, [data, &app] {
+                    output(data.constData());
+                    app.quit();
+                });
+                return app.exec();
+            }
+            output(data.constData());
+        } else {
+            output("{\"version\":1,\"devices\":[{\"id\":\"1:2\",\"serial\":\"TEST123\"}]}\n");
+        }
+        return 0;
+    }
     if (args.contains("devices")) {
         output("List of devices attached\nTEST123 device usb:1-2 model:Pixel_Test transport_id:1\n");
         return 0;
@@ -75,7 +132,7 @@ int main(int argc, char **argv)
         const auto serial = args.value(args.indexOf("--serial") + 1);
         if (serial == "reject")
             return 5;
-        output("{\"event\":\"usb-ready\"}\n");
+        output("{\"event\":\"usb-ready\",\"usb-id\":\"1:2\"}\n");
         if (serial != "slow") {
             // Split across reads to exercise the line protocol framing.
             output("{\"event\":");

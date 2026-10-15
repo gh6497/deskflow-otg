@@ -36,6 +36,7 @@ public:
 signals:
     void changed(Session::State state, const QString &message);
     void log(const QString &message);
+    void usbAttached(const QString &id, const QString &serial);
 
 private:
     void setState(State state, const char *id, const QString &detail = {});

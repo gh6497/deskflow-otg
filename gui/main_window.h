@@ -3,8 +3,10 @@
 
 #include "device_info.h"
 #include "session.h"
+#include "usb_auto_connect.h"
 #include <QMainWindow>
 #include <QPointer>
+#include <QVariantMap>
 
 class QCheckBox;
 class QAction;
@@ -26,6 +28,7 @@ signals:
     void exitReady();
 protected:
     virtual bool trayAvailable() const;
+    virtual QString bridgeExecutable() const;
     void closeEvent(QCloseEvent *event) override;
     void changeEvent(QEvent *event) override;
 private:
@@ -45,6 +48,9 @@ private:
     void readDevice();
     void connectDevice();
     void saveSettings();
+    QVariantMap deviceProfile() const;
+    void applyDeviceProfile(const QVariantMap &profile);
+    void rememberDevice();
     void updateEnabled();
     QSize virtualScreenSize() const;
     void updateVirtualSize();
@@ -58,6 +64,9 @@ private:
     QList<TextBinding> m_textBindings;
     QComboBox *m_language;
     Session m_session;
+    UsbAutoConnect m_autoConnect;
+    QMap<QString, QVariantMap> m_profiles;
+    QVariantMap m_pendingProfile;
     QSystemTrayIcon *m_tray = nullptr;
     QAction *m_trayDisconnect = nullptr;
     QWidget *m_form;
@@ -66,6 +75,7 @@ private:
     QSpinBox *m_width, *m_height, *m_port;
     QDoubleSpinBox *m_sensitivity;
     QCheckBox *m_manage;
+    QCheckBox *m_autoConnectEnabled;
     QPushButton *m_refresh, *m_connect, *m_disconnect;
     QLabel *m_status, *m_deviceStatus;
     QLabel *m_virtualSize;

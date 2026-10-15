@@ -3,8 +3,10 @@
 #include "i18n.h"
 #include "build_version.h"
 #include <QAction>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QFile>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
@@ -23,9 +25,118 @@ protected:
     bool trayAvailable() const override { return available; }
 };
 
+class AutoConnectTestWindow : public TrayTestWindow {
+protected:
+    QString bridgeExecutable() const override
+    {
+        return QCoreApplication::applicationDirPath() + "/test_peer"
+#ifdef Q_OS_WIN
+            ".exe"
+#endif
+            ;
+    }
+};
+
 class WindowTest : public QObject {
     Q_OBJECT
 private slots:
+    void failedConnectionNotRemembered()
+    {
+        QTemporaryDir settingsDir;
+        QVERIFY(settingsDir.isValid());
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDir.path());
+        QCoreApplication::setOrganizationName("otg-test");
+        QCoreApplication::setApplicationName("usb-failure-test");
+        QSettings settings;
+        settings.setValue("adb", "");
+        settings.setValue("manageServer", false);
+        AutoConnectTestWindow window;
+        QCoreApplication::processEvents();
+        window.findChild<QLineEdit *>("usbSerial")->setText("reject");
+        auto *session = window.findChild<Session *>();
+        window.findChild<QPushButton *>("connectButton")->click();
+        QTRY_COMPARE(session->state(), Session::State::Idle);
+        QCOMPARE(settings.beginReadArray("rememberedDevices"), 0);
+        settings.endArray();
+        window.findChild<QAction *>("trayQuit")->trigger();
+    }
+    void autoConnectWithoutAdb()
+    {
+        QTemporaryDir settingsDir;
+        QVERIFY(settingsDir.isValid());
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDir.path());
+        QCoreApplication::setOrganizationName("otg-test");
+        QCoreApplication::setApplicationName("usb-auto-connect-test");
+        QSettings settings;
+        settings.setValue("adb", "");
+        settings.setValue("manageServer", false);
+        settings.setValue("language", "en");
+        const QString snapshotFile = settingsDir.filePath("usb.json");
+        auto writeSnapshot = [&](const QByteArray &data) {
+            QFile file(snapshotFile);
+            if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                return false;
+            return file.write(data) == data.size();
+        };
+        const QByteArray phone = "{\"version\":1,\"devices\":[{\"id\":\"1:2\",\"serial\":\"TEST123\"}]}";
+        QVERIFY(writeSnapshot(phone));
+        qputenv("OTG_TEST_USB_SNAPSHOT", snapshotFile.toUtf8());
+        const auto restore = qScopeGuard([] { qunsetenv("OTG_TEST_USB_SNAPSHOT"); });
+        {
+            AutoConnectTestWindow window;
+            auto *enabled = window.findChild<QCheckBox *>("autoConnectEnabled");
+            auto *session = window.findChild<Session *>();
+            auto *monitor = window.findChild<UsbAutoConnect *>();
+            auto *serial = window.findChild<QLineEdit *>("usbSerial");
+            auto *width = window.findChild<QSpinBox *>("screenWidth");
+            auto *multiplier = window.findChild<QDoubleSpinBox *>("sensitivityMultiplier");
+            auto *button = window.findChild<QPushButton *>("connectButton");
+            QVERIFY(enabled && session && monitor && serial && width && multiplier && button);
+            QVERIFY(!enabled->isChecked());
+            // First connect manually with no ADB, then remember only on success.
+            QCoreApplication::processEvents();
+            serial->setText("TEST123");
+            width->setValue(1234);
+            multiplier->setValue(2.0);
+            enabled->setChecked(true);
+            button->click();
+            QTRY_COMPARE(session->state(), Session::State::Connected);
+            QCOMPARE(settings.beginReadArray("rememberedDevices"), 1);
+            settings.setArrayIndex(0);
+            QCOMPARE(settings.value("profile").toMap().value("originalWidth").toInt(), 1234);
+            settings.endArray();
+            QVERIFY(monitor->acceptSnapshot(phone));
+            window.findChild<QAction *>("trayDisconnect")->trigger();
+            QTRY_COMPARE(session->state(), Session::State::Idle);
+            QVERIFY(monitor->acceptSnapshot(phone));
+            QCOMPARE(session->state(), Session::State::Idle);
+            // Reinsert restores the phone's settings, not unsaved form edits.
+            width->setValue(999);
+            multiplier->setValue(1.0);
+            QVERIFY(writeSnapshot("{\"version\":1,\"devices\":[]}"));
+            QVERIFY(monitor->acceptSnapshot("{\"version\":1,\"devices\":[]}"));
+            window.show();
+            window.close(); // Tray/background auto-connect remains active.
+            QVERIFY(!window.isVisible());
+            QVERIFY(writeSnapshot(phone));
+            monitor->poll();
+            QTRY_COMPARE(session->state(), Session::State::Connected);
+            QCOMPARE(width->value(), 1234);
+            QCOMPARE(multiplier->value(), 2.0);
+            window.findChild<QAction *>("trayQuit")->trigger();
+            QTRY_COMPARE(session->state(), Session::State::Idle);
+        }
+        // Startup with a remembered phone connects without invoking ADB.
+        AutoConnectTestWindow restored;
+        auto *session = restored.findChild<Session *>();
+        QVERIFY(restored.findChild<QCheckBox *>("autoConnectEnabled")->isChecked());
+        QTRY_COMPARE(session->state(), Session::State::Connected);
+        QCOMPARE(restored.findChild<QSpinBox *>("screenWidth")->value(), 1234);
+        restored.findChild<QAction *>("trayQuit")->trigger();
+        QTRY_COMPARE(session->state(), Session::State::Idle);
+    }
     void aboutVersion()
     {
         QTemporaryDir settingsDir;

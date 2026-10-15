@@ -67,6 +67,7 @@ endif()
 add_executable(deskflow-otg
   src/main.c
   src/aoa_hid.c
+  src/usb_scan.c
   src/bridge.c
   src/deskflow_client.c
   src/keymap.c

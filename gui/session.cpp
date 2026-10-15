@@ -223,11 +223,15 @@ void Session::readBridgeEvents()
     while ((end = m_events.indexOf('\n')) >= 0) {
         const auto line = m_events.left(end);
         m_events.remove(0, end + 1);
-        const auto event = QJsonDocument::fromJson(line).object().value("event").toString();
+        const auto object = QJsonDocument::fromJson(line).object();
+        const auto event = object.value("event").toString();
         if (event == "connected" && m_state == State::Starting) {
             m_deadline.stop();
             setState(State::Connected, "otg.status.connected");
         } else if (event == "usb-ready") {
+            const auto id = object.value("usb-id").toString();
+            if (!id.isEmpty())
+                emit usbAttached(id, m_options.serial);
             emit log(qtTrId("otg.log.usb_ready"));
         }
     }
