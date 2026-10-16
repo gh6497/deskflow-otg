@@ -2,6 +2,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "../src/deskflow_client.c"
+#ifndef _WIN32
+#include <time.h>
+#endif
 
 #define CHECK(condition) do { \
     if (!(condition)) { \
@@ -15,6 +18,9 @@ static int cancel_check_count;
 static int cancel_partial(void) { return ++cancel_check_count > 1; }
 static void accepted(void *ud) { ++*(int *)ud; }
 static int tick_twice(void *ud) { return ++*(int *)ud == 2; }
+#ifndef _WIN32
+static int cancel_stalled_read(void) { return ++cancel_check_count > 4; }
+#endif
 
 static void check_acceptance(df_socket fd)
 {
@@ -118,6 +124,23 @@ int main(void)
     CHECK(recv_packet(fds[1], &payload) == 4);
     CHECK(memcmp(payload, "CNOP", 4) == 0);
     free(payload);
+
+#ifndef _WIN32
+    /* A stalled packet must keep pumping transport/cancellation checks at the
+     * configured cadence, not freeze a queued key release for 500ms. */
+    CHECK(io_write_full(fds[1], partial_header, sizeof(partial_header)) == 0);
+    df_client stalled = {0};
+    stalled.fd = fds[0];
+    stalled.cbs.tick_interval_ms = 1;
+    cancel_check_count = 0;
+    df_client_set_stop_check(cancel_stalled_read);
+    struct timespec start, end;
+    CHECK(clock_gettime(CLOCK_MONOTONIC, &start) == 0);
+    CHECK(df_client_run(&stalled, NULL) == -1);
+    CHECK(clock_gettime(CLOCK_MONOTONIC, &end) == 0);
+    CHECK((end.tv_sec - start.tv_sec) * 1000000000LL + end.tv_nsec - start.tv_nsec < 250000000);
+    df_client_set_stop_check(NULL);
+#endif
 
     /* Shut down the writer while keeping the peer open for an EOF check. */
 #ifdef _WIN32

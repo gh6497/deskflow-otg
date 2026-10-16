@@ -182,6 +182,11 @@ for f in src/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only -Isrc -Ibu
   TCP、清空输入，原手机回来后重新握手；不能以重新删除配对作为正常重连方案。
   GATT 固定 `0x0100..0x0111`（characteristic Handle 为 value handle），含 LED 输出、
   Control Point；长读处理 offset。`test_ble_gatt.c` 使用私有 D-Bus，不访问系统蓝牙；
+  常驻会话的 REPORT/POLL 为非阻塞、单请求在途（仍兼容 IPC v2），状态查询间隔 5ms。
+  最多排队 64 条报告，只替换相邻纯移动；按下位置、松键、滚轮、键盘及范围变化必须保序。
+  溢出/回复超时关闭 IPC 触发释放，断线清空待发输入；退出先收完在途回复再请求 DETACH。
+  服务等待 socket 可读，活动期间用最多 1ms 超时驱动 BlueZ/末条移动，不得恢复每请求固定休眠。
+  指针默认 15ms pacing，收到实测连接间隔后直接跟随，不再另加 60Hz 上限。
   `test_ble_supervisor.c` mock MGMT 验证恢复，`test_ble_link.c` 验证实际 HCI 确认，
   `test_ble_pointer.c` 验证坐标/状态屏障与已配对 CCC 保留重连。历史 Python 仅作回归参考。
   构建/模拟不等于真机免重配或硬件恢复验证完成，仍需用户实测确认。

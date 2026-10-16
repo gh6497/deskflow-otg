@@ -204,11 +204,89 @@ static void test_client_rpc(bool abrupt)
     CHECK(send(ipc[1],"interval_us=7500\n",17,0)==17);
     CHECK(session_poll(s));
     uint8_t report[8]={0,0,4};CHECK(session_send(s,1,report,8));
+    gint64 deadline=g_get_monotonic_time()+1000000;
+    while(s->in_flight || s->count) {
+        CHECK(g_get_monotonic_time()<deadline && session_pump(s,false));
+        g_usleep(100);
+    }
     if(abrupt) {
         close(s->fd);s->fd=-1; /* No DETACH; service must react to EOF. */
     }
     otg_ble_session_destroy(s);close(ipc[1]);
     int status;CHECK(waitpid(pid,&status,0)==pid && WIFEXITED(status) && WEXITSTATUS(status)==0);
+}
+
+static void test_async_reports(void)
+{
+    int fds[2];pair_socket(fds);
+    struct session_owner owner={.session={.fd=fds[0],.latency_fd=-1,.alive=true,.ready=true}};
+    struct otg_ble_session *s=&owner.session;
+    struct message m;
+    uint8_t report[8]={2,0,0,0,0,0,0,0};
+    CHECK(session_send(s,2,report,8));
+    CHECK(receive_message(fds[1],&m)==1 && m.operation==REPORT);
+    /* Deliberately withhold the service reply. Input processing must continue
+     * and keep only the latest hover/drag, without losing any state edges. */
+    for(unsigned i=1;i<=1000;i++) {
+        report[2]=(uint8_t)i;report[3]=(uint8_t)(i>>8);
+        CHECK(session_send(s,2,report,8));
+    }
+    CHECK(s->in_flight && s->count==1);
+    CHECK(!receive_message(fds[1],&m)); /* No unbounded kernel-side backlog. */
+    uint8_t expected[10][8];uint16_t ids[10];unsigned total=0;
+#define EXPECT(id) do {ids[total]=id;memcpy(expected[total++],report,8);}while(0)
+    EXPECT(2); /* Latest hover, before the press. */
+    report[0]=3;report[1]=1;CHECK(session_send(s,2,report,8));EXPECT(2);
+    for(unsigned i=1001;i<=2000;i++) {
+        report[2]=(uint8_t)i;report[3]=(uint8_t)(i>>8);
+        CHECK(session_send(s,2,report,8));
+    }
+    EXPECT(2); /* Press location must not be overwritten by this drag. */
+    report[0]=2;report[1]=0;CHECK(session_send(s,2,report,8));EXPECT(2);
+    report[6]=1;CHECK(session_send(s,2,report,8));EXPECT(2);
+    CHECK(session_send(s,2,report,8));EXPECT(2); /* Two scroll steps, not one. */
+    memset(report,0,8);report[2]=4;CHECK(session_send(s,1,report,8));EXPECT(1);
+    report[2]=0;CHECK(session_send(s,1,report,8));EXPECT(1);
+    CHECK(session_send(s,2,report,8));EXPECT(2); /* Range exit. */
+#undef EXPECT
+    CHECK(s->count==total);
+    const uint8_t ready[2]={1,0};
+    for(unsigned i=0;i<total;i++) {
+        CHECK(send_message(fds[1],REPLY,0,ready,2));CHECK(session_pump(s,false));
+        CHECK(receive_message(fds[1],&m)==1 && m.operation==REPORT && m.id==ids[i]);
+        CHECK(!memcmp(m.data,expected[i],8));
+    }
+    CHECK(send_message(fds[1],REPLY,0,ready,2));CHECK(session_pump(s,false));
+    CHECK(!s->in_flight && !s->count);
+    /* Repeated cancellation/tick checks within one status period are local. */
+    s->last_request=g_get_monotonic_time();
+    CHECK(session_poll(s));CHECK(session_poll(s));
+    CHECK(!receive_message(fds[1],&m));
+    s->last_request=0;CHECK(session_poll(s));
+    CHECK(receive_message(fds[1],&m)==1 && m.operation==POLL_SESSION);
+    for(unsigned i=0;i<100;i++)CHECK(session_poll(s));
+    CHECK(!receive_message(fds[1],&m));
+    report[0]=2;CHECK(session_send(s,2,report,8));
+    report[2]=9;CHECK(session_send(s,2,report,8));CHECK(s->count);
+    const uint8_t offline[2]={0,0};
+    CHECK(send_message(fds[1],REPLY,0,offline,2));CHECK(session_pump(s,false));
+    CHECK(!s->ready && !s->count && !s->have_pointer_state);
+    s->last_request=0;CHECK(session_pump(s,true));
+    CHECK(receive_message(fds[1],&m)==1 && m.operation==POLL_SESSION);
+    CHECK(send_message(fds[1],REPLY,0,ready,2));CHECK(session_pump(s,false));
+    CHECK(s->ready && !receive_message(fds[1],&m)); /* No stale replay. */
+    s->last_request=0;CHECK(session_pump(s,true));s->request_deadline=0;
+    CHECK(!session_pump(s,false) && !s->alive && !s->ready);
+    close(fds[0]);close(fds[1]);
+
+    pair_socket(fds);
+    owner.session=(struct otg_ble_session){.fd=fds[0],.latency_fd=-1,.alive=true,.ready=true};
+    CHECK(session_send(s,1,report,8));
+    for(unsigned i=0;i<MAX_REPORTS;i++)CHECK(session_send(s,1,report,8));
+    CHECK(!session_send(s,1,report,8)); /* Fail closed instead of losing release. */
+    CHECK(!s->alive && !s->ready);
+    CHECK(receive_message(fds[1],&m)==1);CHECK(receive_message(fds[1],&m)==-1);
+    close(fds[0]);close(fds[1]);
 }
 
 static void test_service_process(void)
@@ -257,7 +335,8 @@ static void test_service_process(void)
 
 int main(void)
 {
-    test_packets();test_sessions();test_client_rpc(false);test_client_rpc(true);test_service_process();
+    test_packets();test_sessions();test_client_rpc(false);test_client_rpc(true);
+    test_async_reports();test_service_process();
     puts("PASS: resident GATT sessions, EOF release, retained CCCs, schema/busy/UID guards and real seqpacket framing");
     return 0;
 }
