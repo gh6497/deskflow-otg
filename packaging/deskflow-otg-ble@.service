@@ -1,0 +1,13 @@
+# Optional per-user service, never enabled or started by package installation.
+# GUI also supports an ordinary detached service without systemd.
+[Unit]
+Description=Deskflow OTG resident BLE HID service (%i)
+
+[Service]
+Type=simple
+ExecStart=/opt/deskflow-otg/bin/deskflow-otg --ble-service --adapter %i
+Restart=no
+UMask=0077
+
+[Install]
+WantedBy=default.target

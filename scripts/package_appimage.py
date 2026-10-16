@@ -60,7 +60,7 @@ def main():
         apprun.chmod(0o755)
         (appdir / "deskflow-otg.desktop").write_text(
             "[Desktop Entry]\nType=Application\nName=Deskflow OTG\n"
-            "Comment=Control an Android device with Deskflow via USB\n"
+            "Comment=Control an Android device with Deskflow via USB or Bluetooth LE\n"
             "Exec=deskflow-otg-gui\nIcon=deskflow-otg\n"
             "Terminal=false\nCategories=Utility;\n", encoding="utf-8")
         icon = pathlib.Path(__file__).resolve().parent.parent / "packaging/deskflow-otg.svg"

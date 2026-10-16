@@ -220,6 +220,18 @@ for f in src/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only -Isrc -Ibu
 
 ## 可选桌面 GUI
 
+- Linux BLE 正式接入在同一 `deskflow-otg` 中分为 `--ble-service` 常驻进程与
+  `--transport ble --ble-session --ble-peer MAC` 桥接会话；BLE 桥接必须指定 BlueZ 身份地址。
+  本地 IPC 协议现为 v2，服务生命周期内固定目标，不兼容旧实验常驻进程；迁移必须显式停止
+  旧服务，不得擅自杀掉正在使用的连接。`--ble-status` 只读，`--ble-stop-service` 仅同 UID
+  且空闲/清理成功时停止（会注销 GATT，丢失 CCC 连续性）。GATT 方法仅允许 BlueZ 调用，
+  键鼠 Value 信号定向发送给 BlueZ；目标需已配对且适配器仅这一个连接，多连接关闭输入。
+  GUI 蓝牙模式不扫描 ADB/USB，不使用 USB 自动连接；后台启动/复用普通用户服务，退出保留服务。
+  仅 BLE 隔离默认关闭，须确认全适配器断连影响，再用 `/usr/bin/pkexec` 认证；监督器识别
+  PKEXEC_UID/SUDO_UID，继承桥接 stdin，实现取消/EOF 优雅恢复；GUI 不强杀特权恢复进程。
+  DEB 根据 BUILD_FEATURES.json 添加运行依赖和可选用户 systemd 单元，但安装不自动启动服务。
+  GUI/新身份门控的离线通过不代表提权、缓存迁移、系统重启或完整真机输入验收完成。
+
 - `-DBUILD_GUI=ON` 启用 Qt Widgets 桌面端；默认 OFF 保留纯 C 构建。GUI 支持 Linux、macOS、Windows。
 - `gui/main_window.cpp` 管理界面、ADB 异步查询和 QSettings；`device_info.cpp` 解析设备/尺寸/方向并生成布局。
 - GUI 的可选 USB 自动连接默认关闭；成功 Connected 后按 USB 序列号保存独立配置。

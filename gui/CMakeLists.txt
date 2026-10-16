@@ -11,6 +11,9 @@ add_library(otg_gui_support STATIC
 target_include_directories(otg_gui_support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_include_directories(otg_gui_support PUBLIC "${PROJECT_BINARY_DIR}/generated")
 target_link_libraries(otg_gui_support PUBLIC Qt6::Network)
+if(BUILD_BLE)
+  target_compile_definitions(otg_gui_support PUBLIC OTG_GUI_HAVE_BLE=1)
+endif()
 # Keep all display text in the two catalogs; code references stable IDs only.
 # Catalogs are maintained explicitly, not regenerated from source literals.
 qt_add_lrelease(otg_gui_support

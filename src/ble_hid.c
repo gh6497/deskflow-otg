@@ -226,6 +226,29 @@ static void reset_reports(struct otg_ble_hid *b)
     b->pointer_last_sent_ns = 0;
 }
 
+/* Pin the BlueZ identity address, not a transient advertising address. Never
+ * switch a live GATT application's peer: its cached CCCs belong to that peer. */
+bool otg_ble_hid_set_peer(struct otg_ble_hid *b, const char *address)
+{
+    if (!address || strlen(address) != 17) return false;
+    char identity[18];
+    for (unsigned i = 0; i < 17; ++i) {
+        if (i % 3 == 2) {
+            if (address[i] != ':') return false;
+            identity[i] = '_';
+        } else {
+            if (!g_ascii_isxdigit(address[i])) return false;
+            identity[i] = g_ascii_toupper(address[i]);
+        }
+    }
+    identity[17] = 0;
+    char *path = g_strdup_printf("%s/dev_%s", b->adapter_path, identity);
+    bool ok = !b->peer_path || !strcmp(b->peer_path, path);
+    if (ok && !b->peer_path) b->peer_path = g_strdup(path);
+    g_free(path);
+    return ok;
+}
+
 /* BlueZ 5.72 retains CCC subscriptions for bonded peers across disconnects;
  * StopNotify is NOT a physical-link disconnect notification. Gate readiness
  * on Device1 Connected/Paired and keep the service alive for cached CCCs. */
@@ -366,11 +389,42 @@ static GVariant *props(const struct ble_object *o, const char *interface)
 }
 
 static void changed(struct otg_ble_hid *b, int report)
-{ struct ble_object o={b,BLE_REPORT,report}; GVariantBuilder d; g_variant_builder_init(&d,G_VARIANT_TYPE("a{sv}")); g_variant_builder_add(&d,"{sv}","Value",bytes(b->values[report],b->value_size[report])); g_dbus_connection_emit_signal(b->bus,NULL,path_for(&o),"org.freedesktop.DBus.Properties","PropertiesChanged",g_variant_new("(s@a{sv}@as)","org.bluez.GattCharacteristic1",g_variant_builder_end(&d),g_variant_new_strv(NULL,0)),NULL); }
+{
+    char *owner = NULL;
+    if (b->devices) {
+        refresh_peer(b);
+        if (!b->peer_connected) return;
+        owner = g_dbus_object_manager_client_get_name_owner(G_DBUS_OBJECT_MANAGER_CLIENT(b->devices));
+        if (!owner) return;
+    }
+    struct ble_object o={b,BLE_REPORT,report};
+    GVariantBuilder d; g_variant_builder_init(&d,G_VARIANT_TYPE("a{sv}"));
+    g_variant_builder_add(&d,"{sv}","Value",bytes(b->values[report],b->value_size[report]));
+    /* Input reports are private to BlueZ, never broadcast on the system bus. */
+    g_dbus_connection_emit_signal(b->bus,owner,path_for(&o),"org.freedesktop.DBus.Properties",
+        "PropertiesChanged",g_variant_new("(s@a{sv}@as)","org.bluez.GattCharacteristic1",
+        g_variant_builder_end(&d),g_variant_new_strv(NULL,0)),NULL);
+    g_free(owner);
+}
+
+static bool target_options(struct otg_ble_hid *b, GVariant *options)
+{
+    if (!b->peer_path) return true;
+    const char *device = NULL;
+    return g_variant_lookup(options,"device","&o",&device) && !strcmp(device,b->peer_path);
+}
 
 static void method(GDBusConnection *c,const gchar *sender,const gchar *path,const gchar *iface,const gchar *name,GVariant *p,GDBusMethodInvocation *inv,gpointer user)
 {
     struct ble_object *o=user; struct otg_ble_hid *b=o->b;
+    if (b->devices) {
+        char *owner=g_dbus_object_manager_client_get_name_owner(G_DBUS_OBJECT_MANAGER_CLIENT(b->devices));
+        bool allowed=owner && sender && !strcmp(owner,sender);
+        g_free(owner);
+        if(!allowed) {
+            g_dbus_method_invocation_return_dbus_error(inv,"org.bluez.Error.NotAuthorized","BlueZ only");return;
+        }
+    }
     if (o->kind==BLE_ROOT && !strcmp(name,"GetManagedObjects")) { GVariantBuilder top; g_variant_builder_init(&top,G_VARIANT_TYPE("a{oa{sa{sv}}}")); for (int i=1;i<BLE_OBJECT_COUNT-1;i++) { struct ble_object *x=&b->objects[i]; if (!x->b) continue; GVariantBuilder interfaces; g_variant_builder_init(&interfaces,G_VARIANT_TYPE("a{sa{sv}}")); g_variant_builder_add_value(&interfaces,g_variant_new_dict_entry(g_variant_new_string(iface_for(x->kind)),props(x,iface_for(x->kind)))); g_variant_builder_add_value(&top,g_variant_new_dict_entry(g_variant_new_object_path(path_for(x)),g_variant_builder_end(&interfaces))); } g_dbus_method_invocation_return_value(inv,g_variant_new("(@a{oa{sa{sv}}})",g_variant_builder_end(&top))); return; }
     if (!strcmp(iface,"org.freedesktop.DBus.Properties") && !strcmp(name,"GetAll")) { const char *which; g_variant_get(p,"(&s)",&which); g_dbus_method_invocation_return_value(inv,g_variant_new("(@a{sv})",props(o,which))); return; }
     if (o->kind==BLE_ADV && !strcmp(name,"Release")) { g_dbus_method_invocation_return_value(inv,NULL); return; }
@@ -384,7 +438,9 @@ static void method(GDBusConnection *c,const gchar *sender,const gchar *path,cons
         else if(o->kind==BLE_LEDS){value=&b->leds;size=1;}
         else {value=b->values[o->report];size=b->value_size[o->report];}
         GVariant *options=g_variant_get_child_value(p,0); guint16 offset=0;
+        bool allowed=(o->kind!=BLE_REPORT && o->kind!=BLE_LEDS) || target_options(b,options);
         g_variant_lookup(options,"offset","q",&offset); g_variant_unref(options);
+        if(!allowed){g_dbus_method_invocation_return_dbus_error(inv,"org.bluez.Error.NotAuthorized","wrong target");return;}
         if(offset>size){g_dbus_method_invocation_return_dbus_error(inv,"org.bluez.Error.InvalidOffset","offset exceeds value");return;}
         g_dbus_method_invocation_return_value(inv,g_variant_new("(@ay)",bytes(value ? value+offset : NULL,size-offset))); return;
     }
@@ -394,7 +450,7 @@ static void method(GDBusConnection *c,const gchar *sender,const gchar *path,cons
         GVariant *v,*options; g_variant_get(p,"(@ay@a{sv})",&v,&options);
         gsize size; const uint8_t *value=g_variant_get_fixed_array(v,&size,1);
         guint16 offset=0; g_variant_lookup(options,"offset","q",&offset);
-        bool valid=!offset && size==1 && (o->kind==BLE_LEDS || value[0]<=1);
+        bool valid=target_options(b,options) && !offset && size==1 && (o->kind==BLE_LEDS || value[0]<=1);
         if(valid){if(o->kind==BLE_LEDS)b->leds=value[0];else {bool suspend=value[0]==0;reset_reports(b);b->suspended=suspend;}}
         g_variant_unref(options);g_variant_unref(v);
         if(!valid){g_dbus_method_invocation_return_dbus_error(inv,"org.bluez.Error.InvalidArguments","expected one valid byte at offset zero");return;}

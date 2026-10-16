@@ -2,6 +2,7 @@
 """Package an installed Linux distribution tree as a Debian package."""
 
 import argparse
+import json
 import pathlib
 import shutil
 import subprocess
@@ -21,6 +22,16 @@ def main():
     args = parser.parse_args()
 
     stage = args.stage.resolve()
+    features_path = stage / "share/deskflow-otg/BUILD_FEATURES.json"
+    ble = False
+    if features_path.exists():
+        try:
+            features = json.loads(features_path.read_text(encoding="utf-8"))
+            if not isinstance(features.get("ble"), bool):
+                raise ValueError("ble must be boolean")
+            ble = features["ble"]
+        except (ValueError, AttributeError) as exc:
+            parser.error(f"Invalid BUILD_FEATURES.json: {exc}")
     try:
         version = package_version(stage, args.version)
     except ValueError as exc:
@@ -43,6 +54,12 @@ def main():
         bindir = root / "usr/bin"
         bindir.mkdir(parents=True)
         (bindir / "deskflow-otg-gui").symlink_to("/opt/deskflow-otg/bin/deskflow-otg-gui")
+        (bindir / "deskflow-otg").symlink_to("/opt/deskflow-otg/bin/deskflow-otg")
+        if ble:
+            units = root / "usr/lib/systemd/user"
+            units.mkdir(parents=True)
+            shutil.copyfile(pathlib.Path(__file__).resolve().parent.parent /
+                            "packaging/deskflow-otg-ble@.service", units / "deskflow-otg-ble@.service")
         applications = root / "usr/share/applications"
         applications.mkdir(parents=True)
         icons = root / "usr/share/icons/hicolor/scalable/apps"
@@ -51,7 +68,7 @@ def main():
                         icons / "deskflow-otg.svg")
         (applications / "deskflow-otg.desktop").write_text(
             "[Desktop Entry]\nType=Application\nName=Deskflow OTG\n"
-            "Comment=Control an Android device with Deskflow via USB\n"
+            "Comment=Control an Android device with Deskflow via USB or Bluetooth LE\n"
             "Exec=/opt/deskflow-otg/bin/deskflow-otg-gui\n"
             "Icon=deskflow-otg\n"
             "Terminal=false\nCategories=Utility;\n", encoding="utf-8")
@@ -61,14 +78,16 @@ def main():
         # Qt and ADB are bundled, but their platform plugins still need system libraries.
         dependencies = ("libusb-1.0-0, libc6, libstdc++6, libgl1, libegl1, "
                         "libx11-6, libxcb1, libxkbcommon0, libxcb-cursor0")
+        if ble:
+            dependencies += ", bluez, libglib2.0-0t64 | libglib2.0-0, pkexec"
         (control / "control").write_text(
             f"Package: deskflow-otg-gui\nVersion: {version}\nArchitecture: {arch}\n"
             "Maintainer: deskflow-otg contributors <noreply@github.com>\n"
             f"Depends: {dependencies}\n"
             "Section: utils\nPriority: optional\n"
             "Homepage: https://github.com/gh6497/deskflow-otg\n"
-            "Description: Deskflow to Android USB HID bridge\n"
-            " Control an Android device with a Deskflow server via USB AOA HID.\n",
+            "Description: Deskflow to Android HID bridge\n"
+            " Control an Android device via USB AOA HID or Linux Bluetooth LE.\n",
             encoding="utf-8")
         subprocess.run(["dpkg-deb", "--build", "--root-owner-group", str(root), str(output)],
                        check=True)

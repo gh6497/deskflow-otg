@@ -49,6 +49,8 @@ bool otg_ble_hid_set_session(struct otg_ble_hid *b,bool enabled)
     return enabled || !fail_idle;
 }
 void otg_ble_hid_set_interval(struct otg_ble_hid *b,uint64_t us){b->interval=us;}
+bool otg_ble_hid_set_peer(struct otg_ble_hid *b,const char *address)
+{(void)b;return strlen(address)==17;}
 
 static void pair_socket(int *fds)
 {CHECK(!socketpair(AF_UNIX,SOCK_SEQPACKET|SOCK_NONBLOCK|SOCK_CLOEXEC,0,fds));}
@@ -87,6 +89,10 @@ static void test_sessions(void)
     int fds[2];pair_socket(fds);
     struct service s={.client=fds[0],.clean=true,.adapter="hci0"};
     struct message keys=descriptor(1),pointer=descriptor(2),reply;
+    struct message peer={.operation=SELECT_PEER,.size=17,.data="aa:bb:cc:dd:ee:ff"};
+    CHECK(handle_session(&s,&peer));
+    CHECK(!strcmp(s.peer,"AA:BB:CC:DD:EE:FF"));
+    peer.data[0]='Z';CHECK(!handle_session(&s,&peer));peer.data[0]='a';
     CHECK(handle_session(&s,&keys));CHECK(!s.hid && !s.active);
     CHECK(handle_session(&s,&pointer));
     CHECK(created==1 && activated==1 && s.hid->application && s.hid->advertising);
@@ -116,6 +122,8 @@ static void test_sessions(void)
     CHECK(send_message(fds[1],ATTACH,0,NULL,0));handle_pending(&s,&pending);
     CHECK(pending.fd==-1 && s.client==fds[0]);
     CHECK(receive_message(fds[1],&reply)==1 && !reply.id);
+    CHECK(handle_session(&s,&peer));
+    peer.data[0]='1';CHECK(!handle_session(&s,&peer));peer.data[0]='a';
     CHECK(handle_session(&s,&keys) && handle_session(&s,&pointer));
     CHECK(created==1 && activated==2 && fake_ready(s.hid));
     CHECK(!s.hid->report[0][2] && !s.hid->report[1][1]);
@@ -129,6 +137,10 @@ static void test_sessions(void)
     pending=(struct pending_peer){other[0],g_get_monotonic_time()+1000000,true};
     CHECK(send_message(other[1],ATTACH,0,NULL,0));handle_pending(&s,&pending);
     CHECK(receive_message(other[1],&reply)==1 && reply.id==1);close(other[1]);
+    pair_socket(other);
+    pending=(struct pending_peer){other[0],g_get_monotonic_time()+1000000,true};
+    CHECK(send_message(other[1],STOP_SERVICE,0,NULL,0));handle_pending(&s,&pending);
+    CHECK(receive_message(other[1],&reply)==1 && reply.id==1 && !s.shutdown);close(other[1]);
     pair_socket(other);
     pending=(struct pending_peer){other[0],g_get_monotonic_time()+1000000,false};
     CHECK(send_message(other[1],ATTACH,0,NULL,0));handle_pending(&s,&pending);
@@ -232,7 +244,8 @@ static void test_service_process(void)
         otg_ble_session_destroy(client);
         CHECK(otg_ble_service_wait_idle(getuid(),"hci0"));
     }
-    CHECK(!kill(pid,SIGTERM));
+    CHECK(otg_ble_service_status("hci0")==0);
+    CHECK(otg_ble_service_stop("hci0")==0);
     int status;CHECK(waitpid(pid,&status,0)==pid && WIFEXITED(status) && !WEXITSTATUS(status));
     char dir[128];struct sockaddr_un address;
     CHECK(socket_path(getuid(),"hci0",dir,sizeof(dir),&address));

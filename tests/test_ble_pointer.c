@@ -111,6 +111,18 @@ int main(void)
     guint16 handle=0;
     CHECK(g_variant_lookup(properties,"Handle","q",&handle) && handle==0x106);
     g_variant_unref(properties);
+    b.adapter_path="/org/bluez/hci0";
+    CHECK(!otg_ble_hid_set_peer(&b,"invalid"));
+    CHECK(otg_ble_hid_set_peer(&b,"aa:bb:cc:dd:ee:ff"));
+    CHECK(!strcmp(b.peer_path,"/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF"));
+    CHECK(otg_ble_hid_set_peer(&b,"AA:BB:CC:DD:EE:FF"));
+    CHECK(!otg_ble_hid_set_peer(&b,"11:22:33:44:55:66"));
+    GVariant *empty=g_variant_ref_sink(g_variant_new_array(G_VARIANT_TYPE("{sv}"),NULL,0));
+    CHECK(!target_options(&b,empty));g_variant_unref(empty);
+    GVariantBuilder options;g_variant_builder_init(&options,G_VARIANT_TYPE("a{sv}"));
+    g_variant_builder_add(&options,"{sv}","device",g_variant_new_object_path(b.peer_path));
+    GVariant *target=g_variant_ref_sink(g_variant_builder_end(&options));
+    CHECK(target_options(&b,target));g_variant_unref(target);g_free(b.peer_path);
     puts("PASS: latest coordinates, drag, release, wheel, range and cancellation");
     return 0;
 }

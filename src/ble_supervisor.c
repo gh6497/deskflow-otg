@@ -267,9 +267,10 @@ int otg_ble_supervise(int argc,char **argv,const char *adapter,
         return 2;
     }
     const char *uid_string=getenv("SUDO_UID"); char *end=NULL;
+    if(!uid_string)uid_string=getenv("PKEXEC_UID");
     unsigned long uid=uid_string ? strtoul(uid_string,&end,10) : 0;
     struct passwd *user=uid_string && end && !*end && uid>0 && uid<=UINT32_MAX ? getpwuid((uid_t)uid) : NULL;
-    if (!restore_only && !user) {fprintf(stderr,"ERROR: run via sudo from an ordinary user account\n");return 2;}
+    if (!restore_only && !user) {fprintf(stderr,"ERROR: run via sudo or pkexec from an ordinary user account\n");return 2;}
     char *username=user ? g_strdup(user->pw_name) : NULL;
     char *state=g_strdup_printf("/run/deskflow-otg-ble-%s.state",adapter);
     char *lock_path=g_strdup_printf("/run/deskflow-otg-ble-%s.lock",adapter);
@@ -279,7 +280,9 @@ int otg_ble_supervise(int argc,char **argv,const char *adapter,
     bool saved=false;uint32_t original=0;char *original_alias=NULL;
     struct otg_ble_link *link=NULL;int ipc[2]={-1,-1};
     bool resident_session=false;
+    bool gui=false;
     for(int i=1;i<argc;i++)if(!strcmp(argv[i],"--ble-session"))resident_session=true;
+    for(int i=1;i<argc;i++)if(!strcmp(argv[i],"--gui"))gui=true;
     struct stat lock_stat;
     if (lock<0 || fstat(lock,&lock_stat) || lock_stat.st_uid!=0 ||
         !S_ISREG(lock_stat.st_mode) || flock(lock,LOCK_EX|LOCK_NB)) {
@@ -308,6 +311,13 @@ int otg_ble_supervise(int argc,char **argv,const char *adapter,
         fprintf(stderr,"ERROR: start an idle --ble-service as the sudo caller before isolation (no changes made)\n");goto out;
     }
     if(!preflight(bus,object_path,&c)) goto out;
+    if(*stop){result=0;goto out;}
+    if(gui) {
+        struct pollfd input={STDIN_FILENO,POLLIN,0};
+        /* Cancellation while a desktop authentication dialog was open must
+         * not change controller modes after the user has already disconnected. */
+        if(poll(&input,1,0)>0){result=0;goto out;}
+    }
     original=c.settings;original_alias=g_strdup(c.alias);
     if (!snapshot_save(state,&c)) {fprintf(stderr,"ERROR: cannot save recovery snapshot\n");goto out;}
     saved=true;
@@ -322,7 +332,7 @@ int otg_ble_supervise(int argc,char **argv,const char *adapter,
     char **args=g_new0(char *,argc+6);int n=0;
     args[n++]="/usr/sbin/runuser";args[n++]="-u";args[n++]=username;args[n++]="--";args[n++]=executable;
     for (int i=1;i<argc;++i) if (strcmp(argv[i],"--ble-isolate")) args[n++]=argv[i];
-    GSubprocessLauncher *launcher=g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_NONE);
+    GSubprocessLauncher *launcher=g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDIN_INHERIT);
     g_subprocess_launcher_unsetenv(launcher,"OTG_BLE_LATENCY_FD");
     if(socketpair(AF_UNIX,SOCK_DGRAM|SOCK_CLOEXEC|SOCK_NONBLOCK,0,ipc)==0)
         link=otg_ble_link_open(c.index,ipc[0]);

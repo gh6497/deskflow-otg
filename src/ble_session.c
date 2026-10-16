@@ -19,10 +19,10 @@
 #include <unistd.h>
 
 #define SESSION_MAGIC UINT32_C(0x44464253)
-#define SESSION_VERSION 1
+#define SESSION_VERSION 2
 #define MAX_DESC 1024
 static const char *runtime_base="/run/user";
-enum operation { ATTACH=1, REGISTER, REPORT, POLL_SESSION, DETACH, STATUS, REPLY };
+enum operation { ATTACH=1, REGISTER, REPORT, POLL_SESSION, DETACH, STATUS, REPLY, SELECT_PEER, STOP_SERVICE };
 /* Local native ABI only. Version and datagram length are always checked. */
 struct message {
     uint32_t magic;
@@ -34,11 +34,12 @@ struct service {
     struct otg_ble_hid *hid;
     int client;
     unsigned registered;
-    bool active, clean;
+    bool active, clean, shutdown;
     gint64 last_request;
     uint8_t descriptors[2][MAX_DESC];
     uint16_t sizes[2];
     const char *adapter;
+    char peer[18];
 };
 struct otg_ble_session {
     int fd, latency_fd;
@@ -140,6 +141,7 @@ static bool register_descriptor(struct service *s,const struct message *m)
     if(!s->hid) {
         s->hid=otg_ble_hid_create_resident(s->adapter);
         if(!s->hid)return false;
+        if(s->peer[0] && !otg_ble_hid_set_peer(s->hid,s->peer))return false;
         const struct otg_hid_transport_ops *ops=otg_ble_hid_ops();
         if(!ops->register_report(s->hid,AOA_HID_ID_KEYBOARD,s->descriptors[0],s->sizes[0]) ||
            !ops->register_report(s->hid,AOA_HID_ID_MOUSE,s->descriptors[1],s->sizes[1])) {
@@ -160,6 +162,17 @@ static bool reply_status(struct service *s,int fd,bool ok)
 static bool handle_session(struct service *s,const struct message *m)
 {
     switch(m->operation) {
+    case SELECT_PEER:
+        if(s->active || s->registered || m->id || m->size!=17)return false;
+        for(unsigned i=0;i<17;i++) {
+            if(i%3==2 ? m->data[i]!=':' : !g_ascii_isxdigit(m->data[i]))return false;
+        }
+        char peer[18];memcpy(peer,m->data,17);peer[17]=0;
+        for(unsigned i=0;i<17;i++)peer[i]=g_ascii_toupper(peer[i]);
+        if((s->peer[0] && strcmp(s->peer,peer)) ||
+           (s->hid && !otg_ble_hid_set_peer(s->hid,peer)))return false;
+        memcpy(s->peer,peer,sizeof(peer));
+        return true;
     case REGISTER:return register_descriptor(s,m);
     case REPORT:
         if(!s->active || m->size!=8 ||
@@ -188,8 +201,12 @@ static void handle_pending(struct service *s,struct pending_peer *p)
     if(!result && g_get_monotonic_time()<p->deadline)return;
     if(result==1 && !m.size && !m.id) {
         if(m.operation==STATUS)(void)reply_status(s,p->fd,true);
+        else if(m.operation==STOP_SERVICE && p->owner) {
+            bool ok=s->client<0 && !s->active && s->clean;
+            if(reply_status(s,p->fd,ok) && ok)s->shutdown=true;
+        }
         else if(m.operation==ATTACH && p->owner) {
-            bool ok=s->client<0 && s->clean;
+            bool ok=s->client<0 && s->clean && !s->shutdown;
             if(ok){s->client=p->fd;s->registered=0;s->last_request=g_get_monotonic_time();}
             bool sent=reply_status(s,p->fd,ok);
             if(ok && sent){p->fd=-1;return;}
@@ -229,7 +246,7 @@ int otg_ble_service_run(const char *adapter,volatile sig_atomic_t *stop)
     for(size_t i=0;i<G_N_ELEMENTS(pending);i++)pending[i].fd=-1;
     fprintf(stderr,"INFO: resident BLE service listening on %s; idle, no advertisement; keep this process running between bridge sessions\n",address.sun_path);
     result=0;
-    while(!*stop) {
+    while(!*stop && !s.shutdown) {
         if(s.hid && !otg_ble_hid_ops()->poll(s.hid)){result=1;break;}
         if(s.client>=0) {
             struct message m;int n=receive_message(s.client,&m);
@@ -344,6 +361,10 @@ static bool session_rpc(struct otg_ble_session *s,uint16_t op,uint16_t id,
     }
     s->ready=reply.data[0]!=0;return true;
 }
+bool otg_ble_session_set_peer(struct otg_ble_session *s,const char *address)
+{
+    return address && strlen(address)==17 && session_rpc(s,SELECT_PEER,0,address,17);
+}
 static bool session_register(void *ctx,uint16_t id,const uint8_t *data,uint16_t size)
 {return session_rpc(ctx,REGISTER,id,data,size);}
 static bool session_send(void *ctx,uint16_t id,const uint8_t *data,uint16_t size)
@@ -403,4 +424,29 @@ bool otg_ble_service_wait_idle(uid_t uid,const char *adapter)
         g_usleep(10000);
     }while(g_get_monotonic_time()<deadline);
     return false;
+}
+
+int otg_ble_service_status(const char *adapter)
+{
+    int fd=connect_service(getuid(),adapter);
+    struct message reply;
+    bool ok=fd>=0 && request(fd,STATUS,0,NULL,0,&reply);
+    if(fd>=0)close(fd);
+    if(!ok) {
+        puts("{\"version\":2,\"available\":false}");
+        return 1;
+    }
+    printf("{\"version\":2,\"available\":true,\"ready\":%s,\"idle\":%s}\n",
+           reply.data[0]?"true":"false",reply.data[1]?"true":"false");
+    return 0;
+}
+
+int otg_ble_service_stop(const char *adapter)
+{
+    int fd=connect_service(getuid(),adapter);
+    struct message reply;
+    bool ok=fd>=0 && request(fd,STOP_SERVICE,0,NULL,0,&reply);
+    if(fd>=0)close(fd);
+    if(!ok)fprintf(stderr,"ERROR: service unavailable, busy, incompatible or cleanup incomplete; no stop performed\n");
+    return ok ? 0 : 1;
 }

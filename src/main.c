@@ -98,6 +98,9 @@ static void usage(const char *prog)
              "      --ble-restore     Linux: recover saved adapter settings without Python\n"
              "      --ble-service     Linux: resident user GATT service (keep running)\n"
              "      --ble-session     Linux: BLE bridge via an existing resident service\n"
+             "      --ble-peer MAC    Target phone's BlueZ identity address (required for BLE bridge)\n"
+             "      --ble-status      Read resident service JSON status without attaching\n"
+             "      --ble-stop-service Stop an idle user service (loses GATT subscription continuity)\n"
             "      --width W         Virtual screen width, 1..32767 (default %d)\n"
             "      --height H        Virtual screen height, 1..32767 (default %d)\n"
             "      --mouse-mode MODE absolute (default) or relative (compatibility)\n"
@@ -283,8 +286,9 @@ int main(int argc, char **argv)
     const char *serial = NULL;
     const char *transport = "usb";
     const char *adapter = "hci0";
+    const char *ble_peer = NULL;
     int ble_isolate = 0, ble_restore = 0;
-    int ble_service = 0, ble_session = 0;
+    int ble_service = 0, ble_session = 0, ble_status = 0, ble_stop_service = 0;
     unsigned port = DEFAULT_PORT;
     int width = DEFAULT_WIDTH;
     int height = DEFAULT_HEIGHT;
@@ -331,6 +335,12 @@ int main(int argc, char **argv)
             ble_service = 1;
         } else if (strcmp(a, "--ble-session") == 0) {
             ble_session = 1;
+        } else if (strcmp(a, "--ble-status") == 0) {
+            ble_status = 1;
+        } else if (strcmp(a, "--ble-stop-service") == 0) {
+            ble_stop_service = 1;
+        } else if (strcmp(a, "--ble-peer") == 0 && i + 1 < argc) {
+            ble_peer = argv[++i];
         } else if (strcmp(a, "--width") == 0 && i + 1 < argc) {
             width = parse_screen_size(argv[++i]);
         } else if (strcmp(a, "--height") == 0 && i + 1 < argc) {
@@ -361,10 +371,46 @@ int main(int argc, char **argv)
 
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
+#ifndef _WIN32
+    /* This must precede the supervisor dispatch too: losing the GUI's log
+     * pipes must not kill the root process before it restores adapter modes. */
+    if(g_gui)signal(SIGPIPE,SIG_IGN);
+#endif
+    if(strcmp(transport,"usb") && strcmp(transport,"ble")) {
+        fprintf(stderr,"ERROR: invalid transport (use usb or ble)\n");return 2;
+    }
+    if(!strcmp(transport,"ble") || ble_service || ble_session || ble_status || ble_stop_service || ble_restore) {
+        char *end=NULL;
+        unsigned long index=strncmp(adapter,"hci",3) ? UINT16_MAX : strtoul(adapter+3,&end,10);
+        if(!end || end==adapter+3 || *end || adapter[3]<'0' || adapter[3]>'9' || index>=UINT16_MAX) {
+            fprintf(stderr,"ERROR: invalid adapter (use hci0..hci65534)\n");return 2;
+        }
+    }
+    if(!strcmp(transport,"ble") && !ble_service && !ble_status && !ble_stop_service && !ble_restore && !ble_peer) {
+        fprintf(stderr,"ERROR: BLE bridge requires --ble-peer identity-address\n");return 2;
+    }
+    if(ble_peer) {
+        bool valid=strlen(ble_peer)==17;
+        for(unsigned i=0;valid && i<17;i++) {
+            char c=ble_peer[i];
+            valid=i%3==2 ? c==':' : (c>='0'&&c<='9') || (c>='a'&&c<='f') || (c>='A'&&c<='F');
+        }
+        if(!valid || strcmp(transport,"ble") || ble_service || ble_status || ble_stop_service || ble_restore) {
+            fprintf(stderr,"ERROR: --ble-peer requires BLE bridge mode and an identity MAC address\n");return 2;
+        }
+    }
+    if(ble_status || ble_stop_service) {
+        if((ble_status && ble_stop_service) || ble_service || ble_session || ble_isolate || ble_restore || g_gui || serial)return 2;
+#ifdef OTG_HAVE_BLE
+        return ble_status ? otg_ble_service_status(adapter) : otg_ble_service_stop(adapter);
+#else
+        fprintf(stderr,"ERROR: BLE requires BUILD_BLE=ON\n");return 2;
+#endif
+    }
     if(ble_service || ble_session) {
-        if(g_gui || (ble_service && (ble_session || ble_isolate || ble_restore || serial)) ||
-           (ble_session && (ble_restore || strcmp(transport,"ble") || mouse_mode!=OTG_MOUSE_ABSOLUTE))) {
-            fprintf(stderr,"ERROR: --ble-service is standalone; use --ble-session with --transport ble and absolute mouse mode in CLI\n");return 2;
+        if((ble_service && (g_gui || ble_session || ble_isolate || ble_restore || serial)) ||
+           (ble_session && (!ble_peer || ble_restore || strcmp(transport,"ble") || mouse_mode!=OTG_MOUSE_ABSOLUTE))) {
+            fprintf(stderr,"ERROR: --ble-service is standalone; --ble-session requires --transport ble, --ble-peer and absolute mouse mode\n");return 2;
         }
 #ifdef OTG_HAVE_BLE
         if(ble_service)return otg_ble_service_run(adapter,&g_stop);
@@ -373,7 +419,7 @@ int main(int argc, char **argv)
 #endif
     }
     if (ble_isolate || ble_restore) {
-        if (g_gui || (ble_isolate && ble_restore) ||
+        if ((g_gui && ble_restore) || (ble_isolate && ble_restore) ||
             (ble_isolate && strcmp(transport, "ble"))) {
             fprintf(stderr, "ERROR: use --ble-isolate with --transport ble in CLI; --ble-restore is separate\n");
             return 2;
@@ -386,11 +432,6 @@ int main(int argc, char **argv)
 #endif
     }
     if (g_gui) {
-#ifndef _WIN32
-        /* A vanished GUI closes stdout as well as stdin. Let the cancellation
-         * path release HID state rather than exiting on a broken status pipe. */
-        signal(SIGPIPE, SIG_IGN);
-#endif
         df_client_set_stop_check(gui_stop_check);
         if (gui_stop_check()) {
             return 0;
@@ -412,7 +453,13 @@ int main(int argc, char **argv)
 #ifdef OTG_HAVE_BLE
         state.resident_session=ble_session;
         state.transport_owner=ble_session ? (void *)otg_ble_session_open(adapter) :
-                                           (void *)otg_ble_hid_create(adapter);
+                                            (void *)otg_ble_hid_create(adapter);
+        if(state.transport_owner && ble_peer &&
+           !(ble_session ? otg_ble_session_set_peer(state.transport_owner,ble_peer) :
+                           otg_ble_hid_set_peer(state.transport_owner,ble_peer))) {
+            fprintf(stderr,"ERROR: BLE target differs from resident identity; explicitly stop the idle service before changing phones\n");
+            destroy_transport_owner(&state);return 1;
+        }
         const struct otg_hid_transport_ops *ops=ble_session ? otg_ble_session_ops() : otg_ble_hid_ops();
         if (!state.transport_owner || otg_bridge_open_transport(&state.bridge, ops, state.transport_owner,
                                               width, height, mouse_mode) != 0) {
