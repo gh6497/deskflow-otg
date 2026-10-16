@@ -19,6 +19,17 @@ int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
     const auto args = app.arguments();
+    if (args.contains("--ble-status")) {
+        const auto mode = qEnvironmentVariable("OTG_TEST_BLE_STATUS");
+        if (mode == "busy")
+            output("{\"version\":2,\"available\":true,\"idle\":false,\"ready\":true}\n");
+        else if (mode == "incompatible")
+            output("{\"version\":1,\"available\":true,\"idle\":true}\n");
+        else
+            output("{\"version\":2,\"available\":true,\"idle\":true,\"ready\":false}\n");
+        return 0;
+    }
+    if (args.contains("--ble-service")) return 2; // Never start a real daemon in tests.
     if (args.contains("--usb-watch")) {
         const auto mode = qEnvironmentVariable("OTG_TEST_USB_WATCH");
         if (mode == "registration-failure")
@@ -129,10 +140,17 @@ int main(int argc, char **argv)
                 server.nextPendingConnection()->deleteLater();
         });
     } else if (args.contains("--gui")) {
+        const bool ble = args.contains("--ble-session");
+        if (ble && (!args.contains("--ble-peer") || args.contains("--serial") ||
+                    args.value(args.indexOf("--mouse-mode") + 1) != "absolute")) return 9;
         const auto serial = args.value(args.indexOf("--serial") + 1);
         if (serial == "reject")
             return 5;
-        output("{\"event\":\"usb-ready\",\"usb-id\":\"1:2\"}\n");
+        if (!ble) output("{\"event\":\"usb-ready\",\"usb-id\":\"1:2\"}\n");
+        if (ble && qEnvironmentVariableIsSet("OTG_TEST_BLE_RECONNECT")) {
+            QTimer::singleShot(250, &app, [] { output("{\"event\":\"disconnected\"}\n"); });
+            QTimer::singleShot(600, &app, [] { output("{\"event\":\"connected\"}\n"); });
+        }
         if (serial != "slow") {
             // Split across reads to exercise the line protocol framing.
             output("{\"event\":");

@@ -29,6 +29,40 @@
  * s_scrollDelta), matching the Windows WHEEL_DELTA convention. */
 #define WHEEL_DELTA 120
 
+static bool usb_register_report(void *ctx, uint16_t id, const uint8_t *desc,
+                                uint16_t size)
+{
+    return aoa_hid_register(ctx, id, desc, size);
+}
+
+static bool usb_send(void *ctx, uint16_t id, const uint8_t *data, uint16_t size)
+{
+    return aoa_hid_send(ctx, id, data, size);
+}
+
+static bool usb_poll(void *ctx)
+{
+    return aoa_hid_poll(ctx);
+}
+
+static bool usb_ready(void *ctx)
+{
+    return !aoa_hid_is_disconnected(ctx);
+}
+
+static void usb_close(void *ctx)
+{
+    aoa_hid_destroy(ctx);
+}
+
+static const struct otg_hid_transport_ops USB_TRANSPORT = {
+    .register_report = usb_register_report,
+    .send = usb_send,
+    .poll = usb_poll,
+    .ready = usb_ready,
+    .close = usb_close,
+};
+
 /* scrcpy SC_HID_KEYBOARD_REPORT_DESC (8-byte report: 1 modifier + 1 reserved
  * + 6 key slots). */
 static const uint8_t KEYBOARD_REPORT_DESC_FULL[] = {
@@ -200,6 +234,9 @@ static int8_t clamp_i8(int32_t v)
  * sc_hid_keyboard_generate_input_from_key). */
 static void send_keyboard_report(struct otg_bridge *b)
 {
+    if (!b->transport_ops->ready(b->transport_ctx)) {
+        return;
+    }
     uint8_t report[AOA_KEYBOARD_REPORT_SIZE];
     memset(report, 0, sizeof(report));
 
@@ -225,8 +262,8 @@ static void send_keyboard_report(struct otg_bridge *b)
         }
     }
 
-    if (!aoa_hid_send(&b->aoa, AOA_HID_ID_KEYBOARD, report,
-                      sizeof(report))) {
+    if (!b->transport_ops->send(b->transport_ctx, AOA_HID_ID_KEYBOARD, report,
+                                sizeof(report))) {
         LOG_WARN("failed to send keyboard report\n");
     }
 }
@@ -235,13 +272,17 @@ static void send_relative_mouse_report(struct otg_bridge *b, uint8_t buttons,
                                        int8_t dx, int8_t dy, int8_t vscroll,
                                        int8_t hscroll)
 {
+    if (!b->transport_ops->ready(b->transport_ctx)) {
+        return;
+    }
     uint8_t report[AOA_MOUSE_REPORT_SIZE];
     report[0] = buttons;
     report[1] = (uint8_t)dx;
     report[2] = (uint8_t)dy;
     report[3] = (uint8_t)vscroll;
     report[4] = (uint8_t)hscroll;
-    if (!aoa_hid_send(&b->aoa, AOA_HID_ID_MOUSE, report, sizeof(report))) {
+    if (!b->transport_ops->send(b->transport_ctx, AOA_HID_ID_MOUSE, report,
+                                sizeof(report))) {
         LOG_WARN("failed to send mouse report\n");
     }
 }
@@ -250,6 +291,9 @@ static void send_relative_mouse_report(struct otg_bridge *b, uint8_t buttons,
  * A lost move therefore cannot leave the next click at an old location. */
 static void send_mouse_state(struct otg_bridge *b, int8_t vs, int8_t hs)
 {
+    if (!b->transport_ops->ready(b->transport_ctx)) {
+        return;
+    }
     if (b->mouse_mode == OTG_MOUSE_RELATIVE) {
         send_relative_mouse_report(b, b->mouse_buttons, 0, 0, vs, hs);
         return;
@@ -264,7 +308,8 @@ static void send_mouse_state(struct otg_bridge *b, int8_t vs, int8_t hs)
         flags, buttons, (uint8_t)x, (uint8_t)(x >> 8),
         (uint8_t)y, (uint8_t)(y >> 8), (uint8_t)vs, (uint8_t)hs,
     };
-    if (!aoa_hid_send(&b->aoa, AOA_HID_ID_MOUSE, report, sizeof(report))) {
+    if (!b->transport_ops->send(b->transport_ctx, AOA_HID_ID_MOUSE, report,
+                                sizeof(report))) {
         LOG_WARN("failed to send absolute mouse report\n");
     }
 }
@@ -370,11 +415,14 @@ int otg_bridge_open(struct otg_bridge *b, const char *serial,
         aoa_hid_destroy(&b->aoa);
         return -1;
     }
-    if (!aoa_hid_register(&b->aoa, AOA_HID_ID_KEYBOARD,
-                          KEYBOARD_REPORT_DESC_FULL,
-                          sizeof(KEYBOARD_REPORT_DESC_FULL))) {
-        LOG_ERR("could not register AOA keyboard\n");
-        aoa_hid_destroy(&b->aoa);
+    b->transport_ops = &USB_TRANSPORT;
+    b->transport_ctx = &b->aoa;
+    b->external_transport = false;
+    if (!b->transport_ops->register_report(
+            b->transport_ctx, AOA_HID_ID_KEYBOARD, KEYBOARD_REPORT_DESC_FULL,
+            sizeof(KEYBOARD_REPORT_DESC_FULL))) {
+        LOG_ERR("could not register USB keyboard\n");
+        otg_bridge_close(b);
         return -1;
     }
     const uint8_t *mouse_desc = mouse_mode == OTG_MOUSE_ABSOLUTE
@@ -382,9 +430,47 @@ int otg_bridge_open(struct otg_bridge *b, const char *serial,
     uint16_t mouse_desc_size = mouse_mode == OTG_MOUSE_ABSOLUTE
                               ? sizeof(ABSOLUTE_MOUSE_REPORT_DESC)
                               : sizeof(MOUSE_REPORT_DESC);
-    if (!aoa_hid_register(&b->aoa, AOA_HID_ID_MOUSE, mouse_desc, mouse_desc_size)) {
-        LOG_ERR("could not register AOA mouse\n");
-        aoa_hid_destroy(&b->aoa);
+    if (!b->transport_ops->register_report(b->transport_ctx,
+                                           AOA_HID_ID_MOUSE, mouse_desc,
+                                           mouse_desc_size)) {
+        LOG_ERR("could not register USB pointer\n");
+        otg_bridge_close(b);
+        return -1;
+    }
+    return 0;
+}
+
+int otg_bridge_open_transport(struct otg_bridge *b,
+                              const struct otg_hid_transport_ops *ops,
+                              void *ctx, int32_t screen_w, int32_t screen_h,
+                              enum otg_mouse_mode mouse_mode)
+{
+    memset(b, 0, sizeof(*b));
+    if (!ops || !ops->register_report || !ops->send || !ops->poll ||
+        !ops->ready || !ops->close || screen_w < 1 || screen_w > INT16_MAX ||
+        screen_h < 1 || screen_h > INT16_MAX) {
+        return -1;
+    }
+    b->screen_w = screen_w;
+    b->screen_h = screen_h;
+    b->mouse_mode = mouse_mode;
+    b->transport_ops = ops;
+    b->transport_ctx = ctx;
+    b->external_transport = true;
+    const uint8_t *mouse_desc = mouse_mode == OTG_MOUSE_ABSOLUTE
+                                    ? ABSOLUTE_MOUSE_REPORT_DESC
+                                    : MOUSE_REPORT_DESC;
+    uint16_t mouse_desc_size = mouse_mode == OTG_MOUSE_ABSOLUTE
+                                   ? sizeof(ABSOLUTE_MOUSE_REPORT_DESC)
+                                   : sizeof(MOUSE_REPORT_DESC);
+    if (!ops->register_report(ctx, AOA_HID_ID_KEYBOARD,
+                              KEYBOARD_REPORT_DESC_FULL,
+                              sizeof(KEYBOARD_REPORT_DESC_FULL)) ||
+        !ops->register_report(ctx, AOA_HID_ID_MOUSE, mouse_desc,
+                              mouse_desc_size)) {
+        ops->close(ctx);
+        b->transport_ops = NULL;
+        b->transport_ctx = NULL;
         return -1;
     }
     return 0;
@@ -395,12 +481,38 @@ void otg_bridge_close(struct otg_bridge *b)
     if (b->active) {
         otg_bridge_leave(b);
     }
-    aoa_hid_destroy(&b->aoa);
+    if (b->transport_ops) {
+        b->transport_ops->close(b->transport_ctx);
+        b->transport_ops = NULL;
+        b->transport_ctx = NULL;
+    }
+    if (b->external_transport) {
+        memset(&b->aoa, 0, sizeof(b->aoa));
+    }
 }
 
 bool otg_bridge_check(struct otg_bridge *b)
 {
-    return aoa_hid_poll(&b->aoa);
+    return b->transport_ops && b->transport_ops->poll(b->transport_ctx);
+}
+
+bool otg_bridge_ready(const struct otg_bridge *b)
+{
+    return b->transport_ops && b->transport_ops->ready(b->transport_ctx);
+}
+
+void otg_bridge_reset_input(struct otg_bridge *b)
+{
+    b->hid_mods = 0;
+    memset(b->keys, 0, sizeof(b->keys));
+    b->mouse_buttons = 0;
+    b->mouse_x = b->mouse_y = 0;
+    b->active = b->have_mouse_pos = false;
+    b->residual_hscroll = b->residual_vscroll = 0;
+    if (b->transport_ops && otg_bridge_ready(b)) {
+        send_keyboard_report(b);
+        send_mouse_state(b, 0, 0);
+    }
 }
 
 void otg_bridge_enter(struct otg_bridge *b, int16_t x, int16_t y, uint16_t mask)

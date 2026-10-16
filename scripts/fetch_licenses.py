@@ -12,6 +12,7 @@ sources = {
     "Qt-LGPL-3.0.txt": "https://raw.githubusercontent.com/qt/qtbase/v6.8.3/LICENSES/LGPL-3.0-only.txt",
     "Qt-GPL-3.0.txt": "https://raw.githubusercontent.com/qt/qtbase/v6.8.3/LICENSES/GPL-3.0-only.txt",
     "libusb-LGPL-2.1.txt": "https://raw.githubusercontent.com/libusb/libusb/v1.0.27/COPYING",
+    "GLib-LGPL-2.1.txt": "https://raw.githubusercontent.com/GNOME/glib/2.80.0/LICENSES/LGPL-2.1-or-later.txt",
 }
 for name, url in sources.items():
     with urllib.request.urlopen(url, timeout=60) as response:

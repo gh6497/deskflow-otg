@@ -168,6 +168,41 @@ for f in src/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only -Isrc -Ibu
 
 ## 约束与已知限制
 
+- Linux BLE 实验后端通过 `sudo deskflow-otg --transport ble --ble-isolate` 原生启动，
+  不依赖 Python。`src/ble_supervisor.c` 使用 Linux MGMT API 快照/隔离/核对恢复，
+  通过 `/usr/sbin/runuser` 降权运行自己的桥接子进程；父进程用 `src/ble_link.c` 监控 HCI。
+  桥接通过继承的 Unix datagram FD（`OTG_BLE_LATENCY_FD`）传递订阅就绪
+  与实测连接间隔。只对唯一、已加密、本机为 peripheral 的已观测 LE 连接请求 7.5～15ms；
+  HCI Command Status 成功不等于参数已更新，必须等待 LE Connection Update Complete。
+  失败/超时保留连接；重连后重新判断，不接受子进程指定 HCI 命令或句柄。
+  `/run/deskflow-otg-ble-hciN.state` 保存 root 专用、绑定适配器地址的原始快照；失败不覆盖，
+  `--ble-restore --adapter hciN` 恢复，只有核对成功才删除；不要与历史 Python 隔离脚本并行。
+  普通 `--transport ble` 不切换模式。手机掉线不注销 GATT：BlueZ 5.72 对 bonded peer 可能
+  保留 CCC 而不调用 StopNotify，因此就绪还须 Device1 Connected/Paired。断线断开 Deskflow
+  TCP、清空输入，原手机回来后重新握手；不能以重新删除配对作为正常重连方案。
+  GATT 固定 `0x0100..0x0111`（characteristic Handle 为 value handle），含 LED 输出、
+  Control Point；长读处理 offset。`test_ble_gatt.c` 使用私有 D-Bus，不访问系统蓝牙；
+  常驻会话的 REPORT/POLL 为非阻塞、单请求在途（仍兼容 IPC v2），状态查询间隔 5ms。
+  最多排队 64 条报告，只替换相邻纯移动；按下位置、松键、滚轮、键盘及范围变化必须保序。
+  溢出/回复超时关闭 IPC 触发释放，断线清空待发输入；退出先收完在途回复再请求 DETACH。
+  服务等待 socket 可读，活动期间用最多 1ms 超时驱动 BlueZ/末条移动，不得恢复每请求固定休眠。
+  指针默认 15ms pacing，收到实测连接间隔后直接跟随，不再另加 60Hz 上限。
+  `test_ble_supervisor.c` mock MGMT 验证恢复，`test_ble_link.c` 验证实际 HCI 确认，
+  `test_ble_pointer.c` 验证坐标/状态屏障与已配对 CCC 保留重连。历史 Python 仅作回归参考。
+  构建/模拟不等于真机免重配或硬件恢复验证完成，仍需用户实测确认。
+  新实验路径：普通用户前台 `--ble-service --adapter hciN` 保持 GATT 注册，
+  桥接通过 `--transport ble --ble-session` 接入，可叠加 `--ble-isolate`。
+  `src/ble_session.c` 使用私有 Unix seqpacket、双方 UID/版本/包长核对和独占会话；
+  断开/EOF/5 秒无 IPC 释放输入、停广告、恢复名称，不注销 GATT。父进程在模式恢复前
+  通过只读状态检查空闲；失败保留快照。仅支持 absolute、固定描述符，禁止伪造 CCC。
+  服务终止/BlueZ 或主机重启后不保证 CCC 连续性，不能声称任意重启已免重配。
+  `test_ble_session.c` 用真实 socket/fork + fake HID 测试会话；`test_ble_gatt.c` 用私有
+  D-Bus 模拟 BlueZ 管理器测试停广告但保留注册、会话复用和失败清理，不访问系统蓝牙。
+  当前单组真机（AX210/BlueZ 5.72、Redmi K20 Pro Android 14）已过原生隔离、会话正常重启、
+  两次手机断线重连、普通桥接子进程 SIGKILL 后自动恢复及再次接入；实际 interval 12.5～15ms。
+  首次缓存迁移仍需切过一次手机蓝牙；常驻服务/BlueZ/主机重启和持键强杀未验收。
+  详细证据和仍运行的服务/会话见 `docs/LINUX_BLE_HANDOVER.md` 第 7 节，勿擅自停止用户连接。
+
 - **只支持明文协议**，不支持 deskflow 的 TLS（deskflow 1.26 默认开 TLS，需在 server 侧关闭）。
 - 键盘 **US 布局**（其它布局符号键可能错位）。
 - 只支持键盘 + 鼠标，不支持游戏手柄、剪贴板、文件拖放、视频。
@@ -189,6 +224,22 @@ for f in src/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only -Isrc -Ibu
 - License：Apache-2.0（HID/AOA 逻辑移植自 scrcpy，同为 Apache-2.0）。
 
 ## 可选桌面 GUI
+
+- Linux BLE 正式接入在同一 `deskflow-otg` 中分为 `--ble-service` 常驻进程与
+  `--transport ble --ble-session --ble-peer MAC` 桥接会话；BLE 桥接必须指定 BlueZ 身份地址。
+  本地 IPC 协议现为 v2，服务生命周期内固定目标，不兼容旧实验常驻进程；迁移必须显式停止
+  旧服务，不得擅自杀掉正在使用的连接。`--ble-status` 只读，`--ble-stop-service` 仅同 UID
+  且空闲/清理成功时停止（会注销 GATT，丢失 CCC 连续性）。GATT 方法仅允许 BlueZ 调用，
+  键鼠 Value 信号定向发送给 BlueZ；目标需已配对且适配器仅这一个连接，多连接关闭输入。
+  GUI 蓝牙模式不扫描 ADB/USB，不使用 USB 自动连接；后台启动/复用普通用户服务，退出保留服务。
+  仅 BLE 隔离默认关闭，须确认全适配器断连影响，再用 `/usr/bin/pkexec` 认证；监督器识别
+  PKEXEC_UID/SUDO_UID，继承桥接 stdin，实现取消/EOF 优雅恢复；GUI 不强杀特权恢复进程。
+  DEB 根据 BUILD_FEATURES.json 添加运行依赖和可选用户 systemd 单元，但安装不自动启动服务。
+  GUI/新身份门控的离线通过不代表提权、缓存迁移、系统重启或完整真机输入验收完成。
+  身份比较必须读取在线 Device1 的 `Address`，不能把身份 MAC 拼成固定 D-Bus 路径：
+  BlueZ 解析隐私地址后可能保留原 `dev_随机地址` 路径。授权仍要求该在线对象本身 Paired；
+  另一个同 Address、离线且已配对的对象不能替它提供授权。GATT device 选项核对当前已认证
+  在线对象路径，多连接继续关闭输入。服务日志的 `BLE waiting:` 会区分身份、配对和订阅等待。
 
 - `-DBUILD_GUI=ON` 启用 Qt Widgets 桌面端；默认 OFF 保留纯 C 构建。GUI 支持 Linux、macOS、Windows。
 - `gui/main_window.cpp` 管理界面、ADB 异步查询和 QSettings；`device_info.cpp` 解析设备/尺寸/方向并生成布局。

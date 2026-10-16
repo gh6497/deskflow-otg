@@ -38,6 +38,11 @@ typedef struct df_client_callbacks {
      * USB device being unplugged.
      */
     int (*on_idle)(void *ud);
+    /* Optional asynchronous transport pump, called before each packet wait,
+     * including during continuous traffic. Zero interval keeps the 500ms
+     * default. Also bounds partial-read waits between cancellation checks. */
+    int (*on_tick)(void *ud);
+    int tick_interval_ms;
 } df_client_callbacks;
 
 typedef struct df_client df_client;

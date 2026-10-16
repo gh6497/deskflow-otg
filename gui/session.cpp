@@ -5,9 +5,12 @@
 #include "i18n.h"
 
 #include <QFile>
+#include <QDir>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSettings>
+#include <QRegularExpression>
+#include <QStandardPaths>
 #include <QTcpServer>
 
 Session::Session(QObject *parent) : QObject(parent)
@@ -20,6 +23,11 @@ Session::Session(QObject *parent) : QObject(parent)
         fail("otg.error.connection_timeout");
     });
     connect(&m_killBridge, &QTimer::timeout, this, [this] {
+        // Never SIGKILL a privileged supervisor: it owns mode recovery.
+        if (m_options.transport == "ble" && m_options.bleIsolate) {
+            emit log(qtTrId("otg.ble.recovery_wait"));
+            return;
+        }
         emit log(qtTrId("otg.log.bridge_killed"));
         m_bridge.kill();
     });
@@ -105,26 +113,98 @@ void Session::start(const ConnectionOptions &options)
     m_failureId.clear();
     m_failureDetail.clear();
     m_events.clear();
-    const auto generation = ++m_generation;
+    ++m_generation;
     setState(State::Starting, "otg.status.connecting");
-    if (options.serial.isEmpty() || !validScreenName(options.phone) ||
+    const bool ble = options.transport == "ble";
+    static const QRegularExpression adapterPattern("^hci[0-9]{1,5}$");
+    static const QRegularExpression peerPattern("^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$");
+    if ((!ble && options.serial.isEmpty()) ||
+        (options.transport != "usb" && !ble) ||
+        (ble && (!adapterPattern.match(options.adapter).hasMatch() ||
+                 options.adapter.mid(3).toUInt() >= 65535 ||
+                 !peerPattern.match(options.blePeer).hasMatch() || options.mouseMode != "absolute")) ||
+        !validScreenName(options.phone) ||
         options.host.trimmed().isEmpty() || options.port < 1 || options.port > 65535 ||
         options.width < 1 || options.width > 32767 || options.height < 1 || options.height > 32767) {
         fail("otg.error.invalid_options");
         return;
     }
+#ifndef Q_OS_LINUX
+    if (ble) {
+        fail("otg.ble.unsupported");
+        return;
+    }
+#endif
+    if (ble) {
+        prepareBle();
+        return;
+    }
+    startConnection();
+}
+
+void Session::prepareBle(bool started, int attempts)
+{
+    const auto generation = m_generation;
+    runCommand(this, m_options.bridge, {"--ble-status", "--adapter", m_options.adapter},
+               [this, generation, started, attempts](bool ok, const QString &output) {
+        if (generation != m_generation || m_state != State::Starting) return;
+        const auto status = QJsonDocument::fromJson(output.toUtf8()).object();
+        if (ok && status.value("version").toInt() == 2 && status.value("available").toBool()) {
+            if (!status.value("idle").toBool()) {
+                fail("otg.ble.busy");
+                return;
+            }
+            startConnection();
+            return;
+        }
+        if (started) {
+            if (attempts >= 20) {
+                fail("otg.ble.service_failed", output);
+                return;
+            }
+            QTimer::singleShot(100, this, [this, generation, attempts] {
+                if (generation == m_generation && m_state == State::Starting)
+                    prepareBle(true, attempts + 1);
+            });
+            return;
+        }
+        // Detached, ordinary-user process. No PID-based stop/kill: another GUI
+        // or a CLI may reuse it. Its existing private adapter lock wins races.
+        const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+        if (dir.isEmpty() || !QDir().mkpath(dir)) {
+            fail("otg.ble.service_failed", dir);
+            return;
+        }
+        QProcess service;
+        service.setProgram(m_options.bridge);
+        service.setArguments({"--ble-service", "--adapter", m_options.adapter});
+        service.setStandardInputFile(QProcess::nullDevice());
+        service.setStandardOutputFile(QProcess::nullDevice());
+        service.setStandardErrorFile(dir + "/ble-" + m_options.adapter + ".log", QIODevice::Append);
+        if (!service.startDetached()) {
+            fail("otg.ble.service_failed", service.errorString());
+            return;
+        }
+        emit log(qtTrId("otg.ble.service_retained"));
+        prepareBle(true);
+    });
+}
+
+void Session::startConnection()
+{
+    const auto generation = m_generation;
     m_deadline.start(30000);
-    if (!options.manageServer) {
+    if (!m_options.manageServer) {
         launchBridge();
         return;
     }
     // Bind before spawning; don't accidentally use an already-running server.
     QTcpServer portCheck;
-    if (!portCheck.listen(QHostAddress::LocalHost, quint16(options.port))) {
+    if (!portCheck.listen(QHostAddress::LocalHost, quint16(m_options.port))) {
         fail("otg.error.port_in_use");
         return;
     }
-    runCommand(this, options.deskflow, {"--help"},
+    runCommand(this, m_options.deskflow, {"--help"},
                [this, generation](bool ok, const QString &help) {
         if (generation != m_generation || m_state != State::Starting)
             return;
@@ -203,12 +283,27 @@ void Session::launchBridge()
 {
     if (m_bridge.state() != QProcess::NotRunning)
         return;
-    emit log(qtTrId("otg.log.usb_initializing"));
-    m_bridge.start(m_options.bridge,
-                  {"--gui", "--host", m_options.manageServer ? "127.0.0.1" : m_options.host,
-                   "--port", QString::number(m_options.port), "--name", m_options.phone,
-                   "--serial", m_options.serial, "--width", QString::number(m_options.width),
-                   "--height", QString::number(m_options.height), "--mouse-mode", m_options.mouseMode});
+    const bool ble = m_options.transport == "ble";
+    emit log(qtTrId(ble ? "otg.ble.waiting" : "otg.log.usb_initializing"));
+    QStringList args = {"--gui", "--host", m_options.manageServer ? "127.0.0.1" : m_options.host,
+                    "--port", QString::number(m_options.port), "--name", m_options.phone,
+                    "--width", QString::number(m_options.width),
+                    "--height", QString::number(m_options.height), "--mouse-mode", m_options.mouseMode};
+    if (ble) {
+        m_deadline.stop(); // Pairing and desktop authentication are user paced.
+        args << "--transport" << "ble" << "--ble-session" << "--adapter" << m_options.adapter
+             << "--ble-peer" << m_options.blePeer;
+        setState(State::Starting, "otg.ble.waiting");
+        if (m_options.bleIsolate) {
+            args.prepend(m_options.bridge);
+            args << "--ble-isolate";
+            m_bridge.start("/usr/bin/pkexec", args);
+            return;
+        }
+    } else {
+        args << "--serial" << m_options.serial;
+    }
+    m_bridge.start(m_options.bridge, args);
 }
 
 void Session::readBridgeEvents()
@@ -228,6 +323,9 @@ void Session::readBridgeEvents()
         if (event == "connected" && m_state == State::Starting) {
             m_deadline.stop();
             setState(State::Connected, "otg.status.connected");
+        } else if (event == "disconnected" && m_options.transport == "ble" &&
+                   m_state == State::Connected) {
+            setState(State::Starting, "otg.ble.reconnecting");
         } else if (event == "usb-ready") {
             const auto id = object.value("usb-id").toString();
             if (!id.isEmpty())

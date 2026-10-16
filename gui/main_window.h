@@ -71,6 +71,11 @@ private:
     QAction *m_trayDisconnect = nullptr;
     QWidget *m_form;
     QComboBox *m_devices, *m_direction, *m_mouseMode;
+    QComboBox *m_transport;
+    QLineEdit *m_adapter, *m_blePeer;
+    QCheckBox *m_bleIsolate;
+    QPushButton *m_stopBleService;
+    bool m_stoppingBleService = false;
     QLineEdit *m_serial, *m_adb, *m_deskflow, *m_host, *m_computer, *m_phone;
     QSpinBox *m_width, *m_height, *m_port;
     QDoubleSpinBox *m_sensitivity;
@@ -80,6 +85,7 @@ private:
     QLabel *m_status, *m_deviceStatus;
     QLabel *m_virtualSize;
     QPlainTextEdit *m_log;
+    QFormLayout *m_deviceForm, *m_programForm;
     QList<AndroidDevice> m_deviceList;
     bool m_scanning = false;
     bool m_uiReady = false;

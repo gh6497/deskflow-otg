@@ -41,6 +41,51 @@ protected:
 class WindowTest : public QObject {
     Q_OBJECT
 private slots:
+    void bleSettingsAndNoAdb()
+    {
+#if !defined(Q_OS_LINUX) || !defined(OTG_GUI_HAVE_BLE)
+        QSKIP("BLE-enabled Linux GUI only");
+#endif
+        QTemporaryDir settingsDir;
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDir.path());
+        QSettings settings;
+        settings.setValue("adb", QCoreApplication::applicationDirPath() + "/test_peer");
+        settings.setValue("transport", "ble");
+        settings.setValue("bleAdapter", "hci1");
+        settings.setValue("blePeer", "AA:BB:CC:DD:EE:FF");
+        settings.setValue("mouseMode", "relative");
+        settings.setValue("manageServer", false);
+        settings.setValue("language", "zh_CN");
+        AutoConnectTestWindow window;
+        window.show();
+        QCoreApplication::processEvents();
+        auto *transport = window.findChild<QComboBox *>("transportSelector");
+        QCOMPARE(transport->currentData().toString(), "ble");
+        auto *serial = window.findChild<QLineEdit *>("usbSerial");
+        QVERIFY(serial->text().isEmpty());
+        QVERIFY(!serial->isEnabled());
+        auto *mode = window.findChild<QComboBox *>("mouseMode");
+        QCOMPARE(mode->currentData().toString(), "absolute");
+        QVERIFY(!mode->isEnabled());
+        QCOMPARE(window.findChild<QLineEdit *>("bleAdapter")->text(), "hci1");
+        auto *session = window.findChild<Session *>();
+        window.findChild<QPushButton *>("connectButton")->click();
+        QTRY_COMPARE(session->state(), Session::State::Connected);
+        QVERIFY(serial->text().isEmpty()); // No startup ADB scan in BLE mode.
+        session->stop();
+        QTRY_COMPARE(session->state(), Session::State::Idle);
+        const auto screenshot = qEnvironmentVariable("OTG_TEST_BLE_SCREENSHOT");
+        if (!screenshot.isEmpty()) QVERIFY(window.grab().save(screenshot));
+        window.findChild<QAction *>("trayQuit")->trigger();
+        QCOMPARE(settings.value("transport").toString(), "ble");
+        QCOMPARE(settings.value("blePeer").toString(), "AA:BB:CC:DD:EE:FF");
+        AutoConnectTestWindow restored;
+        QCOMPARE(restored.findChild<QLineEdit *>("blePeer")->text(), "AA:BB:CC:DD:EE:FF");
+        restored.findChild<QComboBox *>("transportSelector")->setCurrentIndex(0);
+        QVERIFY(restored.findChild<QLineEdit *>("usbSerial")->isEnabled());
+        restored.findChild<QAction *>("trayQuit")->trigger();
+    }
     void clearLogs()
     {
         QTemporaryDir settingsDir;
@@ -418,7 +463,7 @@ private slots:
         QCOMPARE(width->value(), 1600);
         QTRY_VERIFY([&window] {
             for (auto *label : window.findChildren<QLabel *>()) {
-                if (!label->wordWrap() && label->width() < label->minimumSizeHint().width())
+                if (label->isVisible() && !label->wordWrap() && label->width() < label->minimumSizeHint().width())
                     return false;
             }
             return true;

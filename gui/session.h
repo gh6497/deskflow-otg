@@ -16,13 +16,18 @@ struct ConnectionOptions {
     QString phone = "android";
     QString direction = "right";
     QString mouseMode = "absolute";
+    QString transport = "usb";
+    QString adapter = "hci0";
+    QString blePeer;
+    bool bleIsolate = false;
     int port = 24800;
     int width = 1080;
     int height = 1920;
     bool manageServer = true;
 };
 
-// Process ownership is explicit: only these two child processes are stopped.
+// Only owned bridge/server processes are stopped. A resident BLE service is
+// deliberately retained across sessions and GUI exits to preserve BlueZ CCCs.
 class Session : public QObject {
     Q_OBJECT
 public:
@@ -43,6 +48,8 @@ private:
     void fail(const char *id, const QString &detail = {});
     void launchServer(const QString &help);
     void launchBridge();
+    void prepareBle(bool started = false, int attempts = 0);
+    void startConnection();
     void stopServer();
     void finishStop();
     void readBridgeEvents();

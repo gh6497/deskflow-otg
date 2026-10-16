@@ -88,6 +88,46 @@ static QStringList placeholders(const QString &text)
 class GuiTest : public QObject {
     Q_OBJECT
 private slots:
+    void bleLifecycle()
+    {
+#ifndef Q_OS_LINUX
+        QSKIP("Linux BLE only");
+#endif
+        ConnectionOptions options;
+        options.manageServer = false;
+        options.bridge = peerPath();
+        options.transport = "ble";
+        options.blePeer = "AA:BB:CC:DD:EE:FF";
+        Session session;
+        QSignalSpy usb(&session, &Session::usbAttached);
+        qputenv("OTG_TEST_BLE_RECONNECT", "1");
+        const auto restore = qScopeGuard([] { qunsetenv("OTG_TEST_BLE_RECONNECT"); qunsetenv("OTG_TEST_BLE_STATUS"); });
+        session.start(options);
+        QTRY_COMPARE(session.state(), Session::State::Connected);
+        QTRY_COMPARE(session.state(), Session::State::Starting);
+        QVERIFY(session.statusMessage().contains("配对保留"));
+        QTRY_COMPARE(session.state(), Session::State::Connected);
+        QVERIFY(usb.isEmpty());
+        session.stop();
+        QTRY_COMPARE(session.state(), Session::State::Idle);
+        qputenv("OTG_TEST_BLE_STATUS", "busy");
+        session.start(options);
+        QTRY_COMPARE(session.state(), Session::State::Idle);
+        QVERIFY(session.statusMessage().contains("已有会话"));
+        qunsetenv("OTG_TEST_BLE_STATUS");
+        session.start(options);
+        session.stop(); // Cancel an in-flight service probe, not another user's service.
+        QTRY_COMPARE(session.state(), Session::State::Idle);
+        QTest::qWait(150);
+        QCOMPARE(session.state(), Session::State::Idle);
+        options.blePeer = "not-a-mac";
+        session.start(options);
+        QCOMPARE(session.state(), Session::State::Idle);
+        options.blePeer = "AA:BB:CC:DD:EE:FF";
+        options.mouseMode = "relative";
+        session.start(options);
+        QCOMPARE(session.state(), Session::State::Idle);
+    }
     void initTestCase()
     {
         QVERIFY(LanguageManager::instance().setLanguage("zh_CN"));

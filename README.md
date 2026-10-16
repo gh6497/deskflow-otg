@@ -40,12 +40,25 @@
 
 两者串起来就是：`主机键盘鼠标 → deskflow → 本程序 → AOA HID → 手机`。
 
+Linux 另提供 **Bluetooth LE HID** 传输，可不接 USB 控制手机。CLI 与 GUI 使用同一
+`deskflow-otg` 程序，常驻 GATT 服务和桥接会话是不同进程，不是额外的可执行程序。
+USB 仍为默认方式；macOS/Windows 暂不提供蓝牙后端。
+
 ## 依赖
 
 - Linux、macOS（Intel / Apple Silicon）或 Windows（x64）
 - GCC / Clang / MSVC（C11）
 - CMake ≥ 3.16
 - libusb-1.0（开发包）
+
+Linux BLE HID 后端还需要 BlueZ、GLib/GIO 开发包：
+
+```bash
+sudo apt install libusb-1.0-0-dev libglib2.0-dev bluez
+```
+
+Linux 默认编译 BLE 后端。仅需原有 USB CLI 时可用
+`cmake -S . -B build -DBUILD_BLE=OFF`，不要求 GLib/GIO 或 pkg-config；非 Linux 默认不编译 BLE。
 
 ```bash
 # Debian / Ubuntu
@@ -353,7 +366,164 @@ USB 驱动（例如通过 Zadig 将手机对应 USB 接口绑定 WinUSB）；更
 - macOS 的构建与运行路径已适配，但具体手机的 AOA HID、拔线检测和绝对指针兼容性
   仍需真机验证。
 
-### 3. 操控手机
+### 3. Linux BLE 操控手机
+
+开发交接、已验证范围及下一轮真机检查顺序见 [Linux BLE 交接文档](docs/LINUX_BLE_HANDOVER.md)。
+
+Linux 可将电脑作为 BLE HID peripheral 广播，手机作为 HID Host 连接。该模式不依赖 USB，
+但需要手机完成配对并订阅键盘、指针两个 HID input characteristic；仅蓝牙连接或 Deskflow
+握手成功都不会被当作输入通道就绪。程序运行期间会临时将适配器名称设置为「Deskflow OTG」，
+退出时恢复原名称；不会自动配对、信任或删除配对。只有显式使用 `--ble-isolate` 才会临时
+修改适配器模式，普通 `--transport ble` 不切换模式。
+
+```bash
+./build/deskflow-otg --transport ble --adapter hci0 --ble-peer AA:BB:CC:DD:EE:FF \
+    --host 127.0.0.1 --port 24800 --name android \
+    --width 1080 --height 2340
+```
+
+手机蓝牙设置中连接广播的「Deskflow OTG」，按系统提示确认配对后再将鼠标移入手机屏幕。
+必须用 `--ble-peer` 指定目标手机在 BlueZ 中的身份地址（可查 `bluetoothctl devices`，
+不是轮换的广播地址）。仅目标已配对、且适配器上只有这一个连接时才允许输入；
+键鼠 Value 信号仅发送给 BlueZ，不在系统 D-Bus 广播。多个连接时失败关闭输入，不猜测目标。
+这不是任意多客户端环境下的隔离保证，建议专用适配器；经典 HIDP 双模兼容及完整真机回归
+仍需验证。指针纯移动报告默认每 15ms 发送一次。配合下述隔离启动器取得实际连接间隔后，
+发送周期跟随该间隔（例如 7.5/12.5/15ms）；按键和滚轮报告不做此节流。
+断线时不保证已经断开的链路能够送达松键报告。
+BLE 事件泵在持续 Deskflow 输入及不完整包读取期间也会运行，输入期间等待上限为 1ms，
+不依赖原有 500ms USB 空闲检查发送最后一个坐标。常驻会话的输入 IPC 非阻塞，最多一个
+请求在途；发送前合并连续移动/拖拽坐标，保留按键、按钮、滚轮和范围变化的顺序。
+状态查询按需进行，服务由 socket 就绪立即唤醒；输入队列超限或服务无响应时结束会话并释放输入。
+
+#### 原生仅 BLE 启动与自动恢复（无需 Python）
+
+手机把双模电脑当作音频设备时，可以显式使用原生 `--ble-isolate`。需要 sudo、BlueZ 和
+util-linux 的 `/usr/sbin/runuser`；不依赖 Python、独立验证目录或任何测试脚本。
+启动时会临时断开该适配器的全部蓝牙连接，保存状态、禁用 BR/EDR。桥接子进程通过
+`runuser` 降权，仍以发起 sudo 的普通用户运行；root 父进程只管理本次适配器隔离与恢复。
+先停止旧桥接并等待恢复完成；不要同时运行多个隔离入口。
+
+```bash
+sudo ./build/deskflow-otg --transport ble --ble-isolate --adapter hci0 --ble-peer AA:BB:CC:DD:EE:FF \
+  --host 127.0.0.1 --port 24800 --name android --width 1080 --height 2340
+```
+
+root 启动器通过专用 IPC 收到 HID 就绪通知后，只对该适配器上
+唯一、已加密且本机为 peripheral 的已观测 LE 连接请求 7.5～15ms、latency=0 的参数。
+不接受子进程指定的连接句柄或任意 HCI 命令；多连接时不猜测目标。每次重新连接重新判断。
+HCI 监控不接受会话传来的任意句柄；输入侧另由 `--ble-peer` 绑定手机身份。
+
+只有日志 `BLE actual interval=... (controller event)` 才代表观测到的实际参数；
+`requesting interval` 只表示发出了请求。手机拒绝或 5 秒未确认时保留连接及已观测的参数，
+不循环重试、不改永久蓝牙配置、不安装服务、不赋予桥接程序 HCI 权限。
+不带 `--ble-isolate` 直接运行桥接时仍可连接，但不会自动请求低延迟参数。
+
+**日常重连不要取消配对，也不要关闭程序后再重新启动隔离。** 手机临时断开时，程序保留
+GATT 服务、广播及已有配对；关闭到 Deskflow 的 TCP 连接让电脑收回光标，丢弃旧按键和
+坐标，等待原手机重新连接。BlueZ 为已配对设备保留 CCC 订阅时，不要求它再次触发
+`StartNotify`。重连并确认实际链路与订阅就绪后，程序自动重新接入 Deskflow。
+首次配对仍由系统代理确认，程序不自动接受陌生设备。GUI 的隔离选项须先确认影响范围，
+再通过系统 pkexec 认证；不保存管理员密码。USB 自动连接与托盘行为不变。
+
+GATT 服务固定使用 `0x0100..0x0111`，包含键盘 LED 输出和 HID Control Point，并支持
+Report Map 的 offset 读取，避免每次重新注册时句柄漂移。该范围冲突会报错，不静默改成
+新句柄。旧实验版的不同 GATT 布局、手机缓存或两端已有密钥不一致仍需单独诊断，不能把
+这些代码修复当作已经完成真机免重配验收。
+
+完全退出时，原生启动器核对恢复原 BR/EDR、LE、电源、安全、可发现/可配对及名称设置。
+恢复成功后才能清理快照。异常退出或恢复失败会保留 root 专用的
+`/run/deskflow-otg-ble-hci0.state`，再次启动拒绝覆盖原快照；用同一个二进制恢复：
+
+```bash
+sudo ./build/deskflow-otg --ble-restore --adapter hci0
+```
+
+快照绑定适配器地址；控制器重试上电后仍失败时明确报错，不伪称恢复成功，不重启
+bluetoothd、不删除蓝牙数据。SIGKILL/断电无法自动清理，`/run` 快照不跨重启保存。
+此命令不能读取旧 Python 实验脚本的 JSON 快照，两者不要同时运行。
+
+#### 常驻 GATT 与可重启桥接会话（推荐）
+
+Android 可能缓存 HID 描述符并在重连时不重写 CCC；BlueZ 则在应用注销时删除该服务的 CCC。
+因此固定句柄并不足以保证 CLI 退出后免重配。推荐使用以下服务/会话分离路径：
+
+1. 先正常结束旧 BLE 桥接，确认恢复成功、无 `.state` 遗留；发生 MGMT/HCI 超时先停止测试。
+2. 在普通用户终端运行常驻服务（**不加 sudo**），保持该终端运行：
+
+   ```bash
+   ./build/deskflow-otg --ble-service --adapter hci0
+   ```
+
+3. 另开终端启动会话，仍由原生 root supervisor 隔离并在会话退出时恢复模式：
+
+   ```bash
+    sudo ./build/deskflow-otg --transport ble --ble-session --ble-isolate --adapter hci0 \
+      --ble-peer AA:BB:CC:DD:EE:FF --host 127.0.0.1 --port 24800 --name android --width 1080 --height 2340
+   ```
+
+   系统已为 BLE 配置妥当时，去掉 `sudo` 与 `--ble-isolate` 即可，不切换模式。
+
+会话经 `/run/user/UID/deskflow-otg/ble-hci0.sock` 的私有 Unix seqpacket 连接服务；目录 0700、
+socket 0600，核对双方 UID、协议版本与包长度，每个适配器/用户仅允许一个活动会话。
+CLI 的 `--ble-service` 以前台普通用户运行。首次会话注册 GATT，
+以后会话复用它；必须使用相同 HID 描述符，目前只支持 absolute 指针，尺寸可按会话修改。
+
+- 断开会话或桥接崩溃/EOF 时松键、结束指针范围、丢弃待发送坐标、停广告并恢复名称；
+  5 秒无会话 IPC 也会释放输入。root supervisor 会先检查服务清理完成，再尝试恢复原模式；
+  无法确认时不继续切换模式、不伪称恢复成功，保留快照供停止会话后显式恢复。
+- 会话退出**不注销 GATT**。服务保留真实 StartNotify 状态，仍须原手机在线、已配对、
+  两路已订阅且未挂起才就绪；不把“手机已连接”伪装成订阅成功。
+- 停止常驻服务会注销 GATT，丢失这次 CCC 连续性；服务崩溃、BlueZ/主机重启后的恢复仍未解决。
+  旧实验版已经损坏/丢失的 CCC 或 Android 缓存不会凭空补回；若仍无订阅，应抓包诊断，
+  不要删除配对来冒充此方案通过验收。
+- 本机 AX210/BlueZ 5.72 + Redmi K20 Pro（Android 14）已验证：原生隔离、桥接正常重启、
+  两次手机断线重连、桥接子进程 SIGKILL 自动恢复及再次接入，期间无需重新配对；
+  实际连接间隔由控制器确认降至 12.5～15ms。首次旧缓存迁移仍曾需要切手机蓝牙开关一次。
+  这是生命周期的实验性修正，不是 AX210 HCI Reset 超时的修复，不代表完整输入、长时间、
+  常驻服务/BlueZ/主机重启或其他设备已验收；不替代原有恢复快照机制。
+
+#### GUI 与安装包
+
+1. Linux BLE 构建的 GUI 在「连接方式」选择「低功耗蓝牙」，填写 `hci0` 等适配器名称、
+   手机身份地址及屏幕尺寸。无需 ADB；USB 自动连接在蓝牙模式暂停。
+2. 点击连接，GUI 检查同用户服务：空闲则复用，不存在则后台启动同一程序的 `--ble-service`。
+   其他会话占用或旧版协议不兼容会报错，不会终止旧进程。首次配对/连接通过系统蓝牙设置完成。
+3. 手机被当作音频设备时，可显式选中「临时使用仅 BLE 模式」。确认该适配器的所有连接将
+   断开后进行管理员认证；需要系统提供 `/usr/bin/pkexec` 和桌面认证代理、有线键鼠或专用适配器。
+4. 手机掉线后 GUI 显示等待重连，不退出会话、不删除配对。手动断开结束会话，等待监督器
+   恢复模式。GUI 不强杀拥有恢复责任的特权进程，失败原因见日志。
+5. 退出 GUI 也保留普通用户常驻服务（不继续广告或输入）。要更换目标手机、更新服务二进制
+   或彻底停止时，先断开会话，再点击「停止空闲蓝牙服务」并确认会丢失订阅连续性。
+   CLI 等价操作：
+
+   ```bash
+   deskflow-otg --ble-status --adapter hci0
+   deskflow-otg --ble-stop-service --adapter hci0
+   ```
+
+服务在生命周期内固定绑定目标，不能用其他会话静默换手机。配置保存在 GUI 的 QSettings；
+自动后台服务日志在 Qt AppLocalDataLocation 的 `ble-hci0.log`（通常为
+`~/.local/share/deskflow-otg/deskflow-otg-gui/`，以实际应用标识为准）。首次从旧实验服务迁移
+协议时，必须先显式结束旧会话/服务；GUI 不会擅自替换正在运行的服务。
+
+DEB 自动携带 CLI 快捷入口及可选的 `deskflow-otg-ble@.service` 用户单元，按构建元数据为
+BLE 包声明 BlueZ、GLib 和 pkexec 依赖；安装包**不自动启动/启用**服务、不改系统蓝牙配置。
+希望由用户 systemd 托管时，在没有现存常驻服务的情况下显式运行
+`systemctl --user start deskflow-otg-ble@hci0`，GUI 会复用该服务；不需要 root 常驻守护程序。
+AppImage/解压分发仍依赖主机 BlueZ、GLib 和桌面认证代理；FUSE 挂载可能不允许 root 执行，
+需要仅 BLE 隔离时优先安装 DEB 或解压到固定目录后运行，不以挂载中的 AppImage 承诺提权兼容。
+
+本次 CLI/GUI 接入与打包回归不等同于新增硬件验收。服务/BlueZ/系统重启后的订阅恢复、
+完整持键异常释放、锁屏和长时间稳定性仍需真机确认。
+
+排查“显示输入设备但没有光标”时，查看常驻服务日志的 `BLE waiting:`：身份匹配以 BlueZ
+在线 Device1 的 `Address` 为准，不要求其对象路径与身份 MAC 相同；在线对象仍须已配对，
+不能借用另一个离线对象的配对标志。若提示 `waiting for both HID subscriptions`，表示尚未
+收到手机真实订阅，不是 Deskflow 已连接。保留配对检查手机输入设备开关/重连；服务重启后
+Android 缓存恢复仍可能需要手机蓝牙开关一次，不保证任意重启都免人工操作。就绪后还需确认
+GUI 的服务器地址、端口与实际 Deskflow 监听一致。
+
+### 4. 操控手机
 
 把鼠标移出主机屏幕边缘（滑向"手机"那块屏幕），此时键盘鼠标就会注入到手机。
 把鼠标再滑回主机屏幕边缘，即可回到主机。
@@ -373,6 +543,15 @@ USB 驱动（例如通过 Zadig 将手机对应 USB 接口绑定 WinUSB）；更
   -p, --port PORT       Deskflow server 端口 (默认 24800)
   -n, --name NAME       上报给 server 的屏幕名 (默认 android)
   -s, --serial SERIAL   安卓设备的 USB 序列号 (不指定则自动检测)
+      --transport MODE usb（默认）或 ble（Linux）
+      --adapter NAME   蓝牙适配器（默认 hci0）
+      --ble-isolate    sudo 原生仅 BLE 启动，退出恢复，无需 Python
+      --ble-restore    根据原生快照恢复适配器，不启动桥接
+      --ble-peer MAC   目标手机 BlueZ 身份地址（BLE 桥接必填）
+      --ble-service    普通用户前台常驻 GATT 服务
+      --ble-session    通过常驻服务运行桥接会话（仅 absolute）
+      --ble-status     查询服务 JSON 状态，不占用会话
+      --ble-stop-service 停止空闲服务，会失去订阅连续性
       --width W         虚拟屏幕宽度，1..32767 (默认 1080)
       --height H        虚拟屏幕高度，1..32767 (默认 1920)
       --mouse-mode MODE absolute（默认）或 relative（兼容模式）
@@ -439,6 +618,9 @@ src/
   deskflow_client.c   极简 Deskflow 客户端协议 (TCP 握手 + 消息循环)
   aoa_hid.c           USB AOA HID (libusb 枚举/打开/注册/发送报告)
   usb_scan.c          USB 设备快照与 libusb 热插拔事件监听
+  ble_hid.c           Linux GATT/HID、稳定句柄与已配对设备重连
+  ble_supervisor.c    原生隔离、降权子进程、模式快照与异常恢复
+  ble_link.c          root 父进程的 HCI 参数监控与低延迟请求
   bridge.c            键鼠状态机 + HID 报告生成 (对应 scrcpy 的 hid_*)
   keymap.c            deskflow KeyID → USB HID usage 映射
 gui/

@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QProcess>
+#include <QPointer>
 #include <QStandardPaths>
 #include <QTimer>
 #include <memory>
@@ -19,7 +20,8 @@ void runCommand(QObject *owner, const QString &program, const QStringList &args,
     process->setProcessChannelMode(QProcess::MergedChannels);
     auto output = std::make_shared<QByteArray>();
     auto completed = std::make_shared<bool>(false);
-    auto finish = [process, timer, output, completed, done](bool ok, const QString &error) {
+    const QPointer<QObject> guard(owner);
+    auto finish = [process, timer, output, completed, done, guard](bool ok, const QString &error) {
         if (*completed)
             return;
         *completed = true;
@@ -27,7 +29,7 @@ void runCommand(QObject *owner, const QString &program, const QStringList &args,
         output->append(process->readAll());
         const QString text = QString::fromUtf8(*output);
         process->deleteLater();
-        done(ok, error.isEmpty() ? text : error + "\n" + text);
+        if (guard) done(ok, error.isEmpty() ? text : error + "\n" + text);
     };
     QObject::connect(process, &QProcess::readyRead, process, [process, output] {
         output->append(process->readAll());
