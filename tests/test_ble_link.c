@@ -1,9 +1,65 @@
 /* Anonymous HCI fixtures and real Unix sockets; no Bluetooth/root access.
  * SPDX-License-Identifier: Apache-2.0 */
+#include <sys/socket.h>
+#include <unistd.h>
+static int fake_socket(int domain,int type,int protocol);
+static int fake_bind(int fd,const struct sockaddr *address,socklen_t length);
+static int fake_setsockopt(int fd,int level,int option,const void *value,socklen_t length);
+static int fake_close(int fd);
+#define socket fake_socket
+#define bind fake_bind
+#define setsockopt fake_setsockopt
+#define close fake_close
 #include "../src/ble_link.c"
+#undef socket
+#undef bind
+#undef setsockopt
+#undef close
 #include <stdlib.h>
 
 #define CHECK(x) do {if(!(x)){fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x);exit(1);}} while(0)
+static int fail_stage,closed,filter_calls;
+static int fake_socket(int domain,int type,int protocol)
+{
+    CHECK(domain==AF_BLUETOOTH && protocol==1);
+    CHECK(type==(SOCK_RAW|SOCK_CLOEXEC|SOCK_NONBLOCK));
+    if(fail_stage==1){errno=EPERM;return -1;}
+    return 42;
+}
+static int fake_bind(int fd,const struct sockaddr *address,socklen_t length)
+{
+    struct {sa_family_t family;uint16_t index,channel;} expected={AF_BLUETOOTH,7,0};
+    CHECK(fd==42 && length==sizeof(expected));
+    CHECK(!memcmp(address,&expected,sizeof(expected)));
+    if(fail_stage==2){errno=ENODEV;return -1;}
+    return 0;
+}
+static int fake_setsockopt(int fd,int level,int option,const void *value,socklen_t length)
+{
+    struct {uint32_t type_mask,event_mask[2];uint16_t opcode;} filter;
+    CHECK(fd==42 && level==0 && option==2);
+    CHECK(length==sizeof(filter)); /* Includes native ABI padding, not 14. */
+    memcpy(&filter,value,sizeof(filter));filter_calls++;
+    CHECK(filter.type_mask==(1u<<4) && filter.opcode==0);
+    CHECK(filter.event_mask[0]==((1u<<5)|(1u<<8)|(1u<<15)|(1u<<25)));
+    CHECK(filter.event_mask[1]==(1u<<30));
+    if(fail_stage==3){errno=EINVAL;return -1;}
+    return 0;
+}
+static int fake_close(int fd){CHECK(fd==42);closed++;return 0;}
+
+static void test_monitor_open(void)
+{
+    struct otg_ble_link *b=otg_ble_link_open(7,99);
+    CHECK(b && b->index==7 && b->channel==99 && filter_calls==1);
+    otg_ble_link_close(b);CHECK(closed==1);
+    for(fail_stage=1;fail_stage<=3;fail_stage++) {
+        int before=closed;
+        CHECK(!otg_ble_link_open(7,99));
+        CHECK(closed==before+(fail_stage!=1));
+    }
+    fail_stage=0;
+}
 static void connect_event(struct otg_ble_link *b,uint16_t handle)
 {
     uint8_t event[34]={4,0x3e,31,10,0};set16(event+5,handle);
@@ -14,6 +70,7 @@ static void connect_event(struct otg_ble_link *b,uint16_t handle)
 }
 int main(void)
 {
+    test_monitor_open();
     int hci[2],ipc[2];
     CHECK(socketpair(AF_UNIX,SOCK_DGRAM|SOCK_NONBLOCK,0,hci)==0);
     CHECK(socketpair(AF_UNIX,SOCK_DGRAM|SOCK_NONBLOCK,0,ipc)==0);

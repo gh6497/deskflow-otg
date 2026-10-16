@@ -38,6 +38,7 @@ struct otg_ble_hid {
     bool alias_changed;
     guint registrations[BLE_OBJECT_COUNT];
     bool app_registered, adv_registered;
+    bool resident, session_enabled;
     bool notifying[2], suspended;
     uint8_t values[2][AOA_ABSOLUTE_MOUSE_REPORT_SIZE];
     size_t value_size[2];
@@ -130,7 +131,7 @@ static void latency_state(struct otg_ble_hid *b, bool ready)
         b->pointer_interval_ns = 0;
     }
     if (b->latency_fd < 0) {
-        if (ready) {
+        if (ready && !b->resident) {
             fprintf(stderr, "INFO: BLE automatic interval tuning unavailable; use isolation supervisor\n");
         }
         return;
@@ -163,15 +164,18 @@ static void latency_poll(struct otg_ble_hid *b)
         if ((*end != '\n' && *end != '\0') || us < 7500 || us > 4000000) {
             continue;
         }
-        /* Never enqueue coordinates faster than the observed link interval.
-         * On fast links cap at 60Hz rather than the former fixed 30Hz. */
-        b->pointer_interval_ns = us * UINT64_C(1000);
-        if (b->pointer_interval_ns < UINT64_C(16666667)) {
-            b->pointer_interval_ns = UINT64_C(16666667);
-        }
-        fprintf(stderr, "INFO: BLE observed interval %.2fms; pointer pacing %.2fms\n",
-                us / 1000.0, b->pointer_interval_ns / 1000000.0);
+        otg_ble_hid_set_interval(b, us);
     }
+}
+
+void otg_ble_hid_set_interval(struct otg_ble_hid *b, uint64_t us)
+{
+    if (us < 7500 || us > 4000000) return;
+    b->pointer_interval_ns = us * UINT64_C(1000);
+    if (b->pointer_interval_ns < UINT64_C(16666667))
+        b->pointer_interval_ns = UINT64_C(16666667);
+    fprintf(stderr, "INFO: BLE observed interval %.2fms; pointer pacing %.2fms\n",
+            us / 1000.0, b->pointer_interval_ns / 1000000.0);
 }
 
 static void latency_init(struct otg_ble_hid *b)
@@ -261,7 +265,8 @@ static void refresh_peer(struct otg_ble_hid *b)
 
 static void update_channel_state(struct otg_ble_hid *b)
 {
-    bool ready=b->app_registered && b->peer_connected && b->notifying[0] &&
+    bool ready=(!b->resident || b->session_enabled) &&
+               b->app_registered && b->peer_connected && b->notifying[0] &&
                b->notifying[1] && !b->suspended;
     if(ready==b->channel_ready) return;
     b->channel_ready=ready;
@@ -328,16 +333,18 @@ static bool configure_adapter_alias(struct otg_ble_hid *b)
     return true;
 }
 
-static void restore_adapter_alias(struct otg_ble_hid *b)
+static bool restore_adapter_alias(struct otg_ble_hid *b)
 {
     if (!b->alias_changed || !b->original_alias || !b->bus) {
-        return;
+        return true;
     }
     if (set_adapter_alias(b, b->original_alias)) {
         fprintf(stderr, "INFO: Bluetooth adapter name restored to \"%s\"\n",
                 b->original_alias);
+        b->alias_changed = false;
+        return true;
     }
-    b->alias_changed = false;
+    return false;
 }
 
 static GVariant *props(const struct ble_object *o, const char *interface)
@@ -401,11 +408,75 @@ static const GDBusInterfaceVTable vtable={.method_call=method,.get_property=NULL
 static bool register_objects(struct otg_ble_hid *b)
 { reset_reports(b); GError *e=NULL; for(int i=0;i<BLE_OBJECT_COUNT;i++){ b->objects[i]=(struct ble_object){b,(enum ble_kind[]){BLE_ROOT,BLE_SERVICE,BLE_MAP,BLE_INFO,BLE_REPORT,BLE_REPORT,BLE_REF,BLE_REF,BLE_LEDS,BLE_REF,BLE_CONTROL,BLE_ADV}[i],i==9 ? 2 : (i==5||i==7)}; b->registrations[i]=g_dbus_connection_register_object(b->bus,path_for(&b->objects[i]),g_dbus_node_info_lookup_interface(node_info,iface_for(b->objects[i].kind)),&vtable,&b->objects[i],NULL,&e); if(!b->registrations[i]){fprintf(stderr,"ERROR: BLE object registration: %s\n",e->message);g_clear_error(&e);return false;}} return true; }
 
-static bool register_blueZ(struct otg_ble_hid *b)
-{ GError *e=NULL; GVariant *r=call_wait(b,"org.bluez.GattManager1","RegisterApplication",g_variant_new("(o@a{sv})",ROOT,g_variant_new_array(G_VARIANT_TYPE("{sv}"),NULL,0)),&e); if(!r){fprintf(stderr,"ERROR: BlueZ RegisterApplication: %s\n",e?e->message:"unknown error");g_clear_error(&e);return false;}g_variant_unref(r); b->app_registered=true; r=call_wait(b,"org.bluez.LEAdvertisingManager1","RegisterAdvertisement",g_variant_new("(o@a{sv})",ROOT "/advertisement",g_variant_new_array(G_VARIANT_TYPE("{sv}"),NULL,0)),&e); if(!r){fprintf(stderr,"ERROR: BlueZ RegisterAdvertisement: %s\n",e?e->message:"unknown error");g_clear_error(&e);return false;}g_variant_unref(r);b->adv_registered=true;return true; }
+static bool start_advertisement(struct otg_ble_hid *b)
+{
+    GError *error=NULL;
+    GVariant *reply=call_wait(b,"org.bluez.LEAdvertisingManager1","RegisterAdvertisement",
+        g_variant_new("(o@a{sv})",ROOT "/advertisement",g_variant_new_array(G_VARIANT_TYPE("{sv}"),NULL,0)),&error);
+    if(!reply){fprintf(stderr,"ERROR: BlueZ RegisterAdvertisement: %s\n",error?error->message:"unknown error");g_clear_error(&error);return false;}
+    g_variant_unref(reply);b->adv_registered=true;return true;
+}
 
-static bool reg(void *ctx,uint16_t id,const uint8_t *desc,uint16_t size)
+static bool register_blueZ(struct otg_ble_hid *b)
+{
+    GError *error=NULL;
+    GVariant *reply=call_wait(b,"org.bluez.GattManager1","RegisterApplication",
+        g_variant_new("(o@a{sv})",ROOT,g_variant_new_array(G_VARIANT_TYPE("{sv}"),NULL,0)),&error);
+    if(!reply){fprintf(stderr,"ERROR: BlueZ RegisterApplication: %s\n",error?error->message:"unknown error");g_clear_error(&error);return false;}
+    g_variant_unref(reply);b->app_registered=true;
+    return b->resident || start_advertisement(b);
+}
+
+bool otg_ble_hid_set_session(struct otg_ble_hid *b, bool enabled)
+{
+    if(!b->resident)return false;
+    if(enabled) {
+        if(b->session_enabled)return true;
+        if(!b->app_registered || !configure_adapter_alias(b))return false;
+        if(!start_advertisement(b)){restore_adapter_alias(b);return false;}
+        reset_reports(b);b->pointer_interval_ns=0;b->suspended=false;
+        b->session_enabled=true;
+        update_channel_state(b);
+        return true;
+    }
+    /* Release before disabling input. Keep genuine StartNotify evidence and
+     * the GATT registration; never infer subscriptions from Connected. */
+    if(b->session_enabled) {
+        reset_reports(b);
+        if(b->notifying[0])changed(b,0);
+        if(b->notifying[1])changed(b,1);
+    }
+    b->session_enabled=false;b->pointer_interval_ns=0;
+    update_channel_state(b);
+    bool ok=true;
+    if(b->adv_registered) {
+        GError *error=NULL;
+        GVariant *reply=call_wait(b,"org.bluez.LEAdvertisingManager1","UnregisterAdvertisement",
+            g_variant_new("(o)",ROOT "/advertisement"),&error);
+        ok=reply!=NULL;
+        if(reply){g_variant_unref(reply);b->adv_registered=false;}
+        else fprintf(stderr,"ERROR: cannot stop resident BLE advertisement: %s\n",error?error->message:"unknown error");
+        g_clear_error(&error);
+    }
+    if(!restore_adapter_alias(b))ok=false;
+    if(!b->alias_changed)g_clear_pointer(&b->original_alias,g_free);
+    fprintf(stderr,"%s: BLE session %s; inputs released, GATT registration retained\n",
+            ok?"INFO":"ERROR",ok?"idle":"cleanup incomplete");
+    return ok;
+}
+
+static bool reg_initial(void *ctx,uint16_t id,const uint8_t *desc,uint16_t size)
 { struct otg_ble_hid*b=ctx; int n=id==AOA_HID_ID_MOUSE; if(b->pending_desc[n])free(b->pending_desc[n]); b->pending_desc[n]=malloc(size+2); if(!b->pending_desc[n])return false; memcpy(b->pending_desc[n],desc,size); b->pending_size[n]=size; if(id==AOA_HID_ID_KEYBOARD){b->pending_desc[n][size]=0;b->pending_desc[n][size+1]=0;} if(b->pending_desc[0]&&b->pending_desc[1]&&!b->app_registered){ size_t total=b->pending_size[0]+b->pending_size[1]+4;b->report_map=malloc(total);if(!b->report_map)return false; size_t p=0; for(int i=0;i<2;i++){const uint8_t*d=b->pending_desc[i];size_t z=b->pending_size[i];size_t at=6;memcpy(b->report_map+p,d,at);p+=at;b->report_map[p++]=0x85;b->report_map[p++]=(uint8_t)(i+1);memcpy(b->report_map+p,d+at,z-at);p+=z-at;}b->report_map_size=p;if(!register_blueZ(b))return false;}return true; }
+static bool reg(void *ctx,uint16_t id,const uint8_t *desc,uint16_t size)
+{
+    struct otg_ble_hid *b=ctx;
+    if((id!=AOA_HID_ID_KEYBOARD && id!=AOA_HID_ID_MOUSE) || size<6)return false;
+    int n=id==AOA_HID_ID_MOUSE;
+    if(b->resident && b->app_registered)
+        return b->pending_size[n]==size && !memcmp(b->pending_desc[n],desc,size);
+    return reg_initial(ctx,id,desc,size);
+}
+
 /* Only coordinates may be replaced. Button, range and wheel transitions are
  * ordering barriers, including a release to zero buttons. Drag motion with
  * unchanged buttons can be coalesced just like hover motion. */
@@ -431,7 +502,8 @@ static bool queue_pointer(struct otg_ble_hid *b, const uint8_t *data,
 
 static bool pointer_due(struct otg_ble_hid *b, uint64_t now)
 {
-    if (!b->app_registered || !b->notifying[0] || !b->notifying[1] ||
+    if ((b->resident && !b->session_enabled) ||
+        !b->app_registered || !b->notifying[0] || !b->notifying[1] ||
         b->suspended) {
         b->pointer_pending = false;
         return false;
@@ -453,7 +525,8 @@ static bool send_report(void *ctx, uint16_t id, const uint8_t *data,
         return false;
     }
     int i = id == AOA_HID_ID_MOUSE;
-    if (!b->app_registered || !b->notifying[0] || !b->notifying[1] ||
+    if ((b->resident && !b->session_enabled) ||
+        !b->app_registered || !b->notifying[0] || !b->notifying[1] ||
         b->suspended || size > sizeof(b->values[i])) {
         return false;
     }
@@ -487,9 +560,10 @@ static bool ready_ble(void *ctx){struct otg_ble_hid*b=ctx;return b->channel_read
 static void close_ble(void *ctx){struct otg_ble_hid*b=ctx;if(!b)return;GError*e=NULL;if(b->adv_registered){GVariant*r=call_wait(b,"org.bluez.LEAdvertisingManager1","UnregisterAdvertisement",g_variant_new("(o)",ROOT "/advertisement"),&e);if(r)g_variant_unref(r);g_clear_error(&e);b->adv_registered=false;}if(b->app_registered){GVariant*r=call_wait(b,"org.bluez.GattManager1","UnregisterApplication",g_variant_new("(o)",ROOT),&e);if(r)g_variant_unref(r);g_clear_error(&e);b->app_registered=false;}for(int i=0;i<BLE_OBJECT_COUNT;i++)if(b->registrations[i]){g_dbus_connection_unregister_object(b->bus,b->registrations[i]);b->registrations[i]=0;}}
 static const struct otg_hid_transport_ops OPS={reg,send_report,poll_ble,ready_ble,close_ble};
 const struct otg_hid_transport_ops*otg_ble_hid_ops(void){return &OPS;}
-bool otg_ble_hid_init(struct otg_ble_hid *b,const char *adapter)
+static bool init_mode(struct otg_ble_hid *b,const char *adapter,bool resident)
 {
-    memset(b,0,sizeof(*b));latency_init(b);
+    memset(b,0,sizeof(*b));b->resident=resident;
+    if(resident)b->latency_fd=-1;else latency_init(b);
     b->adapter=g_strdup(adapter ? adapter : "hci0");
     if(!b->adapter)return false;
     b->adapter_path=g_strdup_printf("/org/bluez/%s",b->adapter);
@@ -499,11 +573,13 @@ bool otg_ble_hid_init(struct otg_ble_hid *b,const char *adapter)
     b->devices=g_dbus_object_manager_client_new_sync(b->bus,
         G_DBUS_OBJECT_MANAGER_CLIENT_FLAGS_DO_NOT_AUTO_START,BLUEZ,"/",NULL,NULL,NULL,NULL,&error);
     if(!b->devices){fprintf(stderr,"ERROR: BlueZ device monitor: %s\n",error->message);g_clear_error(&error);return false;}
-    if(!configure_adapter_alias(b))return false;
+    if(!resident && !configure_adapter_alias(b))return false;
     node_info=g_dbus_node_info_new_for_xml(xml,&error);
     if(!node_info){g_clear_error(&error);return false;}
     return register_objects(b);
 }
+bool otg_ble_hid_init(struct otg_ble_hid *b,const char *adapter){return init_mode(b,adapter,false);}
+struct otg_ble_hid *otg_ble_hid_create_resident(const char *adapter){struct otg_ble_hid*b=calloc(1,sizeof(*b));if(b&&!init_mode(b,adapter,true)){otg_ble_hid_destroy(b);return NULL;}return b;}
 struct otg_ble_hid *otg_ble_hid_create(const char *adapter){struct otg_ble_hid*b=calloc(1,sizeof(*b));if(b&&!otg_ble_hid_init(b,adapter)){otg_ble_hid_destroy(b);return NULL;}return b;}
 void otg_ble_hid_destroy(struct otg_ble_hid*b){if(!b)return;close_ble(b);restore_adapter_alias(b);if(b->latency_fd>=0)close(b->latency_fd);for(int i=0;i<2;i++)free(b->pending_desc[i]);free(b->report_map);if(b->devices)g_object_unref(b->devices);if(b->bus)g_object_unref(b->bus);g_free(b->adapter_path);g_free(b->adapter);g_free(b->peer_path);g_free(b->original_alias);free(b);}
 const char*otg_ble_hid_adapter(const struct otg_ble_hid*b){return b?b->adapter:NULL;}

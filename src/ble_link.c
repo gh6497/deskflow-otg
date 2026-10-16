@@ -4,6 +4,7 @@
 #include "ble_link.h"
 #ifdef __linux__
 #include <glib.h>
+#include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -83,13 +84,28 @@ struct otg_ble_link *otg_ble_link_open(uint16_t index,int channel)
     struct otg_ble_link *b=g_new0(struct otg_ble_link,1);b->channel=channel;b->index=index;
     b->hci=socket(AF_BLUETOOTH,SOCK_RAW|SOCK_CLOEXEC|SOCK_NONBLOCK,1);
     struct {sa_family_t family;uint16_t index,channel;} address={AF_BLUETOOTH,index,0};
-    uint32_t filter[4]={1u<<4,(1u<<5)|(1u<<8)|(1u<<15)|(1u<<25),1u<<30,0};
-    if(b->hci<0 || bind(b->hci,(struct sockaddr *)&address,sizeof(address)) ||
-       setsockopt(b->hci,0,2,filter,14)) {
+    /* Match the native HCI_FILTER ABI, including its trailing padding. New
+     * kernels reject the former hard-coded 14-byte (unpadded) length. */
+    struct {uint32_t type_mask,event_mask[2];uint16_t opcode;} filter={
+        .type_mask=1u<<4,
+        .event_mask={(1u<<5)|(1u<<8)|(1u<<15)|(1u<<25),1u<<30},
+        .opcode=0
+    };
+    const char *operation="socket";
+    if(b->hci<0)goto fail;
+    operation="bind";
+    if(bind(b->hci,(struct sockaddr *)&address,sizeof(address)))goto fail;
+    operation="HCI_FILTER";
+    if(setsockopt(b->hci,0,2,&filter,sizeof(filter)))goto fail;
+    return b;
+fail:
+    {
+        int saved_errno=errno;
+        fprintf(stderr,"WARN: BLE timing monitor %s failed on hci%u: %s (errno=%d)\n",
+                operation,index,strerror(saved_errno),saved_errno);
         if(b->hci>=0)close(b->hci);
         g_free(b);return NULL;
     }
-    return b;
 }
 void otg_ble_link_poll(struct otg_ble_link *b)
 {

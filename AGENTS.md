@@ -185,6 +185,18 @@ for f in src/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only -Isrc -Ibu
   `test_ble_supervisor.c` mock MGMT 验证恢复，`test_ble_link.c` 验证实际 HCI 确认，
   `test_ble_pointer.c` 验证坐标/状态屏障与已配对 CCC 保留重连。历史 Python 仅作回归参考。
   构建/模拟不等于真机免重配或硬件恢复验证完成，仍需用户实测确认。
+  新实验路径：普通用户前台 `--ble-service --adapter hciN` 保持 GATT 注册，
+  桥接通过 `--transport ble --ble-session` 接入，可叠加 `--ble-isolate`。
+  `src/ble_session.c` 使用私有 Unix seqpacket、双方 UID/版本/包长核对和独占会话；
+  断开/EOF/5 秒无 IPC 释放输入、停广告、恢复名称，不注销 GATT。父进程在模式恢复前
+  通过只读状态检查空闲；失败保留快照。仅支持 absolute、固定描述符，禁止伪造 CCC。
+  服务终止/BlueZ 或主机重启后不保证 CCC 连续性，不能声称任意重启已免重配。
+  `test_ble_session.c` 用真实 socket/fork + fake HID 测试会话；`test_ble_gatt.c` 用私有
+  D-Bus 模拟 BlueZ 管理器测试停广告但保留注册、会话复用和失败清理，不访问系统蓝牙。
+  当前单组真机（AX210/BlueZ 5.72、Redmi K20 Pro Android 14）已过原生隔离、会话正常重启、
+  两次手机断线重连、普通桥接子进程 SIGKILL 后自动恢复及再次接入；实际 interval 12.5～15ms。
+  首次缓存迁移仍需切过一次手机蓝牙；常驻服务/BlueZ/主机重启和持键强杀未验收。
+  详细证据和仍运行的服务/会话见 `docs/LINUX_BLE_HANDOVER.md` 第 7 节，勿擅自停止用户连接。
 
 - **只支持明文协议**，不支持 deskflow 的 TLS（deskflow 1.26 默认开 TLS，需在 server 侧关闭）。
 - 键盘 **US 布局**（其它布局符号键可能错位）。

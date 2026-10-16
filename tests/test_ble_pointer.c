@@ -76,6 +76,14 @@ int main(void)
     close(fds[1]);
     b.latency_fd = -1;
     b.peer_connected = true;
+    /* A fresh process has no subscription evidence. Connected/Paired alone
+     * must not fabricate CCC state, even when the phone reports connected. */
+    b.notifying[0] = b.notifying[1] = false;
+    update_channel_state(&b);
+    CHECK(!ready_ble(&b));
+    b.notifying[0] = true;
+    update_channel_state(&b);
+    CHECK(!ready_ble(&b));
     b.notifying[0] = b.notifying[1] = true;
     update_channel_state(&b);
     CHECK(ready_ble(&b));

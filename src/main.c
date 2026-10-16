@@ -27,6 +27,7 @@
 #ifdef OTG_HAVE_BLE
 #include "ble_hid.h"
 #include "ble_supervisor.h"
+#include "ble_session.h"
 #include <glib.h>
 #endif
 
@@ -95,6 +96,8 @@ static void usage(const char *prog)
              "      --adapter NAME    BlueZ adapter for BLE (default hci0)\n"
              "      --ble-isolate     Linux: sudo native BLE-only supervisor; restores on exit\n"
              "      --ble-restore     Linux: recover saved adapter settings without Python\n"
+             "      --ble-service     Linux: resident user GATT service (keep running)\n"
+             "      --ble-session     Linux: BLE bridge via an existing resident service\n"
             "      --width W         Virtual screen width, 1..32767 (default %d)\n"
             "      --height H        Virtual screen height, 1..32767 (default %d)\n"
             "      --mouse-mode MODE absolute (default) or relative (compatibility)\n"
@@ -128,6 +131,7 @@ struct app_state {
     struct otg_bridge bridge;
     const char *serial;
     void *transport_owner;
+    bool resident_session;
     bool deskflow_connected;
     bool input_ready_reported;
 };
@@ -241,7 +245,8 @@ static void destroy_transport_owner(app_state *s)
 {
 #ifdef OTG_HAVE_BLE
     if (s->transport_owner) {
-        otg_ble_hid_destroy(s->transport_owner);
+        if(s->resident_session)otg_ble_session_destroy(s->transport_owner);
+        else otg_ble_hid_destroy(s->transport_owner);
         s->transport_owner = NULL;
     }
 #else
@@ -279,6 +284,7 @@ int main(int argc, char **argv)
     const char *transport = "usb";
     const char *adapter = "hci0";
     int ble_isolate = 0, ble_restore = 0;
+    int ble_service = 0, ble_session = 0;
     unsigned port = DEFAULT_PORT;
     int width = DEFAULT_WIDTH;
     int height = DEFAULT_HEIGHT;
@@ -321,6 +327,10 @@ int main(int argc, char **argv)
             ble_isolate = 1;
         } else if (strcmp(a, "--ble-restore") == 0) {
             ble_restore = 1;
+        } else if (strcmp(a, "--ble-service") == 0) {
+            ble_service = 1;
+        } else if (strcmp(a, "--ble-session") == 0) {
+            ble_session = 1;
         } else if (strcmp(a, "--width") == 0 && i + 1 < argc) {
             width = parse_screen_size(argv[++i]);
         } else if (strcmp(a, "--height") == 0 && i + 1 < argc) {
@@ -351,6 +361,17 @@ int main(int argc, char **argv)
 
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
+    if(ble_service || ble_session) {
+        if(g_gui || (ble_service && (ble_session || ble_isolate || ble_restore || serial)) ||
+           (ble_session && (ble_restore || strcmp(transport,"ble") || mouse_mode!=OTG_MOUSE_ABSOLUTE))) {
+            fprintf(stderr,"ERROR: --ble-service is standalone; use --ble-session with --transport ble and absolute mouse mode in CLI\n");return 2;
+        }
+#ifdef OTG_HAVE_BLE
+        if(ble_service)return otg_ble_service_run(adapter,&g_stop);
+#else
+        fprintf(stderr,"ERROR: resident BLE requires BUILD_BLE=ON\n");return 2;
+#endif
+    }
     if (ble_isolate || ble_restore) {
         if (g_gui || (ble_isolate && ble_restore) ||
             (ble_isolate && strcmp(transport, "ble"))) {
@@ -389,13 +410,15 @@ int main(int argc, char **argv)
                 mouse_mode == OTG_MOUSE_ABSOLUTE ? "absolute" : "relative", width, height);
     } else if (strcmp(transport, "ble") == 0) {
 #ifdef OTG_HAVE_BLE
-        struct otg_ble_hid *ble = otg_ble_hid_create(adapter);
-        if (!ble || otg_bridge_open_transport(&state.bridge, otg_ble_hid_ops(), ble,
+        state.resident_session=ble_session;
+        state.transport_owner=ble_session ? (void *)otg_ble_session_open(adapter) :
+                                           (void *)otg_ble_hid_create(adapter);
+        const struct otg_hid_transport_ops *ops=ble_session ? otg_ble_session_ops() : otg_ble_hid_ops();
+        if (!state.transport_owner || otg_bridge_open_transport(&state.bridge, ops, state.transport_owner,
                                               width, height, mouse_mode) != 0) {
-            otg_ble_hid_destroy(ble);
+            destroy_transport_owner(&state);
             return 1;
         }
-        state.transport_owner = ble;
         fprintf(stderr, "INFO:  BLE HID advertisement started on %s; waiting for phone subscriptions\n", adapter);
 #else
         fprintf(stderr, "ERROR: BLE HID requires Linux with BUILD_BLE=ON (adapter %s)\n", adapter);

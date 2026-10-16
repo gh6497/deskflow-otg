@@ -3,6 +3,71 @@
 #include "../src/ble_hid.c"
 
 #define CHECK(x) do {if(!(x)){fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x);exit(1);}} while(0)
+struct mock_bluez {
+    const char *address;
+    GMainContext *context;
+    GMainLoop *loop;
+    int ready,registered,unregistered,advertised,stopped,reject_stop;
+    char alias[64];
+};
+static const char *manager_xml=
+"<node><interface name='org.freedesktop.DBus.Properties'>"
+"<method name='Get'><arg type='s' direction='in'/><arg type='s' direction='in'/><arg type='v' direction='out'/></method>"
+"<method name='Set'><arg type='s' direction='in'/><arg type='s' direction='in'/><arg type='v' direction='in'/></method></interface>"
+"<interface name='org.bluez.GattManager1'>"
+"<method name='RegisterApplication'><arg type='o' direction='in'/><arg type='a{sv}' direction='in'/></method>"
+"<method name='UnregisterApplication'><arg type='o' direction='in'/></method></interface>"
+"<interface name='org.bluez.LEAdvertisingManager1'>"
+"<method name='RegisterAdvertisement'><arg type='o' direction='in'/><arg type='a{sv}' direction='in'/></method>"
+"<method name='UnregisterAdvertisement'><arg type='o' direction='in'/></method></interface></node>";
+static void manager_method(GDBusConnection *bus,const char *sender,const char *path,
+    const char *interface,const char *name,GVariant *args,GDBusMethodInvocation *inv,void *user)
+{
+    (void)bus;(void)sender;(void)path;(void)interface;
+    struct mock_bluez *mock=user;
+    if(!strcmp(name,"Get")) {
+        g_dbus_method_invocation_return_value(inv,g_variant_new("(v)",g_variant_new_string(mock->alias)));return;
+    }
+    if(!strcmp(name,"Set")) {
+        const char *iface,*property;GVariant *value;
+        g_variant_get(args,"(&s&sv)",&iface,&property,&value);
+        CHECK(!strcmp(iface,"org.bluez.Adapter1") && !strcmp(property,"Alias"));
+        g_strlcpy(mock->alias,g_variant_get_string(value,NULL),sizeof(mock->alias));g_variant_unref(value);
+    } else if(!strcmp(name,"RegisterApplication"))g_atomic_int_inc(&mock->registered);
+    else if(!strcmp(name,"UnregisterApplication"))g_atomic_int_inc(&mock->unregistered);
+    else if(!strcmp(name,"RegisterAdvertisement"))g_atomic_int_inc(&mock->advertised);
+    else if(!strcmp(name,"UnregisterAdvertisement")) {
+        if(g_atomic_int_get(&mock->reject_stop)) {
+            g_dbus_method_invocation_return_dbus_error(inv,"org.bluez.Error.Failed","injected stop failure");return;
+        }
+        g_atomic_int_inc(&mock->stopped);
+    } else CHECK(false);
+    g_dbus_method_invocation_return_value(inv,NULL);
+}
+static gpointer manager_thread(gpointer data)
+{
+    struct mock_bluez *mock=data;
+    mock->context=g_main_context_new();g_main_context_push_thread_default(mock->context);
+    mock->loop=g_main_loop_new(mock->context,FALSE);
+    GDBusConnection *bus=g_dbus_connection_new_for_address_sync(mock->address,
+        G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_CLIENT|G_DBUS_CONNECTION_FLAGS_MESSAGE_BUS_CONNECTION,NULL,NULL,NULL);
+    CHECK(bus);
+    GVariant *reply=g_dbus_connection_call_sync(bus,"org.freedesktop.DBus","/org/freedesktop/DBus",
+        "org.freedesktop.DBus","RequestName",g_variant_new("(su)",BLUEZ,0),NULL,0,1000,NULL,NULL);
+    CHECK(reply);g_variant_unref(reply);
+    GDBusNodeInfo *info=g_dbus_node_info_new_for_xml(manager_xml,NULL);
+    const GDBusInterfaceVTable table={.method_call=manager_method};guint ids[3];
+    for(int i=0;i<3;i++) {
+        ids[i]=g_dbus_connection_register_object(bus,"/org/bluez/hci0",info->interfaces[i],&table,mock,NULL,NULL);
+        CHECK(ids[i]);
+    }
+    g_atomic_int_set(&mock->ready,1);g_main_loop_run(mock->loop);
+    for(int i=0;i<3;i++)g_dbus_connection_unregister_object(bus,ids[i]);
+    g_dbus_node_info_unref(info);g_dbus_connection_close_sync(bus,NULL,NULL);g_object_unref(bus);
+    g_main_loop_unref(mock->loop);g_main_context_pop_thread_default(mock->context);g_main_context_unref(mock->context);
+    return NULL;
+}
+static gboolean stop_manager(gpointer data){g_main_loop_quit(data);return G_SOURCE_REMOVE;}
 static GVariant *invoke(struct otg_ble_hid *b,const char *path,const char *iface,
                          const char *method_name,GVariant *args,bool success)
 {
@@ -33,6 +98,9 @@ int main(void)
     if(!daemon)return 77;
     g_free(daemon);
     GTestDBus *test=g_test_dbus_new(G_TEST_DBUS_NONE);g_test_dbus_up(test);
+    struct mock_bluez mock={.address=g_test_dbus_get_bus_address(test),.alias="original-host"};
+    GThread *thread=g_thread_new("mock-bluez",manager_thread,&mock);
+    while(!g_atomic_int_get(&mock.ready))g_usleep(1000);
     struct otg_ble_hid b={.latency_fd=-1};
     b.bus=g_dbus_connection_new_for_address_sync(g_test_dbus_get_bus_address(test),
         G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_CLIENT|G_DBUS_CONNECTION_FLAGS_MESSAGE_BUS_CONNECTION,
@@ -63,9 +131,33 @@ int main(void)
     write_byte(&b,ROOT "/hid/control",1,true);CHECK(!b.suspended);
     write_byte(&b,ROOT "/hid/control",3,false);CHECK(!b.suspended);
     write_byte(&b,ROOT "/hid/keys",4,false);
+    /* Real private D-Bus lifecycle: session teardown removes advertising, not
+     * the registered GATT service; a second session needs no new StartNotify. */
+    b.resident=true;b.adapter="hci0";b.adapter_path="/org/bluez/hci0";
+    CHECK(register_blueZ(&b));CHECK(b.app_registered && !b.adv_registered);
+    CHECK(otg_ble_hid_set_session(&b,true));
+    b.peer_connected=true;update_channel_state(&b);CHECK(!b.channel_ready);
+    result=invoke(&b,ROOT "/hid/keys","org.bluez.GattCharacteristic1","StartNotify",NULL,true);g_variant_unref(result);
+    result=invoke(&b,ROOT "/hid/pointer","org.bluez.GattCharacteristic1","StartNotify",NULL,true);g_variant_unref(result);
+    update_channel_state(&b);CHECK(b.channel_ready);
+    b.values[0][2]=4;b.values[1][1]=1;b.pointer_pending=true;
+    CHECK(otg_ble_hid_set_session(&b,false));
+    CHECK(b.app_registered && !b.adv_registered && !b.channel_ready);
+    CHECK(b.notifying[0] && b.notifying[1]);
+    CHECK(!b.values[0][2] && !b.values[1][1] && !b.pointer_pending);
+    CHECK(!g_atomic_int_get(&mock.unregistered));
+    CHECK(otg_ble_hid_set_session(&b,true));CHECK(b.channel_ready);
+    CHECK(g_atomic_int_get(&mock.registered)==1 && g_atomic_int_get(&mock.advertised)==2);
+    g_atomic_int_set(&mock.reject_stop,1);
+    CHECK(!otg_ble_hid_set_session(&b,false));CHECK(!b.channel_ready && b.adv_registered);
+    g_atomic_int_set(&mock.reject_stop,0);
+    CHECK(otg_ble_hid_set_session(&b,false));CHECK(!b.adv_registered);
     close_ble(&b);
+    CHECK(g_atomic_int_get(&mock.unregistered)==1);
+    g_free(b.original_alias);
     g_dbus_node_info_unref(node_info);node_info=NULL;
     g_dbus_connection_close_sync(b.bus,NULL,NULL);g_object_unref(b.bus);
+    g_main_context_invoke(mock.context,stop_manager,mock.loop);g_thread_join(thread);
     g_test_dbus_down(test);g_object_unref(test);
     puts("PASS: GATT export, stable handles, long-read offsets, neutral reports and control point");
     return 0;
