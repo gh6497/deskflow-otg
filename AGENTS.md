@@ -231,6 +231,10 @@ for f in src/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only -Isrc -Ibu
   PKEXEC_UID/SUDO_UID，继承桥接 stdin，实现取消/EOF 优雅恢复；GUI 不强杀特权恢复进程。
   DEB 根据 BUILD_FEATURES.json 添加运行依赖和可选用户 systemd 单元，但安装不自动启动服务。
   GUI/新身份门控的离线通过不代表提权、缓存迁移、系统重启或完整真机输入验收完成。
+  身份比较必须读取在线 Device1 的 `Address`，不能把身份 MAC 拼成固定 D-Bus 路径：
+  BlueZ 解析隐私地址后可能保留原 `dev_随机地址` 路径。授权仍要求该在线对象本身 Paired；
+  另一个同 Address、离线且已配对的对象不能替它提供授权。GATT device 选项核对当前已认证
+  在线对象路径，多连接继续关闭输入。服务日志的 `BLE waiting:` 会区分身份、配对和订阅等待。
 
 - `-DBUILD_GUI=ON` 启用 Qt Widgets 桌面端；默认 OFF 保留纯 C 构建。GUI 支持 Linux、macOS、Windows。
 - `gui/main_window.cpp` 管理界面、ADB 异步查询和 QSettings；`device_info.cpp` 解析设备/尺寸/方向并生成布局。

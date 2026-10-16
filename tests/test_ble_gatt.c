@@ -10,7 +10,7 @@ struct mock_bluez {
     int ready,registered,unregistered,advertised,stopped,reject_stop;
     char alias[64];
     GDBusConnection *bus;
-    int connected_mask, unpaired_mask;
+    int connected_mask, unpaired_mask, private_path;
 };
 static const char *manager_xml=
 "<node><interface name='org.freedesktop.DBus.Properties'>"
@@ -31,11 +31,16 @@ static void manager_method(GDBusConnection *bus,const char *sender,const char *p
     struct mock_bluez *mock=user;
     if(!strcmp(name,"GetManagedObjects")) {
         GVariantBuilder objects;g_variant_builder_init(&objects,G_VARIANT_TYPE("a{oa{sa{sv}}}"));
-        const char *paths[]={"/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF","/org/bluez/hci0/dev_11_22_33_44_55_66"};
-        for(int i=0;i<2;i++) {
+        bool privacy=g_atomic_int_get(&mock->private_path)!=0;
+        const char *paths[]={privacy ? "/org/bluez/hci0/dev_52_00_00_00_00_01" :
+            "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF","/org/bluez/hci0/dev_11_22_33_44_55_66",
+            "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF"};
+        for(int i=0;i<(privacy?3:2);i++) {
             GVariantBuilder interfaces,properties;
             g_variant_builder_init(&interfaces,G_VARIANT_TYPE("a{sa{sv}}"));
             g_variant_builder_init(&properties,G_VARIANT_TYPE("a{sv}"));
+            g_variant_builder_add(&properties,"{sv}","Address",g_variant_new_string(i==1 ?
+                "11:22:33:44:55:66" : "AA:BB:CC:DD:EE:FF"));
             g_variant_builder_add(&properties,"{sv}","Connected",g_variant_new_boolean(!!(g_atomic_int_get(&mock->connected_mask)&(1<<i))));
             g_variant_builder_add(&properties,"{sv}","Paired",g_variant_new_boolean(!(g_atomic_int_get(&mock->unpaired_mask)&(1<<i))));
             g_variant_builder_add(&interfaces,"{s@a{sv}}","org.bluez.Device1",g_variant_builder_end(&properties));
@@ -185,11 +190,29 @@ int main(void)
         b.session_enabled=true;update_channel_state(&b);
         CHECK(b.channel_ready==(mask==1));
     }
+    /* Identity Address changes need not rename an object's original private
+     * path. An offline bonded alias must never authenticate the live link. */
+    g_atomic_int_set(&mock.private_path,1);g_atomic_int_set(&mock.connected_mask,1);
+    g_clear_object(&b.devices);
+    b.devices=g_dbus_object_manager_client_new_sync(b.bus,
+        G_DBUS_OBJECT_MANAGER_CLIENT_FLAGS_DO_NOT_AUTO_START,BLUEZ,"/",NULL,NULL,NULL,NULL,NULL);
+    CHECK(b.devices);refresh_peer(&b);update_channel_state(&b);
+    CHECK(b.channel_ready && !strcmp(b.peer_path,"/org/bluez/hci0/dev_52_00_00_00_00_01"));
+    GVariantBuilder options;g_variant_builder_init(&options,G_VARIANT_TYPE("a{sv}"));
+    g_variant_builder_add(&options,"{sv}","device",g_variant_new_object_path(b.peer_path));
+    GVariant *target=g_variant_ref_sink(g_variant_builder_end(&options));
+    CHECK(target_options(&b,target));g_variant_unref(target);
+    g_variant_builder_init(&options,G_VARIANT_TYPE("a{sv}"));
+    g_variant_builder_add(&options,"{sv}","device",g_variant_new_object_path("/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF"));
+    target=g_variant_ref_sink(g_variant_builder_end(&options));
+    CHECK(!target_options(&b,target));g_variant_unref(target);
     g_atomic_int_set(&mock.connected_mask,1);g_atomic_int_set(&mock.unpaired_mask,1);
     g_clear_object(&b.devices);
     b.devices=g_dbus_object_manager_client_new_sync(b.bus,
         G_DBUS_OBJECT_MANAGER_CLIENT_FLAGS_DO_NOT_AUTO_START,BLUEZ,"/",NULL,NULL,NULL,NULL,NULL);
-    CHECK(b.devices);refresh_peer(&b);CHECK(!b.peer_connected);
+    CHECK(b.devices);refresh_peer(&b);update_channel_state(&b);
+    CHECK(!b.peer_connected && !b.peer_path && !b.channel_ready);
+    CHECK(strstr(b.wait_reason,"not paired"));
     CHECK(!read_at(&b,ROOT "/hid/keys",0,false)); // Non-BlueZ D-Bus caller rejected.
     result=invoke(&b,ROOT "/hid/keys","org.bluez.GattCharacteristic1","StartNotify",NULL,false);
     CHECK(!result);

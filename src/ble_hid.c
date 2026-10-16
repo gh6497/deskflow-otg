@@ -31,6 +31,8 @@ struct otg_ble_hid {
     GDBusConnection *bus;
     GDBusObjectManager *devices;
     char *peer_path;
+    char peer_address[18];
+    const char *peer_wait_reason, *wait_reason;
     bool peer_connected, channel_ready;
     char *adapter;
     char *adapter_path;
@@ -235,18 +237,29 @@ bool otg_ble_hid_set_peer(struct otg_ble_hid *b, const char *address)
     for (unsigned i = 0; i < 17; ++i) {
         if (i % 3 == 2) {
             if (address[i] != ':') return false;
-            identity[i] = '_';
+            identity[i] = ':';
         } else {
             if (!g_ascii_isxdigit(address[i])) return false;
             identity[i] = g_ascii_toupper(address[i]);
         }
     }
     identity[17] = 0;
-    char *path = g_strdup_printf("%s/dev_%s", b->adapter_path, identity);
-    bool ok = !b->peer_path || !strcmp(b->peer_path, path);
-    if (ok && !b->peer_path) b->peer_path = g_strdup(path);
-    g_free(path);
-    return ok;
+    if (b->peer_address[0]) return !strcmp(b->peer_address, identity);
+    if (b->peer_path) return false; /* Don't silently retarget a legacy binding. */
+    memcpy(b->peer_address, identity, sizeof(identity));
+    return true;
+}
+
+/* BlueZ may resolve Address to the identity address while retaining the D-Bus
+ * path created for the original private address. The path is an opaque key,
+ * not an authentication identifier, and can change across reconnections. */
+static bool matches_identity(struct otg_ble_hid *b, GDBusProxy *device)
+{
+    GVariant *value=g_dbus_proxy_get_cached_property(device,"Address");
+    bool same=value && g_variant_is_of_type(value,G_VARIANT_TYPE_STRING) &&
+              !g_ascii_strcasecmp(g_variant_get_string(value,NULL),b->peer_address);
+    if(value)g_variant_unref(value);
+    return same;
 }
 
 /* BlueZ 5.72 retains CCC subscriptions for bonded peers across disconnects;
@@ -256,10 +269,15 @@ static void refresh_peer(struct otg_ble_hid *b)
 {
     if (!b->devices) return;
     char *owner=g_dbus_object_manager_client_get_name_owner(G_DBUS_OBJECT_MANAGER_CLIENT(b->devices));
-    if (!owner) {b->app_registered=false;b->peer_connected=false;return;}
+    if (!owner) {
+        b->app_registered=false;b->peer_connected=false;
+        b->peer_wait_reason="BlueZ unavailable";
+        if(b->peer_address[0])g_clear_pointer(&b->peer_path,g_free);
+        return;
+    }
     g_free(owner);
     GList *objects=g_dbus_object_manager_get_objects(b->devices);
-    unsigned connected=0;char *candidate=NULL;bool paired=false;
+    unsigned connected=0;char *candidate=NULL;bool paired=false,identity=false;
     for(GList *it=objects;it;it=it->next) {
         GDBusObject *object=it->data;
         const char *path=g_dbus_object_get_object_path(object);
@@ -270,6 +288,7 @@ static void refresh_peer(struct otg_ble_hid *b)
         GVariant *value=g_dbus_proxy_get_cached_property(G_DBUS_PROXY(interface),"Connected");
         if(value && g_variant_get_boolean(value)) {
             connected++;g_free(candidate);candidate=g_strdup(path);
+            identity=b->peer_address[0] && matches_identity(b,G_DBUS_PROXY(interface));
             GVariant *bond=g_dbus_proxy_get_cached_property(G_DBUS_PROXY(interface),"Paired");
             paired=bond && g_variant_get_boolean(bond);
             if(bond)g_variant_unref(bond);
@@ -278,16 +297,34 @@ static void refresh_peer(struct otg_ble_hid *b)
         g_object_unref(interface);
     }
     g_list_free_full(objects,g_object_unref);
-    bool same=!b->peer_path || (candidate && !strcmp(candidate,b->peer_path));
+    bool same=b->peer_address[0] ? identity :
+              (!b->peer_path || (candidate && !strcmp(candidate,b->peer_path)));
     b->peer_connected=connected==1 && paired && same;
+    b->peer_wait_reason=!connected ? "target not connected" :
+        connected!=1 ? "multiple connected devices; input blocked" :
+        !same ? "connected device identity does not match target" :
+        !paired ? "connected LE object is not paired; another object's saved bond is not sufficient" : NULL;
     if(!b->peer_connected) b->suspended=false;
-    if(b->peer_connected && !b->peer_path && b->notifying[0] && b->notifying[1])
+    if(b->peer_address[0]) {
+        if(b->peer_connected && g_strcmp0(candidate,b->peer_path)) {
+            g_free(b->peer_path);b->peer_path=g_strdup(candidate);
+        } else if(!b->peer_connected)g_clear_pointer(&b->peer_path,g_free);
+    } else if(b->peer_connected && !b->peer_path && b->notifying[0] && b->notifying[1])
         b->peer_path=g_strdup(candidate);
     g_free(candidate);
 }
 
 static void update_channel_state(struct otg_ble_hid *b)
 {
+    const char *reason=b->resident && !b->session_enabled ? "session idle" :
+        !b->app_registered ? "GATT not registered" :
+        !b->peer_connected ? (b->peer_wait_reason ? b->peer_wait_reason : "waiting for target connection") :
+        !b->notifying[0] || !b->notifying[1] ? "waiting for both HID subscriptions" :
+        b->suspended ? "phone suspended HID input" : NULL;
+    if(g_strcmp0(reason,b->wait_reason)) {
+        if(reason)fprintf(stderr,"INFO: BLE waiting: %s\n",reason);
+        b->wait_reason=reason;
+    }
     bool ready=(!b->resident || b->session_enabled) &&
                b->app_registered && b->peer_connected && b->notifying[0] &&
                b->notifying[1] && !b->suspended;
@@ -409,6 +446,10 @@ static void changed(struct otg_ble_hid *b, int report)
 
 static bool target_options(struct otg_ble_hid *b, GVariant *options)
 {
+    if(b->peer_address[0]) {
+        refresh_peer(b);
+        if(!b->peer_connected || !b->peer_path)return false;
+    }
     if (!b->peer_path) return true;
     const char *device = NULL;
     return g_variant_lookup(options,"device","&o",&device) && !strcmp(device,b->peer_path);
