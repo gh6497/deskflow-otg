@@ -21,6 +21,9 @@
 #define SESSION_MAGIC UINT32_C(0x44464253)
 #define SESSION_VERSION 2
 #define MAX_DESC 1024
+#define MAX_REPORTS 64
+#define STATUS_INTERVAL_US 5000
+#define REQUEST_TIMEOUT_US 3000000
 static const char *runtime_base="/run/user";
 enum operation { ATTACH=1, REGISTER, REPORT, POLL_SESSION, DETACH, STATUS, REPLY, SELECT_PEER, STOP_SERVICE };
 /* Local native ABI only. Version and datagram length are always checked. */
@@ -45,6 +48,16 @@ struct otg_ble_session {
     int fd, latency_fd;
     bool ready, notified, alive;
     gint64 last_supervisor_note;
+    bool in_flight, have_pointer_state;
+    uint8_t pointer_state[2];
+    gint64 request_deadline, last_request;
+    uint64_t interval_us;
+    unsigned head, count;
+    struct queued_report {
+        uint16_t id;
+        uint8_t data[8];
+        bool motion;
+    } reports[MAX_REPORTS];
 };
 
 static bool valid_adapter(const char *name)
@@ -271,7 +284,16 @@ int otg_ble_service_run(const char *adapter,volatile sig_atomic_t *stop)
             }
             handle_pending(&s,&pending[i]);
         }
-        g_usleep(1000);
+        /* IPC wakes us immediately, including the next request from a client
+         * that just received a reply. A sleep here caps throughput at 1k RPC/s.
+         * The bounded timeout also pumps BlueZ and the last coalesced pointer
+         * report when no socket input arrives. Never busy-spin while idle. */
+        struct pollfd fds[6]={{listener,POLLIN,0},{s.client,POLLIN,0}};
+        for(size_t i=0;i<G_N_ELEMENTS(pending);i++)
+            fds[i+2]=(struct pollfd){pending[i].fd,POLLIN,0};
+        if(!*stop && !s.shutdown && poll(fds,G_N_ELEMENTS(fds),s.active?1:50)<0 && errno!=EINTR) {
+            result=1;break;
+        }
     }
     drop_client(&s);
     for(size_t i=0;i<G_N_ELEMENTS(pending);i++)if(pending[i].fd>=0)close(pending[i].fd);
@@ -299,21 +321,28 @@ static int connect_service(uid_t uid,const char *adapter)
     return fd;
 }
 
-static bool request(int fd,uint16_t operation,uint16_t id,const void *data,
-                      uint16_t size,struct message *reply)
+static bool valid_reply(const struct message *reply)
+{return reply->operation==REPLY && reply->size==2 && reply->id==0;}
+
+static bool wait_reply(int fd,struct message *reply,gint64 deadline)
 {
-    if(!send_message(fd,operation,id,data,size))return false;
     struct pollfd pfd={fd,POLLIN,0};
-    gint64 deadline=g_get_monotonic_time()+3000000;
     while(g_get_monotonic_time()<deadline) {
         int n=poll(&pfd,1,50);
         if(n<0 && errno==EINTR)continue;
         if(n<0 || (pfd.revents & (POLLERR|POLLNVAL)))return false;
         if(!n)continue;
         if(receive_message(fd,reply)!=1)return false;
-        return reply->operation==REPLY && reply->size==2 && reply->id==0;
+        return valid_reply(reply);
     }
     return false;
+}
+
+static bool request(int fd,uint16_t operation,uint16_t id,const void *data,
+                       uint16_t size,struct message *reply)
+{
+    return send_message(fd,operation,id,data,size) &&
+        wait_reply(fd,reply,g_get_monotonic_time()+REQUEST_TIMEOUT_US);
 }
 
 static void notify_supervisor(struct otg_ble_session *s,const char *adapter,bool ready)
@@ -367,22 +396,86 @@ bool otg_ble_session_set_peer(struct otg_ble_session *s,const char *address)
 }
 static bool session_register(void *ctx,uint16_t id,const uint8_t *data,uint16_t size)
 {return session_rpc(ctx,REGISTER,id,data,size);}
+
+static bool session_fail(struct otg_ble_session *s,const char *reason)
+{
+    fprintf(stderr,"ERROR: resident BLE %s; releasing session input\n",reason);
+    s->alive=s->ready=s->in_flight=false;s->count=0;
+    /* The service sees EOF and releases keys even if the caller has not yet
+     * reached its normal close path. Never silently lose a state barrier. */
+    if(s->fd>=0)(void)shutdown(s->fd,SHUT_RDWR);
+    return false;
+}
+
+/* One outstanding request keeps IPC v2 reply ordering unambiguous and bounds
+ * the kernel queue. Everything behind it stays here, where motion can still
+ * be replaced. Frequent stop checks/ticks only drain a nonblocking reply;
+ * they do not each initiate a synchronous status round trip. */
+static bool session_pump(struct otg_ble_session *s,bool poll_status)
+{
+    if(!s->alive)return false;
+    gint64 now=g_get_monotonic_time();
+    if(s->in_flight) {
+        struct message reply;int n=receive_message(s->fd,&reply);
+        if(n<0 || (n>0 && !valid_reply(&reply)))return session_fail(s,"reply failed");
+        if(!n) {
+            if(now>=s->request_deadline)return session_fail(s,"reply timed out");
+            return true;
+        }
+        s->in_flight=false;s->ready=reply.data[0]!=0;
+        if(!s->ready) {
+            s->count=0;s->have_pointer_state=false;s->interval_us=0;
+        }
+    }
+    uint16_t op=POLL_SESSION,id=0,size=0;const void *data=NULL;
+    bool report=s->ready && s->count && !s->interval_us;
+    if(report) {
+        struct queued_report *r=&s->reports[s->head];
+        op=REPORT;id=r->id;size=sizeof(r->data);data=r->data;
+    } else if(s->interval_us || (poll_status && now-s->last_request>=STATUS_INTERVAL_US)) {
+        if(s->interval_us){data=&s->interval_us;size=sizeof(s->interval_us);}
+    } else return true;
+    if(!send_message(s->fd,op,id,data,size))return session_fail(s,"request failed");
+    if(report){s->head=(s->head+1)%MAX_REPORTS;s->count--;}
+    else s->interval_us=0;
+    s->in_flight=true;s->last_request=now;s->request_deadline=now+REQUEST_TIMEOUT_US;
+    return true;
+}
+
 static bool session_send(void *ctx,uint16_t id,const uint8_t *data,uint16_t size)
-{return session_rpc(ctx,REPORT,id,data,size);}
+{
+    struct otg_ble_session *s=ctx;
+    if(size!=8 || (id!=AOA_HID_ID_KEYBOARD && id!=AOA_HID_ID_MOUSE))return false;
+    if(!session_pump(s,false))return false;
+    if(!s->ready)return true; /* A reply just reported a phone disconnect. */
+    bool pointer=id==AOA_HID_ID_MOUSE;
+    bool motion=pointer && s->have_pointer_state &&
+        !memcmp(s->pointer_state,data,2) && !data[6] && !data[7];
+    struct queued_report *last=s->count ? &s->reports[(s->head+s->count-1)%MAX_REPORTS] : NULL;
+    if(motion && last && last->motion && last->id==id && !memcmp(last->data,data,2)) {
+        memcpy(last->data,data,size);
+    } else {
+        if(s->count==MAX_REPORTS)return session_fail(s,"input queue full");
+        struct queued_report *r=&s->reports[(s->head+s->count++)%MAX_REPORTS];
+        r->id=id;r->motion=motion;memcpy(r->data,data,size);
+    }
+    if(pointer){memcpy(s->pointer_state,data,2);s->have_pointer_state=true;}
+    return session_pump(s,false);
+}
 static bool session_ready(void *ctx){return ((struct otg_ble_session *)ctx)->ready;}
 static bool session_poll(void *ctx)
 {
-    struct otg_ble_session *s=ctx;uint64_t us=0;
+    struct otg_ble_session *s=ctx;
     if(s->latency_fd>=0) {
         char text[96];ssize_t size;
         while((size=recv(s->latency_fd,text,sizeof(text)-1,MSG_DONTWAIT))>0) {
             text[size]=0;
             if(!g_str_has_prefix(text,"interval_us="))continue;
             char *end;uint64_t candidate=g_ascii_strtoull(text+12,&end,10);
-            if((*end=='\n' || !*end) && candidate>=7500 && candidate<=4000000)us=candidate;
+            if((*end=='\n' || !*end) && candidate>=7500 && candidate<=4000000)s->interval_us=candidate;
         }
     }
-    bool ok=session_rpc(s,POLL_SESSION,0,us?&us:NULL,us?sizeof(us):0);
+    bool ok=session_pump(s,true);
     gint64 now=g_get_monotonic_time();
     if(s->ready!=s->notified || now-s->last_supervisor_note>=100000) {
         struct session_owner *owner=(struct session_owner *)s;
@@ -404,7 +497,12 @@ static void session_close(void *ctx)
     struct session_owner *owner=(struct session_owner *)s;
     notify_supervisor(s,owner->adapter,false);
     struct message reply;
-    if(!request(s->fd,DETACH,0,NULL,0,&reply))fprintf(stderr,"WARN: resident BLE detach was not acknowledged\n");
+    /* Discard unsent input on exit; DETACH itself releases keys/range. Consume
+     * the outstanding reply first so it cannot be mistaken for DETACH's ACK. */
+    s->count=0;
+    bool drained=!s->in_flight || wait_reply(s->fd,&reply,s->request_deadline);
+    if(!s->alive || !drained || !request(s->fd,DETACH,0,NULL,0,&reply))
+        fprintf(stderr,"WARN: resident BLE detach was not acknowledged\n");
     close(s->fd);s->fd=-1;s->alive=s->ready=false;
 }
 static const struct otg_hid_transport_ops SESSION_OPS={session_register,session_send,session_poll,session_ready,session_close};

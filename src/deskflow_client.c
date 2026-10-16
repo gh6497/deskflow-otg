@@ -98,9 +98,11 @@ static int df_socket_wait_timeout(df_socket fd, int timeout_ms)
 }
 #endif
 
+static int io_wait_interval_ms = 500;
+
 static int df_socket_wait(df_socket fd)
 {
-    return df_socket_wait_timeout(fd, 500);
+    return df_socket_wait_timeout(fd, io_wait_interval_ms);
 }
 
 struct df_client {
@@ -761,6 +763,10 @@ int df_client_run(df_client *c, volatile sig_atomic_t *stop)
 {
     df_socket fd = c->fd;
     int result = 0;
+    /* A partial TCP packet must not stall an asynchronous transport's pending
+     * replies/reports for the legacy 500ms cancellation interval. */
+    io_wait_interval_ms = c->cbs.tick_interval_ms > 0
+                             ? c->cbs.tick_interval_ms : 500;
 
     for (;;) {
         if ((stop && *stop) || (stop_check && stop_check())) {
@@ -833,6 +839,7 @@ int df_client_run(df_client *c, volatile sig_atomic_t *stop)
         }
     }
 
+    io_wait_interval_ms = 500;
     if (c->cbs.on_disconnected) {
         c->cbs.on_disconnected(c->ud);
     }

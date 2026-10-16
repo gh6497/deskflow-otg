@@ -16,11 +16,11 @@ int main(void)
     uint64_t t = UINT64_C(1000000000);
     uint8_t report[8] = {2, 0, 10, 0, 20, 0, 0, 0};
     CHECK(queue_pointer(&b, report, 8, t));
-    for (int i = 1; i <= 20; ++i) {
+    for (int i = 1; i <= 10; ++i) {
         report[2] = (uint8_t)i;
         CHECK(!queue_pointer(&b, report, 8, t + i * UINT64_C(1000000)));
     }
-    CHECK(b.values[1][2] == 20);
+    CHECK(b.values[1][2] == 10);
     CHECK(!pointer_due(&b, t + BLE_POINTER_INTERVAL_NS - 1));
     CHECK(pointer_due(&b, t + BLE_POINTER_INTERVAL_NS));
     CHECK(!pointer_due(&b, t + BLE_POINTER_INTERVAL_NS + 1));
@@ -65,11 +65,22 @@ int main(void)
     const char fast[] = "interval_us=7500\n";
     CHECK(send(fds[1], fast, sizeof(fast) - 1, 0) > 0);
     latency_poll(&b);
-    CHECK(pointer_interval(&b) == UINT64_C(16666667));
+    CHECK(pointer_interval(&b) == UINT64_C(7500000));
     const char invalid[] = "interval_us=0\n";
     CHECK(send(fds[1], invalid, sizeof(invalid) - 1, 0) > 0);
     latency_poll(&b);
-    CHECK(pointer_interval(&b) == UINT64_C(16666667));
+    CHECK(pointer_interval(&b) == UINT64_C(7500000));
+    b.notifying[0] = true;
+    t += UINT64_C(1000000000);
+    CHECK(queue_pointer(&b, report, 8, t));
+    report[2]++;
+    CHECK(!queue_pointer(&b, report, 8, t + 1));
+    CHECK(!pointer_due(&b, t + UINT64_C(7499999)));
+    CHECK(pointer_due(&b, t + UINT64_C(7500000)));
+    otg_ble_hid_set_interval(&b, 12500);
+    CHECK(pointer_interval(&b) == UINT64_C(12500000));
+    otg_ble_hid_set_interval(&b, 15000);
+    CHECK(pointer_interval(&b) == UINT64_C(15000000));
     latency_state(&b, false);
     CHECK(pointer_interval(&b) == BLE_POINTER_INTERVAL_NS);
     close(fds[0]);

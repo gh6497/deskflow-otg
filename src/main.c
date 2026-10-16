@@ -503,7 +503,7 @@ int main(int argc, char **argv)
         .on_disconnected = cb_disconnected,
         .on_idle = cb_idle,
         .on_tick = state.transport_owner ? cb_idle : NULL,
-        .tick_interval_ms = state.transport_owner ? 5 : 0,
+        .tick_interval_ms = state.transport_owner ? 1 : 0,
     };
 
     int ret = 0;

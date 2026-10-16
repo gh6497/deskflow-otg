@@ -19,7 +19,7 @@
 #define MAP_UUID "00002a4b-0000-1000-8000-00805f9b34fb"
 #define INFO_UUID "00002a4a-0000-1000-8000-00805f9b34fb"
 #define REF_UUID "00002908-0000-1000-8000-00805f9b34fb"
-#define BLE_POINTER_INTERVAL_NS UINT64_C(33333333)
+#define BLE_POINTER_INTERVAL_NS UINT64_C(15000000)
 
 struct otg_ble_hid;
 enum ble_kind { BLE_ROOT, BLE_SERVICE, BLE_REPORT, BLE_MAP, BLE_INFO,
@@ -174,8 +174,8 @@ void otg_ble_hid_set_interval(struct otg_ble_hid *b, uint64_t us)
 {
     if (us < 7500 || us > 4000000) return;
     b->pointer_interval_ns = us * UINT64_C(1000);
-    if (b->pointer_interval_ns < UINT64_C(16666667))
-        b->pointer_interval_ns = UINT64_C(16666667);
+    /* Pace to the observed connection, rather than imposing a separate 60Hz
+     * ceiling that misses connection events on 7.5/12.5/15ms links. */
     fprintf(stderr, "INFO: BLE observed interval %.2fms; pointer pacing %.2fms\n",
             us / 1000.0, b->pointer_interval_ns / 1000000.0);
 }
