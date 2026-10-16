@@ -14,6 +14,7 @@ static int cancelled(void) { return 1; }
 static int cancel_check_count;
 static int cancel_partial(void) { return ++cancel_check_count > 1; }
 static void accepted(void *ud) { ++*(int *)ud; }
+static int tick_twice(void *ud) { return ++*(int *)ud == 2; }
 
 static void check_acceptance(df_socket fd)
 {
@@ -97,6 +98,24 @@ int main(void)
     CHECK(memcmp(payload, "CALV", 4) == 0);
     free(payload);
     CHECK(recv_packet(fds[0], &payload) == 4);
+    CHECK(memcmp(payload, "CNOP", 4) == 0);
+    free(payload);
+
+    /* The asynchronous transport pump must run between packets, not only
+     * after a 500ms idle timeout. A CALV already queued on TCP exercises this. */
+    int ticks = 0;
+    df_client pumped = {0};
+    pumped.fd = fds[0];
+    pumped.ud = &ticks;
+    pumped.cbs.on_tick = tick_twice;
+    pumped.cbs.tick_interval_ms = 5;
+    CHECK(send_packet(fds[1], "CALV", 4) == 0);
+    CHECK(df_client_run(&pumped, NULL) == 0);
+    CHECK(ticks == 2);
+    CHECK(recv_packet(fds[1], &payload) == 4);
+    CHECK(memcmp(payload, "CALV", 4) == 0);
+    free(payload);
+    CHECK(recv_packet(fds[1], &payload) == 4);
     CHECK(memcmp(payload, "CNOP", 4) == 0);
     free(payload);
 

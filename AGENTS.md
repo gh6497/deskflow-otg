@@ -168,6 +168,24 @@ for f in src/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only -Isrc -Ibu
 
 ## 约束与已知限制
 
+- Linux BLE 实验后端通过 `sudo deskflow-otg --transport ble --ble-isolate` 原生启动，
+  不依赖 Python。`src/ble_supervisor.c` 使用 Linux MGMT API 快照/隔离/核对恢复，
+  通过 `/usr/sbin/runuser` 降权运行自己的桥接子进程；父进程用 `src/ble_link.c` 监控 HCI。
+  桥接通过继承的 Unix datagram FD（`OTG_BLE_LATENCY_FD`）传递订阅就绪
+  与实测连接间隔。只对唯一、已加密、本机为 peripheral 的已观测 LE 连接请求 7.5～15ms；
+  HCI Command Status 成功不等于参数已更新，必须等待 LE Connection Update Complete。
+  失败/超时保留连接；重连后重新判断，不接受子进程指定 HCI 命令或句柄。
+  `/run/deskflow-otg-ble-hciN.state` 保存 root 专用、绑定适配器地址的原始快照；失败不覆盖，
+  `--ble-restore --adapter hciN` 恢复，只有核对成功才删除；不要与历史 Python 隔离脚本并行。
+  普通 `--transport ble` 不切换模式。手机掉线不注销 GATT：BlueZ 5.72 对 bonded peer 可能
+  保留 CCC 而不调用 StopNotify，因此就绪还须 Device1 Connected/Paired。断线断开 Deskflow
+  TCP、清空输入，原手机回来后重新握手；不能以重新删除配对作为正常重连方案。
+  GATT 固定 `0x0100..0x0111`（characteristic Handle 为 value handle），含 LED 输出、
+  Control Point；长读处理 offset。`test_ble_gatt.c` 使用私有 D-Bus，不访问系统蓝牙；
+  `test_ble_supervisor.c` mock MGMT 验证恢复，`test_ble_link.c` 验证实际 HCI 确认，
+  `test_ble_pointer.c` 验证坐标/状态屏障与已配对 CCC 保留重连。历史 Python 仅作回归参考。
+  构建/模拟不等于真机免重配或硬件恢复验证完成，仍需用户实测确认。
+
 - **只支持明文协议**，不支持 deskflow 的 TLS（deskflow 1.26 默认开 TLS，需在 server 侧关闭）。
 - 键盘 **US 布局**（其它布局符号键可能错位）。
 - 只支持键盘 + 鼠标，不支持游戏手柄、剪贴板、文件拖放、视频。

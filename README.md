@@ -47,6 +47,15 @@
 - CMake ≥ 3.16
 - libusb-1.0（开发包）
 
+Linux BLE HID 后端还需要 BlueZ、GLib/GIO 开发包：
+
+```bash
+sudo apt install libusb-1.0-0-dev libglib2.0-dev bluez
+```
+
+Linux 默认编译实验 BLE 后端。仅需原有 USB CLI 时可用
+`cmake -S . -B build -DBUILD_BLE=OFF`，不要求 GLib/GIO 或 pkg-config；非 Linux 默认不编译 BLE。
+
 ```bash
 # Debian / Ubuntu
 sudo apt install build-essential cmake libusb-1.0-0-dev
@@ -353,7 +362,78 @@ USB 驱动（例如通过 Zadig 将手机对应 USB 接口绑定 WinUSB）；更
 - macOS 的构建与运行路径已适配，但具体手机的 AOA HID、拔线检测和绝对指针兼容性
   仍需真机验证。
 
-### 3. 操控手机
+### 3. Linux BLE 操控手机（实验性）
+
+开发交接、已验证范围及下一轮真机检查顺序见 [Linux BLE 交接文档](docs/LINUX_BLE_HANDOVER.md)。
+
+Linux 可将电脑作为 BLE HID peripheral 广播，手机作为 HID Host 连接。该模式不依赖 USB，
+但需要手机完成配对并订阅键盘、指针两个 HID input characteristic；仅蓝牙连接或 Deskflow
+握手成功都不会被当作输入通道就绪。程序运行期间会临时将适配器名称设置为「Deskflow OTG」，
+退出时恢复原名称；不会自动配对、信任或删除配对。只有显式使用 `--ble-isolate` 才会临时
+修改适配器模式，普通 `--transport ble` 不切换模式。
+
+```bash
+./build/deskflow-otg --transport ble --adapter hci0 \
+    --host 127.0.0.1 --port 24800 --name android \
+    --width 1080 --height 2340
+```
+
+手机蓝牙设置中连接广播的「Deskflow OTG」，按系统提示确认配对后再将鼠标移入手机屏幕。
+BLE 后端当前为 Linux 实验性功能，目标手机白名单、多主机隔离、经典 HIDP 双模兼容和完整
+真机回归仍未完成；指针纯移动报告默认约 30Hz。配合下述隔离启动器取得实际连接间隔后，
+发送周期不短于该间隔、最高约 60Hz；按键和滚轮报告不做此节流。
+断线时不保证已经断开的链路能够送达松键报告。
+BLE 事件泵在持续 Deskflow 输入期间也会运行，空闲等待最长 5ms，不依赖原有 500ms
+USB 空闲检查发送最后一个坐标。拖拽中仅合并坐标；按钮变化和退出悬停立即发送。
+
+#### 原生仅 BLE 启动与自动恢复（无需 Python）
+
+手机把双模电脑当作音频设备时，可以显式使用原生 `--ble-isolate`。需要 sudo、BlueZ 和
+util-linux 的 `/usr/sbin/runuser`；不依赖 Python、独立验证目录或任何测试脚本。
+启动时会临时断开该适配器的全部蓝牙连接，保存状态、禁用 BR/EDR。桥接子进程通过
+`runuser` 降权，仍以发起 sudo 的普通用户运行；root 父进程只管理本次适配器隔离与恢复。
+先停止旧桥接并等待恢复完成；不要同时运行多个隔离入口。
+
+```bash
+sudo ./build/deskflow-otg --transport ble --ble-isolate --adapter hci0 \
+  --host 127.0.0.1 --port 24800 --name android --width 1080 --height 2340
+```
+
+root 启动器通过专用 IPC 收到 HID 就绪通知后，只对该适配器上
+唯一、已加密且本机为 peripheral 的已观测 LE 连接请求 7.5～15ms、latency=0 的参数。
+不接受子进程指定的连接句柄或任意 HCI 命令；多连接时不猜测目标。每次重新连接重新判断。
+该限制不等同于已实现手机白名单，实验时仍应只连接目标手机。
+
+只有日志 `BLE actual interval=... (controller event)` 才代表观测到的实际参数；
+`requesting interval` 只表示发出了请求。手机拒绝或 5 秒未确认时保留连接及已观测的参数，
+不循环重试、不改永久蓝牙配置、不安装服务、不赋予桥接程序 HCI 权限。
+不带 `--ble-isolate` 直接运行桥接时仍可连接，但不会自动请求低延迟参数。
+
+**日常重连不要取消配对，也不要关闭程序后再重新启动隔离。** 手机临时断开时，程序保留
+GATT 服务、广播及已有配对；关闭到 Deskflow 的 TCP 连接让电脑收回光标，丢弃旧按键和
+坐标，等待原手机重新连接。BlueZ 为已配对设备保留 CCC 订阅时，不要求它再次触发
+`StartNotify`。重连并确认实际链路与订阅就绪后，程序自动重新接入 Deskflow。
+首次配对仍由系统代理确认，程序不自动接受陌生设备。当前原生隔离入口仅用于 CLI，
+不会替你改写已安装 GUI 的配置；USB 自动连接与托盘行为不变。
+
+GATT 服务固定使用 `0x0100..0x0111`，包含键盘 LED 输出和 HID Control Point，并支持
+Report Map 的 offset 读取，避免每次重新注册时句柄漂移。该范围冲突会报错，不静默改成
+新句柄。旧实验版的不同 GATT 布局、手机缓存或两端已有密钥不一致仍需单独诊断，不能把
+这些代码修复当作已经完成真机免重配验收。
+
+完全退出时，原生启动器核对恢复原 BR/EDR、LE、电源、安全、可发现/可配对及名称设置。
+恢复成功后才能清理快照。异常退出或恢复失败会保留 root 专用的
+`/run/deskflow-otg-ble-hci0.state`，再次启动拒绝覆盖原快照；用同一个二进制恢复：
+
+```bash
+sudo ./build/deskflow-otg --ble-restore --adapter hci0
+```
+
+快照绑定适配器地址；控制器重试上电后仍失败时明确报错，不伪称恢复成功，不重启
+bluetoothd、不删除蓝牙数据。SIGKILL/断电无法自动清理，`/run` 快照不跨重启保存。
+此命令不能读取旧 Python 实验脚本的 JSON 快照，两者不要同时运行。
+
+### 4. 操控手机
 
 把鼠标移出主机屏幕边缘（滑向"手机"那块屏幕），此时键盘鼠标就会注入到手机。
 把鼠标再滑回主机屏幕边缘，即可回到主机。
@@ -373,6 +453,10 @@ USB 驱动（例如通过 Zadig 将手机对应 USB 接口绑定 WinUSB）；更
   -p, --port PORT       Deskflow server 端口 (默认 24800)
   -n, --name NAME       上报给 server 的屏幕名 (默认 android)
   -s, --serial SERIAL   安卓设备的 USB 序列号 (不指定则自动检测)
+      --transport MODE usb（默认）或 ble（Linux 实验后端）
+      --adapter NAME   蓝牙适配器（默认 hci0）
+      --ble-isolate    sudo 原生仅 BLE 启动，退出恢复，无需 Python
+      --ble-restore    根据原生快照恢复适配器，不启动桥接
       --width W         虚拟屏幕宽度，1..32767 (默认 1080)
       --height H        虚拟屏幕高度，1..32767 (默认 1920)
       --mouse-mode MODE absolute（默认）或 relative（兼容模式）
@@ -439,6 +523,9 @@ src/
   deskflow_client.c   极简 Deskflow 客户端协议 (TCP 握手 + 消息循环)
   aoa_hid.c           USB AOA HID (libusb 枚举/打开/注册/发送报告)
   usb_scan.c          USB 设备快照与 libusb 热插拔事件监听
+  ble_hid.c           Linux GATT/HID、稳定句柄与已配对设备重连
+  ble_supervisor.c    原生隔离、降权子进程、模式快照与异常恢复
+  ble_link.c          root 父进程的 HCI 参数监控与低延迟请求
   bridge.c            键鼠状态机 + HID 报告生成 (对应 scrcpy 的 hid_*)
   keymap.c            deskflow KeyID → USB HID usage 映射
 gui/
