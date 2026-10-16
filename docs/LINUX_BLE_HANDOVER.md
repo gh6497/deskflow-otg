@@ -2,6 +2,10 @@
 
 ## 接手摘要
 
+**续接更新：CLI/GUI 与 DEB 接入已落地，新增要求及验证范围见第 8 节。旧命令中的 BLE 桥接
+现需添加 `--ble-peer`；IPC 已升至 v2，不能直接复用本文件第 7 节仍运行的旧版服务。不得擅自
+停止用户连接。以下历史记录保留当时的原始事实，不作为新版 GUI 已完成真机验收的证据。**
+
 分支：`feat/linux-ble-hid`。基于 `d11c432`（`main`）。实验功能包含本地实现及本轮续测记录，
 未推送、未开 PR、未发布安装包；不要将其当作完成真机验收的正式版本。
 
@@ -351,3 +355,45 @@ Alias=`len-mint`、ActiveInstances=0、`.state` 已清理。
 恢复后再次启动会话免重配重新接入通过**；不扩大到常驻服务/BlueZ/主机重启。
 本条验证记录结束时第三会话与常驻服务仍运行，未擅自结束用户正在使用的连接；
 当时尚未提交本轮修改，未推送、未发布。后续提交状态以 Git 历史为准。
+
+## 8. Linux CLI / GUI / 安装包接入（2026-10-16）
+
+用户确认蓝牙具备 OTG 同等的操控能力，并批准按 Linux CLI + GUI + 安装包范围接入。
+没有新增独立可执行文件：同一个 `deskflow-otg` 负责服务和会话两种角色。
+
+- BLE 桥接新增必填 `--ble-peer AA:BB:CC:DD:EE:FF`（BlueZ 身份地址）。服务生命周期内
+  固定该目标，换手机须显式停止空闲服务。输入仍须目标已配对、唯一在线、真实两路订阅。
+  多连接失败关闭输入；这不是任意多主机环境的强隔离保证，推荐专用适配器。
+- GATT 方法核对 BlueZ 唯一 D-Bus owner；键鼠 Value 信号定向 BlueZ，不在系统总线上广播。
+  输入 ReadValue / LED / Control Point 校验 BlueZ 提供的目标 device。
+- IPC 升至 v2，新增目标绑定、只读 `--ble-status` 和同 UID 空闲服务停止
+  `--ble-stop-service`。不隐式停止/替换旧服务，不用 PID 猜测进程归属。
+- Linux BLE GUI 提供传输、适配器、目标地址、仅 BLE 选项和停止空闲服务；保存设置、隐藏
+  无关 USB/ADB 控件、暂停 USB 自动连接。服务不存在时后台启动，已有空闲服务则复用；
+  会话断开和 GUI 退出保留常驻服务。手机/Deskflow 断线后等待重连，不把旧连接状态留成已连接。
+- GUI 隔离须确认该适配器所有连接中断，再经系统 pkexec 认证；监督器支持 PKEXEC_UID，
+  桥接继续降权。stdin 继承给子进程，取消/GUI EOF 仍由桥接优雅退出，监督器负责恢复。
+  认证等待期间取消会在切换控制器前检查 stdin；GUI 不强杀特权监督器。
+- BUILD_FEATURES.json 随安装树提供；DEB 按 BLE 功能声明 BlueZ/GLib/pkexec 依赖，增加 CLI
+  入口及可选的用户 systemd 单元。安装不自动启动/启用单元，不重启 bluetoothd。
+  CLI 安装 RPATH 支持在不依赖 LD_LIBRARY_PATH 的情况下运行。AppImage FUSE 提权边界见 README。
+- CI 补充 GLib/BlueZ 和 USB-only GUI 回归；补充 GLib 许可证来源。
+
+本轮验证（全部离线，不访问系统蓝牙、不停止第 7 节的用户服务）：
+
+- Qt 6.8.3 + BLE + GUI，`-Wall -Wextra -Werror` 构建通过；14 项 CTest 通过。
+- BUILD_BLE=OFF + GUI，严格构建和 8 项 CTest 通过。
+- BLE CLI 的 ASan/UBSan 构建与 10 项 CTest 通过。
+- 9 项 Python 打包测试通过，含实际构建/解包 BLE 与 USB-only DEB 的依赖、CLI 入口和单元检查。
+- 私有 D-Bus 模拟 BlueZ 验证目标匹配、未配对、非目标/多连接关闭输入及非 BlueZ 调用拒绝；
+  真实私有 seqpacket 验证目标绑定、占用时拒绝停止、空闲停止和旧版协议拒绝。
+- Qt 模拟子进程验证 BLE 参数（不传 USB serial）、断线/重连、忙碌拒绝、取消、配置恢复、无 ADB
+  及切回 USB。`/tmp/opencode/ble-product-gui.png` 为模拟界面截图，不是真实手机连接截图。
+
+开发构建：`/tmp/opencode/ble-product-build`；USB-only：`/tmp/opencode/ble-product-usb`；
+sanitizer：`/tmp/opencode/ble-product-asan`。本地 DEB 在 `/tmp/opencode/deskflow-otg-ble-linux-amd64.deb`，
+尚未安装/发布，构建版本为 0.1.4 的 tracked-dirty 开发版；源码提交状态以 Git 为准。
+
+**下一步仍须用户批准后切换旧服务，再真机验证新版 GUI 启动、桌面认证/取消、会话退出恢复、
+目标地址门控和无线输入；常驻服务/BlueZ/系统重启、持键强杀、锁屏及长时间输入未因本次
+GUI/打包接入而变成已验收。不要擅自停止旧连接、切模式或删除配对。**

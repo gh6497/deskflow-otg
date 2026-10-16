@@ -73,7 +73,7 @@ add_executable(deskflow-otg
   src/keymap.c
 )
 
-option(BUILD_BLE "Build the experimental Linux BLE HID backend" ${LINUX})
+option(BUILD_BLE "Build the Linux BLE HID backend" ${LINUX})
 if(BUILD_BLE)
   if(NOT LINUX)
     message(FATAL_ERROR "BUILD_BLE is only supported on Linux")
@@ -153,10 +153,24 @@ if(BUILD_TESTING)
   add_test(NAME cli_version COMMAND deskflow-otg --version)
   set_tests_properties(cli_version PROPERTIES
     PASS_REGULAR_EXPRESSION "deskflow-otg ${PROJECT_VERSION}")
+  add_test(NAME cli_ble_validation COMMAND "${CMAKE_COMMAND}"
+    "-DCLI=$<TARGET_FILE:deskflow-otg>" -P "${PROJECT_SOURCE_DIR}/tests/test_cli_ble.cmake")
 endif()
 
 install(TARGETS deskflow-otg RUNTIME DESTINATION bin)
 install(FILES "${PROJECT_BINARY_DIR}/BUILD_VERSION.txt" DESTINATION share/deskflow-otg)
+if(BUILD_BLE)
+  set(OTG_BLE_FEATURE true)
+else()
+  set(OTG_BLE_FEATURE false)
+endif()
+file(WRITE "${PROJECT_BINARY_DIR}/BUILD_FEATURES.json" "{\"ble\":${OTG_BLE_FEATURE}}\n")
+install(FILES "${PROJECT_BINARY_DIR}/BUILD_FEATURES.json" DESTINATION share/deskflow-otg)
+if(LINUX)
+  # pkexec strips LD_LIBRARY_PATH. Both native CLI and elevated supervisor must
+  # resolve the staged runtime without relying on the AppRun environment.
+  set_target_properties(deskflow-otg PROPERTIES INSTALL_RPATH "$ORIGIN/../lib")
+endif()
 
 option(BUILD_GUI "Build the Qt desktop application" OFF)
 if(BUILD_GUI)

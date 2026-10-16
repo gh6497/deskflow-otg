@@ -9,6 +9,8 @@ struct mock_bluez {
     GMainLoop *loop;
     int ready,registered,unregistered,advertised,stopped,reject_stop;
     char alias[64];
+    GDBusConnection *bus;
+    int connected_mask, unpaired_mask;
 };
 static const char *manager_xml=
 "<node><interface name='org.freedesktop.DBus.Properties'>"
@@ -19,12 +21,28 @@ static const char *manager_xml=
 "<method name='UnregisterApplication'><arg type='o' direction='in'/></method></interface>"
 "<interface name='org.bluez.LEAdvertisingManager1'>"
 "<method name='RegisterAdvertisement'><arg type='o' direction='in'/><arg type='a{sv}' direction='in'/></method>"
-"<method name='UnregisterAdvertisement'><arg type='o' direction='in'/></method></interface></node>";
+"<method name='UnregisterAdvertisement'><arg type='o' direction='in'/></method></interface>"
+"<interface name='org.freedesktop.DBus.ObjectManager'><method name='GetManagedObjects'>"
+"<arg type='a{oa{sa{sv}}}' direction='out'/></method></interface></node>";
 static void manager_method(GDBusConnection *bus,const char *sender,const char *path,
     const char *interface,const char *name,GVariant *args,GDBusMethodInvocation *inv,void *user)
 {
     (void)bus;(void)sender;(void)path;(void)interface;
     struct mock_bluez *mock=user;
+    if(!strcmp(name,"GetManagedObjects")) {
+        GVariantBuilder objects;g_variant_builder_init(&objects,G_VARIANT_TYPE("a{oa{sa{sv}}}"));
+        const char *paths[]={"/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF","/org/bluez/hci0/dev_11_22_33_44_55_66"};
+        for(int i=0;i<2;i++) {
+            GVariantBuilder interfaces,properties;
+            g_variant_builder_init(&interfaces,G_VARIANT_TYPE("a{sa{sv}}"));
+            g_variant_builder_init(&properties,G_VARIANT_TYPE("a{sv}"));
+            g_variant_builder_add(&properties,"{sv}","Connected",g_variant_new_boolean(!!(g_atomic_int_get(&mock->connected_mask)&(1<<i))));
+            g_variant_builder_add(&properties,"{sv}","Paired",g_variant_new_boolean(!(g_atomic_int_get(&mock->unpaired_mask)&(1<<i))));
+            g_variant_builder_add(&interfaces,"{s@a{sv}}","org.bluez.Device1",g_variant_builder_end(&properties));
+            g_variant_builder_add(&objects,"{o@a{sa{sv}}}",paths[i],g_variant_builder_end(&interfaces));
+        }
+        g_dbus_method_invocation_return_value(inv,g_variant_new("(@a{oa{sa{sv}}})",g_variant_builder_end(&objects)));return;
+    }
     if(!strcmp(name,"Get")) {
         g_dbus_method_invocation_return_value(inv,g_variant_new("(v)",g_variant_new_string(mock->alias)));return;
     }
@@ -52,17 +70,18 @@ static gpointer manager_thread(gpointer data)
     GDBusConnection *bus=g_dbus_connection_new_for_address_sync(mock->address,
         G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_CLIENT|G_DBUS_CONNECTION_FLAGS_MESSAGE_BUS_CONNECTION,NULL,NULL,NULL);
     CHECK(bus);
+    mock->bus=bus;
     GVariant *reply=g_dbus_connection_call_sync(bus,"org.freedesktop.DBus","/org/freedesktop/DBus",
         "org.freedesktop.DBus","RequestName",g_variant_new("(su)",BLUEZ,0),NULL,0,1000,NULL,NULL);
     CHECK(reply);g_variant_unref(reply);
     GDBusNodeInfo *info=g_dbus_node_info_new_for_xml(manager_xml,NULL);
-    const GDBusInterfaceVTable table={.method_call=manager_method};guint ids[3];
-    for(int i=0;i<3;i++) {
-        ids[i]=g_dbus_connection_register_object(bus,"/org/bluez/hci0",info->interfaces[i],&table,mock,NULL,NULL);
+    const GDBusInterfaceVTable table={.method_call=manager_method};guint ids[4];
+    for(int i=0;i<4;i++) {
+        ids[i]=g_dbus_connection_register_object(bus,i==3?"/":"/org/bluez/hci0",info->interfaces[i],&table,mock,NULL,NULL);
         CHECK(ids[i]);
     }
     g_atomic_int_set(&mock->ready,1);g_main_loop_run(mock->loop);
-    for(int i=0;i<3;i++)g_dbus_connection_unregister_object(bus,ids[i]);
+    for(int i=0;i<4;i++)g_dbus_connection_unregister_object(bus,ids[i]);
     g_dbus_node_info_unref(info);g_dbus_connection_close_sync(bus,NULL,NULL);g_object_unref(bus);
     g_main_loop_unref(mock->loop);g_main_context_pop_thread_default(mock->context);g_main_context_unref(mock->context);
     return NULL;
@@ -152,9 +171,32 @@ int main(void)
     CHECK(!otg_ble_hid_set_session(&b,false));CHECK(!b.channel_ready && b.adv_registered);
     g_atomic_int_set(&mock.reject_stop,0);
     CHECK(otg_ble_hid_set_session(&b,false));CHECK(!b.adv_registered);
+    /* A real ObjectManager snapshot on the private bus exercises identity,
+     * pairing and multi-peer fail-closed behavior, without system Bluetooth. */
+    CHECK(otg_ble_hid_set_peer(&b,"AA:BB:CC:DD:EE:FF"));
+    for(int mask=0;mask<4;mask++) {
+        g_atomic_int_set(&mock.connected_mask,mask);
+        g_clear_object(&b.devices);
+        b.devices=g_dbus_object_manager_client_new_sync(b.bus,
+            G_DBUS_OBJECT_MANAGER_CLIENT_FLAGS_DO_NOT_AUTO_START,BLUEZ,"/",NULL,NULL,NULL,NULL,NULL);
+        CHECK(b.devices);
+        refresh_peer(&b);
+        CHECK(b.peer_connected==(mask==1));
+        b.session_enabled=true;update_channel_state(&b);
+        CHECK(b.channel_ready==(mask==1));
+    }
+    g_atomic_int_set(&mock.connected_mask,1);g_atomic_int_set(&mock.unpaired_mask,1);
+    g_clear_object(&b.devices);
+    b.devices=g_dbus_object_manager_client_new_sync(b.bus,
+        G_DBUS_OBJECT_MANAGER_CLIENT_FLAGS_DO_NOT_AUTO_START,BLUEZ,"/",NULL,NULL,NULL,NULL,NULL);
+    CHECK(b.devices);refresh_peer(&b);CHECK(!b.peer_connected);
+    CHECK(!read_at(&b,ROOT "/hid/keys",0,false)); // Non-BlueZ D-Bus caller rejected.
+    result=invoke(&b,ROOT "/hid/keys","org.bluez.GattCharacteristic1","StartNotify",NULL,false);
+    CHECK(!result);
     close_ble(&b);
     CHECK(g_atomic_int_get(&mock.unregistered)==1);
     g_free(b.original_alias);
+    g_clear_object(&b.devices);g_free(b.peer_path);
     g_dbus_node_info_unref(node_info);node_info=NULL;
     g_dbus_connection_close_sync(b.bus,NULL,NULL);g_object_unref(b.bus);
     g_main_context_invoke(mock.context,stop_manager,mock.loop);g_thread_join(thread);

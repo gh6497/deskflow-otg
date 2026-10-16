@@ -40,3 +40,15 @@ source and build recipe allow relinking against a modified libusb.
 
 - Sources and notices: <https://github.com/libusb/libusb>
 - License: <https://github.com/libusb/libusb/blob/master/COPYING>
+
+## Linux Bluetooth runtime
+
+Linux BLE builds dynamically link GLib/GIO (LGPL-2.1-or-later). BlueZ and
+util-linux runuser are system dependencies, not vendored implementations.
+Desktop administrator authentication uses the system's pkexec/Polkit agent;
+no privileged helper with persistent authorization is installed.
+
+- GLib source and license: <https://gitlab.gnome.org/GNOME/glib>
+- GLib license text is included by `scripts/fetch_licenses.py` for release staging.
+- BlueZ: <https://www.bluez.org/>
+- util-linux: <https://github.com/util-linux/util-linux>

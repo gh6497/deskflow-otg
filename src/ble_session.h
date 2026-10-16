@@ -9,6 +9,10 @@
 struct otg_ble_session;
 int otg_ble_service_run(const char *adapter, volatile sig_atomic_t *stop);
 struct otg_ble_session *otg_ble_session_open(const char *adapter);
+bool otg_ble_session_set_peer(struct otg_ble_session *session, const char *address);
+/* Read-only, same UID status; never attaches or changes Bluetooth settings. */
+int otg_ble_service_status(const char *adapter);
+int otg_ble_service_stop(const char *adapter);
 const struct otg_hid_transport_ops *otg_ble_session_ops(void);
 void otg_ble_session_destroy(struct otg_ble_session *session);
 /* Supervisor's read-only barrier before restoring modes after a child exits. */
