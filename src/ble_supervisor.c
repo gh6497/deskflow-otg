@@ -4,6 +4,7 @@
 #define _GNU_SOURCE
 #include "ble_supervisor.h"
 #include "ble_link.h"
+#include "ble_session.h"
 #ifdef __linux__
 #include <gio/gio.h>
 #include <errno.h>
@@ -58,8 +59,10 @@ static bool mgmt_command(struct controller *c, uint16_t opcode,
         if (n<9 || le16(packet+2)!=c->index || le16(packet+4)!=(size_t)n-6) continue;
         uint16_t event=le16(packet);
         if (event!=1 && event!=2) continue;
-        if (le16(packet+(event==1 ? 6 : 7))!=opcode) continue;
-        uint8_t status=packet[event==1 ? 8 : 6];
+        /* MGMT Command Complete and Command Status both carry opcode LE16
+         * followed by status. HCI Command Status has a different layout. */
+        if (le16(packet+6)!=opcode) continue;
+        uint8_t status=packet[8];
         if (status) {
             fprintf(stderr,"ERROR: Bluetooth MGMT 0x%04x status=0x%02x\n",opcode,status);
             return false;
@@ -275,6 +278,8 @@ int otg_ble_supervise(int argc,char **argv,const char *adapter,
     GDBusConnection *bus=NULL;GSubprocess *child=NULL;int result=1;
     bool saved=false;uint32_t original=0;char *original_alias=NULL;
     struct otg_ble_link *link=NULL;int ipc[2]={-1,-1};
+    bool resident_session=false;
+    for(int i=1;i<argc;i++)if(!strcmp(argv[i],"--ble-session"))resident_session=true;
     struct stat lock_stat;
     if (lock<0 || fstat(lock,&lock_stat) || lock_stat.st_uid!=0 ||
         !S_ISREG(lock_stat.st_mode) || flock(lock,LOCK_EX|LOCK_NB)) {
@@ -298,6 +303,9 @@ int otg_ble_supervise(int argc,char **argv,const char *adapter,
     }
     if (!(c.supported & BIT(9)) || (c.settings & (BIT(8)|BIT(12)))) {
         fprintf(stderr,"ERROR: unsupported LE controller or special debug/high-speed settings; no changes made\n");goto out;
+    }
+    if(resident_session && !otg_ble_service_wait_idle((uid_t)uid,adapter)) {
+        fprintf(stderr,"ERROR: start an idle --ble-service as the sudo caller before isolation (no changes made)\n");goto out;
     }
     if(!preflight(bus,object_path,&c)) goto out;
     original=c.settings;original_alias=g_strdup(c.alias);
@@ -351,6 +359,13 @@ restore:
     if (saved) {
         /* Cleanup must not be interrupted by repeated Ctrl+C. */
         signal(SIGINT,SIG_IGN);signal(SIGTERM,SIG_IGN);
+        /* EOF from an abnormal child exit must be consumed and input/advertising
+         * disabled by the resident service before changing controller modes. */
+        bool idle=!resident_session || otg_ble_service_wait_idle((uid_t)uid,adapter);
+        if(!idle) {
+            fprintf(stderr,"ERROR: resident BLE idle state not verified; not changing modes; recovery incomplete, snapshot retained: %s\n",state);
+            result=1;goto out;
+        }
         bool ok=apply_settings(&c,original);
         if (!restore_alias(bus,object_path,original_alias)) ok=false;
         if (ok) {

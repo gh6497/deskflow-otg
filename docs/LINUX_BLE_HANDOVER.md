@@ -2,14 +2,16 @@
 
 ## 接手摘要
 
-分支：`feat/linux-ble-hid`。基于 `d11c432`（`main`）。本次为实验功能的本地提交，
+分支：`feat/linux-ble-hid`。基于 `d11c432`（`main`）。实验功能包含本地实现及本轮续测记录，
 未推送、未开 PR、未发布安装包；不要将其当作完成真机验收的正式版本。
 
 **已有用户实测证据：Python 隔离入口 + 正式 C 桥接能操控手机，键盘正常；
 鼠标曾延迟/拖尾。手动把 BLE 连接间隔从 45ms 缩短后，用户确认有改善。**
 
-**最新代码已替换为无需 Python 的原生隔离入口，并修改了重连流程；
-用户尚未反馈这套最新原生流程的实测结果。下一会话首先验证这一点，不要继续盲调鼠标频率。**
+**续测已验证：原生隔离启动、常驻 GATT 下桥接会话正常重启、两次手机断线重连、
+普通桥接子进程 SIGKILL 后自动恢复及再次接入均通过；实际连接间隔确认降至 12.5～15ms。
+首次迁移卡在 Android HID 连接中，保留配对切手机蓝牙开关一次后才恢复，不得隐去此边界。
+常驻服务/BlueZ/主机重启、长时间与完整输入验收仍未完成，详见第 6、7 节。**
 
 建议阅读顺序：本文件 → `README.md` 的 Linux BLE 章节 → `AGENTS.md` → 对应源码和测试。
 项目计划“Linux BLE HID 功能接入与真机验证”仍未完成，不能把编译/mock 通过当作完成验收。
@@ -18,9 +20,11 @@
 
 - [x] 接入可替换 HID 输出接口，保留 USB 默认行为及共享报告编码。
 - [x] 实现实验 Linux BLE 后端、事件调度、原生隔离/恢复入口及离线测试。
-- [ ] 真机验证原生启动、正常退出恢复、异常退出恢复及重复启动。
-- [ ] 不删除任何配对，验证手机连续断开/重连、程序退出/重启后的键鼠恢复。
-- [ ] 验证原生低延迟参数请求与实际生效结果，再评估拖尾。
+- [x] 真机验证新常驻路径原生启动、桥接正常退出恢复/重启、桥接子进程 SIGKILL 恢复与再次接入。
+- [x] 常驻服务保持运行，保留配对验证两次手机断线重连及桥接会话重启，鼠标控制恢复。
+- [x] 原生低延迟请求与 controller event/IPC 回传确认，实际 12.5～15ms。
+- [ ] 首次缓存迁移无需切手机蓝牙、常驻服务/BlueZ/主机重启后的免重配恢复。
+- [ ] 新路径完整键盘/修饰键、拖拽/滚轮、持键异常退出、拖尾和长时间稳定性验收。
 - [ ] 补齐目标手机身份/授权隔离、GUI、打包/CI及完整无线验收。
 
 ## 1. 用户当前诉求与证据边界
@@ -46,11 +50,11 @@
 - 用户手动使用 `hcitool lecup` 请求 7.5～15ms 后报告“有改善”。当时未记录请求后最终
   实际间隔，因此不能直接把请求值写成已验证的手机最终参数。
 
-### 尚未验证
+### 当前尚未验证
 
-- 最新 `--ble-isolate` 原生父进程：真实 MGMT 命令、runuser 降权/继承 FD、原始模式恢复。
-- 最新 GATT 固定句柄、Device1 监控与 Deskflow 重连组合在该手机上是否免重配。
-- 原生 HCI 监控是否收到加密/连接更新事件、IPC 就绪通知是否到达、请求是否被手机接受。
+- 常驻服务、BlueZ/主机重启后恢复；首次旧缓存迁移无需人工切手机蓝牙。
+- root supervisor 自身 SIGKILL、服务崩溃/硬件卡死的恢复，跨重启快照持久化。
+- 不同手机/BlueZ/内核组合，目标白名单与多主机安全隔离。
 - 长时间稳定性、锁屏/唤醒、方向变化、全部按钮/拖拽/滚轮/修饰键、拔 USB 独立无线验收。
 - GUI BLE 接入、三平台 GUI 回归、发布包依赖与 CI。
 
@@ -62,6 +66,7 @@
 | `src/ble_hid.h/.c` | GIO/BlueZ GATT、广告、HID 报告、Device1 在线/配对状态、坐标合并与 IPC |
 | `src/ble_supervisor.h/.c` | 原生 root 隔离父进程，MGMT 快照/切换/核对恢复、runuser 子进程、锁 |
 | `src/ble_link.h/.c` | root 父进程的 HCI 连接/加密/更新事件监控、低延迟请求及实际间隔通知 |
+| `src/ble_session.h/.c` | 普通用户常驻 GATT 服务、私有 Unix IPC 会话、EOF/lease 清理及空闲状态检查 |
 | `src/main.c` | 新 CLI 参数、BLE 等待与 Deskflow TCP 重连；USB 仍使用原有单次连接流程 |
 | `src/deskflow_client.h/.c` | `on_tick`、可配置 poll 间隔，持续 TCP 流量期间也驱动 BLE 事件泵 |
 | `scripts/ble_latency.py` | 历史 Python 隔离入口的参数监控实现，仅兼容/测试参考；原生入口不加载它 |
@@ -98,7 +103,8 @@
   使用固定的 `/usr/sbin/runuser` 以 sudo 发起者的普通用户身份运行自己的桥接子进程。
 - `/run/deskflow-otg-ble-hciN.lock` 防并发；root 专用 `.state` 快照绑定适配器地址。
   已有快照不覆盖，恢复不成功不删除快照；上电有有限重试，最终重新读取标志核对。
-- 正常退出/可捕获信号触发恢复。SIGKILL、断电不能自动清理；`/run` 不跨重启持久化。
+- 正常退出/可捕获信号触发恢复。普通桥接子进程 SIGKILL 后，存活的常驻服务/父进程可清理；
+  root supervisor 自身 SIGKILL、断电不能自动清理；`/run` 不跨重启持久化。
 - `--ble-restore` 仅识别原生 `.state`，不读取旧 Python 实验脚本的 JSON 文件。
 - `src/ble_link.c` 仅对唯一、已加密、本机为 peripheral 的已观测 LE 链路请求 7.5～15ms。
   通过专用 Unix datagram FD 传递 `ready:hciN` 和实测间隔，不接受子进程指定 HCI 命令/句柄。
@@ -183,3 +189,165 @@ sudo ./build/deskflow-otg --ble-restore --adapter hci0
 
 下一会话不要默认宣布重连、恢复、授权隔离或低延迟全部完成。当前优先级仍是用户提出的
 “免反复重配/重置 + 原生启动”，其次才是延迟、GUI、打包与完整产品化。
+
+## 6. 续测记录（2026-10-16，尚未验收）
+
+- 已观察原生进程树：root supervisor → `/usr/sbin/runuser -u len` → 普通用户桥接；
+  未见 Python 隔离入口。此证据证明降权入口运行过，不代表全部恢复/重连功能通过。
+- 用户报告：首次 CLI 启动后手机连接、断开可用；关闭 CLI 再启动，手机显示已连接，
+  但没有两路 `report subscribed` 和 `BLE HID input channel ready` 日志。
+  尚无此次重启的 ATT/加密抓包，不能认定缺少日志的唯一原因。
+- 退出时 MGMT `0x0005`（Set Powered）多次超时；显式 `--ble-restore` 失败，
+  `bluetoothctl power on` 也报 `org.bluez.Error.Failed`。当时适配器 DOWN、无 rfkill 阻断，
+  内核反复记录 HCI `Opcode 0x0c03 failed: -110`（Reset 超时）及 MSFT 扩展错误。
+  恢复失败保留了 root 快照；控制器超时的触发原因尚未确认，不应归因于手机配对。
+- 随后主机重启，观察到 `hci0` Powered=yes、Alias=`len-mint`，手机 Paired/Bonded=yes；
+  `/run` 快照已不存在。重启后的可用状态不能计为原生自动恢复成功，也无法据此核对旧快照。
+- 修正确定的 MGMT 解析错误：Command Complete 和 Command Status 的 payload 均为
+  `opcode LE16 + status u8`；旧实现错误地把 Command Status 当成另一种字段排列，
+  忽略内核错误后只报告超时。新增 Unix datagram 原始报文测试，不触碰真实蓝牙。
+  **此修复不等于解决控制器 HCI Reset 超时。**
+- 撤回曾短暂加入的“已配对且已连接即推断两路 CCC 保留”逻辑。核对 BlueZ 5.72
+  `src/gatt-database.c`：`att_disconnected()` 对 bonded peer 可保留 CCC，但
+  `gatt_db_service_removed()` 调用 `remove_device_ccc()` 清除注销服务的 CCC。
+  保持服务的断线重连和注销服务后的进程重启不能混为一谈；没有真实订阅时不能伪造 ready。
+
+下一轮先保留现有配对，从原生启动前开始同时记录 CLI 与本地 `btmon`，依次观察
+连接角色、加密、ATT 服务发现/CCC 写入、StartNotify 和 Deskflow 就绪，再正常退出。
+出现 HCI Reset/MGMT 超时就停止反复启动，不删除恢复快照；不得自动重启 bluetoothd、
+重载驱动或复位 USB 硬件。硬件恢复需用户确认，主机重启前如需保留原始状态，须将 root
+快照安全备份到持久位置（不可公开提交）。现有 USB GUI 会话不要为 BLE 测试擅自终止。
+
+### 后续抓包与 Android 侧证据
+
+- 原生启动日志仍停在等待订阅，且报告 `native BLE timing monitor unavailable`。
+  首轮抓包看到了 HID 服务/特征/CCC 枚举和成功加密，但无键鼠 CCC 写入。
+  抓包中有 Unpair Device，用户确认因无法连接而删除过配对，因此首轮不能计为免重配成功。
+- 用户关闭再开启手机“输入设备”后，CLI 依旧没有订阅日志。新抓包显示手机主动断开，
+  随后以 peripheral 角色的电脑建立连接，复用已有 LTK、成功启用 AES-CCM；只看到
+  Service Changed 的 CCC `0x000b=0200`，没有 HID `0x0107/0x010b` 的写入。
+  **链路/密钥复用成功不等于 HID 输入恢复。**
+- 经已授权 USB ADB 只读诊断，实测系统为 Android 14/API 34（不要由手机型号推断系统版本）。
+  Android Bluetooth 日志在 14:34:01 报 HID Host 连接成功，使用 164 字节的描述符创建 UHID；
+  `dumpsys input` 存在蓝牙 `Deskflow OTG`，Sources 为 KEYBOARD/MOUSE/STYLUS。
+  与抓包对照表明 Android 使用已有 HID 状态，但电脑缺少实际订阅；缓存/服务生命周期不一致
+  是待验证方向，尚不能宣布唯一根因或将“手机已连接”视为恢复成功。
+- 修正独立的 HCI filter ABI 问题：原代码 `setsockopt(HCI_FILTER)` 写死长度 14，
+  而当前内核的 `copy_safe_from_sockptr()` 要求 native 结构大小（本机含 padding 为 16）。
+  改为结构体及 `sizeof`，并输出 socket/bind/filter 的具体 errno；新增 mock 验证 filter
+  布局及各阶段失败清理。此次构建、8 项 CTest 和修改源码严格编译检查通过。
+  正在运行的进程仍为旧构建，监控修复尚未真机验证，也不解决缺失 HID CCC。
+- 本地证据在 `/tmp/opencode/ble-native-review/run-20261016-01/`。用户第二次抓包复用了
+  `btmon.log` 并覆盖首轮；保留下来的文件仅代表开关输入设备这一次，不可冒充完整启动抓包。
+  抓包含配对密钥，仅本地使用，不得提交或公开。后续抓包使用新文件名，不再覆盖。
+
+## 7. 常驻 GATT / 会话分离实现（待切换真机）
+
+用户批准按服务生命周期分离方向实施。新增 `src/ble_session.c/.h`：
+
+- `--ble-service`：普通用户前台服务，不隐式安装/后台运行；首次会话才创建 BlueZ GATT，
+  空闲时不广告、不修改名称、不发送输入，但保留应用及真实订阅状态。
+- `--transport ble --ble-session`：通过同 UID 的私有 Unix seqpacket 接入；可叠加原生
+  `--ble-isolate`。只有 root supervisor 切换/恢复模式，常驻服务永不运行 MGMT/HCI 命令。
+- 目录 0700、socket 0600；SO_PEERCRED 核对双方 UID、版本/包长校验、单会话占用，
+  root 仅可读取 idle 状态，不可接管会话发送输入。旧 socket 在持有本适配器锁后才清理。
+- 会话正常关闭、IPC EOF 或 5 秒无 IPC 时：松键/结束范围、清除待发移动、停广告、恢复名称；
+  不注销 GATT。新会话描述符必须完全一致，目前限定 absolute 模式，拒绝静默换 schema。
+- supervisor 在隔离前要求服务空闲，桥接退出后再次等待清理确认再尝试恢复；无法确认
+  时不继续切换模式、保留快照供停止会话后显式恢复，不宣称完整恢复。手机掉线时丢弃来自
+  旧 ready 状态的报告，不回放旧输入。
+- 真实 ready/实测 interval 在会话与 root 监督器之间转发；不凭 Connected 伪造两路 CCC。
+  停止常驻服务或 BlueZ/主机重启后仍会丢失连续性，既有缺失订阅不保证自动迁移。
+
+测试新增 `ble_session`（真实 socket/fork、fake HID、正常/EOF/lease、schema/busy/UID/报文校验），
+扩展 `ble_gatt`（私有 D-Bus 上真实方法调用与 mock BlueZ 管理器、跨会话不注销应用、停止广告、
+松键、失败不伪称 idle）。普通 BLE 构建 9 项、ASan/UBSan 9 项、USB-only 3 项通过；
+修改源码 `-Wall -Wextra -Werror` 和 diff 检查通过。
+
+**尚未启动新常驻服务或停止旧真机实例；上述测试不是硬件验收。** 下一轮需用户在有抓包的
+条件下先正常结束旧实例并确认原生恢复成功，再按 README 的两个原生进程命令切换。
+不能在旧 GATT 实例仍注册时并行试新服务；不能因旧 CCC 缺失而宣称服务分离已经解决全部重启。
+
+### 切换进度
+
+用户随后正常关闭了旧 CLI。`/tmp/opencode/ble-native-review/exit-20261016-145719.log`
+中 HCI Reset、Set BR/EDR、Set SSP、Set Powered 均成功；主机观察 Powered=yes、
+Alias=`len-mint`、ActiveInstances=0、`.state` 已清理。这是本轮旧实例退出恢复成功的证据，
+不代表此前 AX210 超时已修复，也不等同于新常驻路径验收。
+
+已启动普通用户 `--ble-service --adapter hci0`，确认仅处于监听/空闲状态，目录 0700、
+socket 0600；日志 `/tmp/opencode/ble-native-review/resident-aEMphpoG/service.log`。
+新桥接会话尚未启动，等待用户在终端 sudo 启动 `--ble-session --ble-isolate` 并抓包。
+
+随后用户启动首个新会话并点击手机已有配对设备：电脑 Connected=yes，手机显示“已保存”。
+`resident-aEMphpoG/start.log` 表明已有 LTK 回复成功、AES-CCM 加密成功、HID 服务/特征/CCC
+枚举结束，但没有 HID Report Map 读取和两路 HID CCC 写入；服务日志无 StartNotify。
+Android `dumpsys bluetooth_manager` 的 HidHostService 对电脑为状态 1（CONNECTING），
+不是 CONNECTED。15:00:29 的连接请求后未见 HID open complete；随后多次点击被
+`Hid Device not disconnected` 拒绝。日志还出现 GATT cache file 缺失、服务变化 indication
+和 GATT service discovery finished，尚不能据此确定唯一根因。
+新会话已接入常驻服务，且无此前 timing monitor unavailable 警告；未就绪前没有调参请求
+符合设计，但尚未验证新监控的实测参数回传。不得把当前首会话卡住记为方案已免重配通过。
+
+用户在保留配对、常驻服务和会话的条件下，将手机蓝牙总开关关闭再开启一次，随后报告
+自动连接且手机光标出现。15:05 左右核对：服务日志有真实 keyboard/pointer subscribed、
+HID input channel ready；会话日志有 Deskflow Barrier 1.8 握手及 enter/leave 事件。
+Android HidHostService 为状态 2（CONNECTED），主机 Paired/Bonded/Connected 均 yes。
+原生 HCI 监控记录实际 45ms → 发起 7.5～15ms 请求 → controller event 确认实际 **15ms**、
+latency=0；服务收到 interval IPC，指针 pacing=16.67ms。这次真实链路验证了 HCI filter
+修正后的监控及参数回传通路，不是端到端显示延迟测量。
+
+该次需要手机蓝牙开关来离开此前卡住的状态，因此只计为一次保留配对的初始化恢复，
+不计为日常重连/桥接重启免重配通过。接下来保持常驻服务，验证仅结束/重新启动桥接会话
+后无需再操作蓝牙总开关或删除配对，并继续验证两次手机侧断线重连；键盘、拖拽、滚轮及
+异常退出释放输入仍需用户实测，不能仅从订阅和光标出现推断全部通过。
+
+用户随后正常结束新路径的第一个桥接会话。15:07 核对：桥接/supervisor 已退出，常驻服务
+PID 23757 保持运行；服务记录 input channel disconnected、名称恢复和 session idle/GATT
+retained。适配器 Powered=yes、Alias=`len-mint`、ActiveInstances=0，HID UUID 仍在；
+`.state` 已清理。会话日志经普通 `tee` 的管道缺少 Ctrl-C 后的恢复尾部输出，后续改用
+`tee -i`，以免把日志管道随 SIGINT 中断。接下来启动第二个会话，不再切手机蓝牙或删配对。
+
+15:10，用户确认第二个会话可连接、鼠标恢复。核对 `session-2.log`：input channel ready、
+Deskflow Barrier 1.8 接入及 enter/leave；实际间隔 controller event 为 45ms → 请求 →
+**12.5ms**、latency=0，服务收到 interval IPC、pacing=16.67ms。Android HID Host 状态 2，
+主机 Paired/Bonded/Connected=yes；常驻服务仍为同一 PID 23757。服务日志只有首次会话的
+两条 subscribed，第二会话直接由 retained 状态恢复 ready，未伪造新的 StartNotify。
+
+据用户反馈，本次未删配对、未再次切手机蓝牙总开关：可计为**一次常驻服务不退出、桥接
+会话正常结束/重启后的免重配恢复成功**。不能扩大为常驻服务自身重启、主机/BlueZ 重启
+或异常退出已验收。下一步保持第二会话运行，手机侧断开/重连至少两次，再验证异常退出
+和键盘/拖拽/滚轮；这些仍未完成。
+
+15:13，用户确认保持第二会话和常驻服务运行、手机侧连续断开/重连两次均正常。
+`session-2.log` 有两组 resident input channel disconnected → service retained → ready →
+重新 Barrier 1.8 握手，随后均有 enter/leave；每次 root HCI 监控确认实际间隔
+37.5ms → 请求 → **12.5ms**、latency=0。服务日志亦有对应两组 disconnected/ready，
+没有新增 subscribed；常驻服务 PID 23757、桥接 PID 29508 均未重启，原配对保留。
+
+可计为**两次手机侧断线重连免重配、Deskflow 自动重接及原生调参重新生效通过**。
+鼠标控制恢复由用户确认；不得据此宣称所有键盘/拖拽/滚轮、锁屏和异常恢复通过。
+下一项异常退出测试应先征得用户确认：鼠标先回电脑，只 SIGKILL 普通用户桥接子进程，
+保留 root supervisor 和常驻 GATT 服务，检查 EOF 松键/停广告/名称及原模式恢复和快照清理。
+不要直接 SIGKILL root supervisor（那属于不能自动清理的另一种故障边界）。
+
+15:16，用户明确批准执行上述异常测试。通过 pidfd 固定 PID 29508，并核对 UID=1000、
+可执行路径、`--ble-session` 且无 `--ble-isolate/--ble-service` 后，只 SIGKILL 该普通用户
+桥接进程，未向 root supervisor/runuser/常驻服务发信号。服务日志新增 disconnected、
+名称恢复、session idle/GATT retained；`session-2.log` 尾部完整记录“已杀死”及
+`original Bluetooth settings verified and restored; pairing records retained`。
+独立核对：桥接/runuser/root supervisor 均退出，常驻 PID 23757 保留；Powered=yes、
+Alias=`len-mint`、ActiveInstances=0、`.state` 已清理。
+
+可计为**一次普通桥接子进程 SIGKILL 后，服务 EOF 清理及 root 自动恢复通过**。
+测试前鼠标已离开手机、没有故意按住键，因此未验证真机“按住按键/拖拽时强杀”的释放效果；
+该场景仅离线测试覆盖。root supervisor 自身 SIGKILL、常驻服务崩溃、断电等仍不计通过。
+接下来保留常驻服务，启动第三会话验证异常恢复后也能免重配重新控制手机。
+
+15:17，用户确认第三会话可正常连接。`session-3.log` 有 resident ready、Deskflow Barrier 1.8
+握手及两组 enter/leave；controller event 确认 37.5ms → 请求 → **12.5ms**、latency=0，
+服务收到 interval IPC。主机 Paired/Bonded/Connected=yes，Android HID Host 状态 2，
+常驻服务仍为 PID 23757，服务日志没有新增 StartNotify。可计为**上述桥接子进程 SIGKILL
+恢复后再次启动会话免重配重新接入通过**；不扩大到常驻服务/BlueZ/主机重启。
+本条验证记录结束时第三会话与常驻服务仍运行，未擅自结束用户正在使用的连接；
+当时尚未提交本轮修改，未推送、未发布。后续提交状态以 Git 历史为准。

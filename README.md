@@ -433,6 +433,46 @@ sudo ./build/deskflow-otg --ble-restore --adapter hci0
 bluetoothd、不删除蓝牙数据。SIGKILL/断电无法自动清理，`/run` 快照不跨重启保存。
 此命令不能读取旧 Python 实验脚本的 JSON 快照，两者不要同时运行。
 
+#### 常驻 GATT 与可重启桥接会话（新实验路径）
+
+Android 可能缓存 HID 描述符并在重连时不重写 CCC；BlueZ 则在应用注销时删除该服务的 CCC。
+因此固定句柄并不足以保证 CLI 退出后免重配。新增以下**显式启用、部分真机验证通过**的实验路径：
+
+1. 先正常结束旧 BLE 桥接，确认恢复成功、无 `.state` 遗留；发生 MGMT/HCI 超时先停止测试。
+2. 在普通用户终端运行常驻服务（**不加 sudo**），保持该终端运行：
+
+   ```bash
+   ./build/deskflow-otg --ble-service --adapter hci0
+   ```
+
+3. 另开终端启动会话，仍由原生 root supervisor 隔离并在会话退出时恢复模式：
+
+   ```bash
+   sudo ./build/deskflow-otg --transport ble --ble-session --ble-isolate --adapter hci0 \
+     --host 127.0.0.1 --port 24800 --name android --width 1080 --height 2340
+   ```
+
+   系统已为 BLE 配置妥当时，也可用普通用户运行 `--transport ble --ble-session`，不切换模式。
+
+会话经 `/run/user/UID/deskflow-otg/ble-hci0.sock` 的私有 Unix seqpacket 连接服务；目录 0700、
+socket 0600，核对双方 UID、协议版本与包长度，每个适配器/用户仅允许一个活动会话。
+服务以前台普通用户运行，不自动安装 systemd 服务、不隐式后台启动。首次会话注册 GATT，
+以后会话复用它；必须使用相同 HID 描述符，目前只支持 absolute 指针，尺寸可按会话修改。
+
+- 断开会话或桥接崩溃/EOF 时松键、结束指针范围、丢弃待发送坐标、停广告并恢复名称；
+  5 秒无会话 IPC 也会释放输入。root supervisor 会先检查服务清理完成，再尝试恢复原模式；
+  无法确认时不继续切换模式、不伪称恢复成功，保留快照供停止会话后显式恢复。
+- 会话退出**不注销 GATT**。服务保留真实 StartNotify 状态，仍须原手机在线、已配对、
+  两路已订阅且未挂起才就绪；不把“手机已连接”伪装成订阅成功。
+- 停止常驻服务会注销 GATT，丢失这次 CCC 连续性；服务崩溃、BlueZ/主机重启后的恢复仍未解决。
+  旧实验版已经损坏/丢失的 CCC 或 Android 缓存不会凭空补回；若仍无订阅，应抓包诊断，
+  不要删除配对来冒充此方案通过验收。
+- 本机 AX210/BlueZ 5.72 + Redmi K20 Pro（Android 14）已验证：原生隔离、桥接正常重启、
+  两次手机断线重连、桥接子进程 SIGKILL 自动恢复及再次接入，期间无需重新配对；
+  实际连接间隔由控制器确认降至 12.5～15ms。首次旧缓存迁移仍曾需要切手机蓝牙开关一次。
+  这是生命周期的实验性修正，不是 AX210 HCI Reset 超时的修复，不代表完整输入、长时间、
+  常驻服务/BlueZ/主机重启或其他设备已验收；不替代原有恢复快照机制。
+
 ### 4. 操控手机
 
 把鼠标移出主机屏幕边缘（滑向"手机"那块屏幕），此时键盘鼠标就会注入到手机。
