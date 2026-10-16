@@ -16,6 +16,21 @@
 
 #include "aoa_hid.h"
 
+/*
+ * HID transport contract.  The bridge owns the report state and encoding;
+ * transports only publish descriptors and deliver complete input reports.
+ * `ready` is deliberately separate from a successful open: BLE is not ready
+ * until the phone has subscribed to both input characteristics.
+ */
+struct otg_hid_transport_ops {
+    bool (*register_report)(void *ctx, uint16_t id,
+                            const uint8_t *desc, uint16_t desc_size);
+    bool (*send)(void *ctx, uint16_t id, const uint8_t *data, uint16_t size);
+    bool (*poll)(void *ctx);
+    bool (*ready)(void *ctx);
+    void (*close)(void *ctx);
+};
+
 enum otg_mouse_mode {
     OTG_MOUSE_ABSOLUTE,
     OTG_MOUSE_RELATIVE,
@@ -23,6 +38,9 @@ enum otg_mouse_mode {
 
 struct otg_bridge {
     struct aoa_hid aoa;
+    const struct otg_hid_transport_ops *transport_ops;
+    void *transport_ctx;
+    bool external_transport;
 
     /* keyboard state */
     uint8_t hid_mods;         /* HID modifier byte (bits 0..7) */
@@ -60,6 +78,12 @@ int otg_bridge_open(struct otg_bridge *b, const char *serial,
                     int32_t screen_w, int32_t screen_h,
                     enum otg_mouse_mode mouse_mode);
 
+/* Open the bridge with a caller-owned transport (used by Linux BLE). */
+int otg_bridge_open_transport(struct otg_bridge *b,
+                              const struct otg_hid_transport_ops *ops,
+                              void *ctx, int32_t screen_w, int32_t screen_h,
+                              enum otg_mouse_mode mouse_mode);
+
 void otg_bridge_close(struct otg_bridge *b);
 
 /* Event handlers (driven by the deskflow client callbacks). */
@@ -78,5 +102,10 @@ void otg_bridge_mouse_wheel(struct otg_bridge *b, int16_t x, int16_t y);
  * server return the cursor to the primary screen).
  */
 bool otg_bridge_check(struct otg_bridge *b);
+
+/* Whether the transport can currently accept input reports. */
+bool otg_bridge_ready(const struct otg_bridge *b);
+/* Drop input state without reopening HID; best-effort release if still ready. */
+void otg_bridge_reset_input(struct otg_bridge *b);
 
 #endif /* DESKFLOW_OTG_BRIDGE_H */

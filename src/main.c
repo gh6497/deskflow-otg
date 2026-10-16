@@ -24,6 +24,11 @@
 #include "build_version.h"
 #include "deskflow_client.h"
 #include "usb_scan.h"
+#ifdef OTG_HAVE_BLE
+#include "ble_hid.h"
+#include "ble_supervisor.h"
+#include <glib.h>
+#endif
 
 #define DEFAULT_PORT   24800
 #define DEFAULT_HOST   "127.0.0.1"
@@ -64,11 +69,9 @@ static void gui_event(const char *event)
     }
 }
 
-static void cb_connected(void *ud)
-{
-    (void)ud;
-    gui_event("connected");
-}
+typedef struct app_state app_state;
+
+static void cb_connected(void *ud);
 
 static void on_signal(int sig)
 {
@@ -87,7 +90,11 @@ static void usage(const char *prog)
             "  -H, --host HOST       Deskflow server address (default %s)\n"
             "  -p, --port PORT       Deskflow server port (default %u)\n"
             "  -n, --name NAME       Screen name reported to the server (default %s)\n"
-            "  -s, --serial SERIAL   Android USB device serial (auto-detect if omitted)\n"
+             "  -s, --serial SERIAL   Android USB device serial (USB transport)\n"
+             "      --transport MODE usb (default) or ble (Linux)\n"
+             "      --adapter NAME    BlueZ adapter for BLE (default hci0)\n"
+             "      --ble-isolate     Linux: sudo native BLE-only supervisor; restores on exit\n"
+             "      --ble-restore     Linux: recover saved adapter settings without Python\n"
             "      --width W         Virtual screen width, 1..32767 (default %d)\n"
             "      --height H        Virtual screen height, 1..32767 (default %d)\n"
             "      --mouse-mode MODE absolute (default) or relative (compatibility)\n"
@@ -117,10 +124,23 @@ static int parse_screen_size(const char *arg)
 
 /* ---- deskflow callbacks -> bridge --------------------------------------- */
 
-typedef struct {
+struct app_state {
     struct otg_bridge bridge;
     const char *serial;
-} app_state;
+    void *transport_owner;
+    bool deskflow_connected;
+    bool input_ready_reported;
+};
+
+static void cb_connected(void *ud)
+{
+    app_state *s = ud;
+    s->deskflow_connected = true;
+    if (otg_bridge_ready(&s->bridge)) {
+        s->input_ready_reported = true;
+        gui_event("connected");
+    }
+}
 
 static void cb_enter(void *ud, int16_t x, int16_t y, uint32_t seq, uint16_t mask)
 {
@@ -191,8 +211,8 @@ static void cb_mouse_wheel(void *ud, int16_t x, int16_t y)
 
 static void cb_disconnected(void *ud)
 {
-    (void)ud;
-    g_stop = 1;
+    app_state *s = ud;
+    if (!s->transport_owner) g_stop = 1;
 }
 
 static int cb_idle(void *ud)
@@ -202,14 +222,63 @@ static int cb_idle(void *ud)
      * server notices the client is gone and returns the cursor to the primary
      * screen. */
     app_state *s = ud;
-    return otg_bridge_check(&s->bridge) ? 0 : 1;
+    if (!otg_bridge_check(&s->bridge)) {
+        return 1;
+    }
+    if (s->transport_owner && s->input_ready_reported &&
+        !otg_bridge_ready(&s->bridge)) {
+        return 1; /* Drop TCP so Deskflow returns the cursor to the host. */
+    }
+    if (s->deskflow_connected && !s->input_ready_reported &&
+        otg_bridge_ready(&s->bridge)) {
+        s->input_ready_reported = true;
+        gui_event("connected");
+    }
+    return 0;
 }
+
+static void destroy_transport_owner(app_state *s)
+{
+#ifdef OTG_HAVE_BLE
+    if (s->transport_owner) {
+        otg_ble_hid_destroy(s->transport_owner);
+        s->transport_owner = NULL;
+    }
+#else
+    (void)s;
+#endif
+}
+
+#ifdef OTG_HAVE_BLE
+static app_state *ble_app;
+static int ble_stop_check(void)
+{
+    if (g_stop || (g_gui && gui_stop_check())) return 1;
+    if (!ble_app || !otg_bridge_check(&ble_app->bridge)) return 1;
+    return ble_app->input_ready_reported && !otg_bridge_ready(&ble_app->bridge);
+}
+
+static bool ble_wait(app_state *s, bool require_ready, unsigned delay_ms)
+{
+    gint64 until=g_get_monotonic_time()+(gint64)delay_ms*1000;
+    while (!g_stop && !(g_gui && gui_stop_check())) {
+        if (!otg_bridge_check(&s->bridge)) return false;
+        if (require_ready && otg_bridge_ready(&s->bridge)) return true;
+        if (!require_ready && g_get_monotonic_time()>=until) return true;
+        g_usleep(5000);
+    }
+    return false;
+}
+#endif
 
 int main(int argc, char **argv)
 {
     const char *host = DEFAULT_HOST;
     const char *name = DEFAULT_NAME;
     const char *serial = NULL;
+    const char *transport = "usb";
+    const char *adapter = "hci0";
+    int ble_isolate = 0, ble_restore = 0;
     unsigned port = DEFAULT_PORT;
     int width = DEFAULT_WIDTH;
     int height = DEFAULT_HEIGHT;
@@ -244,6 +313,14 @@ int main(int argc, char **argv)
             name = argv[++i];
         } else if ((strcmp(a, "-s") == 0 || strcmp(a, "--serial") == 0) && i + 1 < argc) {
             serial = argv[++i];
+        } else if (strcmp(a, "--transport") == 0 && i + 1 < argc) {
+            transport = argv[++i];
+        } else if (strcmp(a, "--adapter") == 0 && i + 1 < argc) {
+            adapter = argv[++i];
+        } else if (strcmp(a, "--ble-isolate") == 0) {
+            ble_isolate = 1;
+        } else if (strcmp(a, "--ble-restore") == 0) {
+            ble_restore = 1;
         } else if (strcmp(a, "--width") == 0 && i + 1 < argc) {
             width = parse_screen_size(argv[++i]);
         } else if (strcmp(a, "--height") == 0 && i + 1 < argc) {
@@ -274,6 +351,19 @@ int main(int argc, char **argv)
 
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
+    if (ble_isolate || ble_restore) {
+        if (g_gui || (ble_isolate && ble_restore) ||
+            (ble_isolate && strcmp(transport, "ble"))) {
+            fprintf(stderr, "ERROR: use --ble-isolate with --transport ble in CLI; --ble-restore is separate\n");
+            return 2;
+        }
+#ifdef OTG_HAVE_BLE
+        return otg_ble_supervise(argc, argv, adapter, ble_restore, &g_stop);
+#else
+        fprintf(stderr, "ERROR: BLE supervision requires Linux with BUILD_BLE=ON (adapter %s)\n", adapter);
+        return 2;
+#endif
+    }
     if (g_gui) {
 #ifndef _WIN32
         /* A vanished GUI closes stdout as well as stdin. Let the cancellation
@@ -290,13 +380,32 @@ int main(int argc, char **argv)
     memset(&state, 0, sizeof(state));
     state.serial = serial;
 
-    /* 1. Open the Android device and register the AOA HID keyboard + mouse. */
-    if (otg_bridge_open(&state.bridge, serial, width, height, mouse_mode) != 0) {
-        return 1;
+    /* 1. Open the selected HID transport and register keyboard + pointer. */
+    if (strcmp(transport, "usb") == 0) {
+        if (otg_bridge_open(&state.bridge, serial, width, height, mouse_mode) != 0) {
+            return 1;
+        }
+        fprintf(stderr, "INFO:  AOA HID keyboard + %s pointer ready (screen %dx%d)\n",
+                mouse_mode == OTG_MOUSE_ABSOLUTE ? "absolute" : "relative", width, height);
+    } else if (strcmp(transport, "ble") == 0) {
+#ifdef OTG_HAVE_BLE
+        struct otg_ble_hid *ble = otg_ble_hid_create(adapter);
+        if (!ble || otg_bridge_open_transport(&state.bridge, otg_ble_hid_ops(), ble,
+                                              width, height, mouse_mode) != 0) {
+            otg_ble_hid_destroy(ble);
+            return 1;
+        }
+        state.transport_owner = ble;
+        fprintf(stderr, "INFO:  BLE HID advertisement started on %s; waiting for phone subscriptions\n", adapter);
+#else
+        fprintf(stderr, "ERROR: BLE HID requires Linux with BUILD_BLE=ON (adapter %s)\n", adapter);
+        return 2;
+#endif
+    } else {
+        fprintf(stderr, "invalid transport: %s (use usb or ble)\n", transport);
+        return 2;
     }
-    fprintf(stderr, "INFO:  AOA HID keyboard + %s pointer ready (screen %dx%d)\n",
-            mouse_mode == OTG_MOUSE_ABSOLUTE ? "absolute" : "relative", width, height);
-    if (g_gui) {
+    if (g_gui && strcmp(transport, "usb") == 0) {
         printf("{\"event\":\"usb-ready\",\"usb-id\":\"%u:%u\"}\n",
                (unsigned)libusb_get_bus_number(state.bridge.aoa.device),
                (unsigned)libusb_get_device_address(state.bridge.aoa.device));
@@ -304,6 +413,7 @@ int main(int argc, char **argv)
     }
     if (g_gui && gui_stop_check()) {
         otg_bridge_close(&state.bridge);
+        destroy_transport_owner(&state);
         return 0;
     }
 
@@ -322,26 +432,36 @@ int main(int argc, char **argv)
         .on_mouse_wheel = cb_mouse_wheel,
         .on_disconnected = cb_disconnected,
         .on_idle = cb_idle,
+        .on_tick = state.transport_owner ? cb_idle : NULL,
+        .tick_interval_ms = state.transport_owner ? 5 : 0,
     };
 
-    df_client *client = df_client_connect(host, (uint16_t)port, name,
-                                          width, height, &cbs, &state);
-    if (!client) {
-        otg_bridge_close(&state.bridge);
-        return 1;
-    }
-    fprintf(stderr, "INFO:  connected to deskflow server %s:%u as \"%s\"\n",
-            host, port, name);
-    fprintf(stderr, "INFO:  move the cursor onto the \"%s\" screen to control "
-                    "the phone; move it back across the edge to return\n", name);
-    fprintf(stderr, "INFO:  to quit, first move the cursor back to this screen, "
-                    "then press Ctrl+C (or just unplug the phone)\n");
-
-    /* 3. Run the event loop. */
-    int ret = df_client_run(client, &g_stop);
-
-    df_client_disconnect(client);
+    int ret = 0;
+#ifdef OTG_HAVE_BLE
+    if (state.transport_owner) {ble_app=&state;df_client_set_stop_check(ble_stop_check);}
+#endif
+    do {
+#ifdef OTG_HAVE_BLE
+        if (state.transport_owner && !ble_wait(&state,true,0)) break;
+#endif
+        df_client *client=df_client_connect(host,(uint16_t)port,name,width,height,&cbs,&state);
+        if(client) {
+            fprintf(stderr,"INFO: connected to deskflow server %s:%u as \"%s\"\n",host,port,name);
+            ret=df_client_run(client,&g_stop);
+            df_client_disconnect(client);
+        } else ret=1;
+        if(!state.transport_owner || g_stop) break;
+        otg_bridge_leave(&state.bridge);
+        otg_bridge_reset_input(&state.bridge);
+        state.deskflow_connected=state.input_ready_reported=false;
+        gui_event("disconnected");
+        fprintf(stderr,"INFO: BLE service retained; reconnect phone without removing pairing; retrying Deskflow when ready\n");
+#ifdef OTG_HAVE_BLE
+        if(!ble_wait(&state,false,1000)) break;
+#endif
+    } while(!g_stop);
     otg_bridge_close(&state.bridge);
+    destroy_transport_owner(&state);
     gui_event("disconnected");
     (void)g_stop;
     return ret;

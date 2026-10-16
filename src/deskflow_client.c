@@ -74,12 +74,12 @@ static int df_socket_interrupted(void)
 
 static int df_socket_error(void) { return WSAGetLastError(); }
 
-static int df_socket_wait(df_socket fd)
+static int df_socket_wait_timeout(df_socket fd, int timeout_ms)
 {
     WSAPOLLFD pfd = {0};
     pfd.fd = fd;
     pfd.events = POLLRDNORM;
-    return WSAPoll(&pfd, 1, 500);
+    return WSAPoll(&pfd, 1, timeout_ms);
 }
 #else
 typedef int df_socket;
@@ -91,12 +91,17 @@ static void df_socket_cleanup(void) { }
 static int df_socket_interrupted(void) { return errno == EINTR; }
 static int df_socket_error(void) { return errno; }
 
-static int df_socket_wait(df_socket fd)
+static int df_socket_wait_timeout(df_socket fd, int timeout_ms)
 {
     struct pollfd pfd = { .fd = fd, .events = POLLIN };
-    return poll(&pfd, 1, 500);
+    return poll(&pfd, 1, timeout_ms);
 }
 #endif
+
+static int df_socket_wait(df_socket fd)
+{
+    return df_socket_wait_timeout(fd, 500);
+}
 
 struct df_client {
     df_socket fd;
@@ -762,7 +767,14 @@ int df_client_run(df_client *c, volatile sig_atomic_t *stop)
             break;
         }
 
-        int pr = df_socket_wait(fd);
+        /* Service asynchronous transports even under continuous TCP input.
+         * The legacy idle hook remains timeout-only for USB callers. */
+        if (c->cbs.on_tick && c->cbs.on_tick(c->ud)) {
+            break;
+        }
+        int timeout_ms = c->cbs.tick_interval_ms > 0
+                             ? c->cbs.tick_interval_ms : 500;
+        int pr = df_socket_wait_timeout(fd, timeout_ms);
         if (pr < 0) {
             if (df_socket_interrupted()) {
                 continue;
