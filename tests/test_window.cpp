@@ -41,10 +41,28 @@ protected:
 class WindowTest : public QObject {
     Q_OBJECT
 private slots:
+    void transportAvailability()
+    {
+        QTemporaryDir settingsDir;
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDir.path());
+        QSettings().setValue("adb", "");
+        AutoConnectTestWindow window;
+        auto *transport = window.findChild<QComboBox *>("transportSelector");
+        QVERIFY(transport);
+        QCOMPARE(transport->itemData(0).toString(), "usb");
+#if (defined(Q_OS_LINUX) && defined(OTG_GUI_HAVE_BLE)) || (defined(Q_OS_WIN) && defined(OTG_GUI_HAVE_BLE_WIN))
+        QCOMPARE(transport->count(), 2);
+        QCOMPARE(transport->itemData(1).toString(), "ble");
+#else
+        QCOMPARE(transport->count(), 1);
+#endif
+        window.findChild<QAction *>("trayQuit")->trigger();
+    }
     void bleSettingsAndNoAdb()
     {
-#if !defined(Q_OS_LINUX) || !defined(OTG_GUI_HAVE_BLE)
-        QSKIP("BLE-enabled Linux GUI only");
+#if !defined(OTG_GUI_HAVE_BLE) && !defined(OTG_GUI_HAVE_BLE_WIN)
+        QSKIP("BLE-enabled GUI only");
 #endif
         QTemporaryDir settingsDir;
         QSettings::setDefaultFormat(QSettings::IniFormat);
@@ -54,6 +72,11 @@ private slots:
         settings.setValue("transport", "ble");
         settings.setValue("bleAdapter", "hci1");
         settings.setValue("blePeer", "AA:BB:CC:DD:EE:FF");
+#ifdef Q_OS_WIN
+        settings.setValue("bleIsolate", true); // Stale Linux settings must never leak into Windows args.
+        qputenv("OTG_TEST_BLE_WINDOWS", "1");
+        const auto restoreEnv = qScopeGuard([] { qunsetenv("OTG_TEST_BLE_WINDOWS"); });
+#endif
         settings.setValue("mouseMode", "relative");
         settings.setValue("manageServer", false);
         settings.setValue("language", "zh_CN");
@@ -69,6 +92,12 @@ private slots:
         QCOMPARE(mode->currentData().toString(), "absolute");
         QVERIFY(!mode->isEnabled());
         QCOMPARE(window.findChild<QLineEdit *>("bleAdapter")->text(), "hci1");
+#ifdef Q_OS_WIN
+        QVERIFY(!window.findChild<QLineEdit *>("bleAdapter")->isVisible());
+        QVERIFY(!window.findChild<QCheckBox *>("bleIsolate")->isVisible());
+        QVERIFY(!window.findChild<QPushButton *>("stopBleService")->isVisible());
+        QVERIFY(window.findChild<QLineEdit *>("blePeer")->toolTip().contains("Windows"));
+#endif
         auto *session = window.findChild<Session *>();
         window.findChild<QPushButton *>("connectButton")->click();
         QTRY_COMPARE(session->state(), Session::State::Connected);
@@ -78,6 +107,7 @@ private slots:
         const auto screenshot = qEnvironmentVariable("OTG_TEST_BLE_SCREENSHOT");
         if (!screenshot.isEmpty()) QVERIFY(window.grab().save(screenshot));
         window.findChild<QAction *>("trayQuit")->trigger();
+        QTRY_VERIFY(!session->hasBleProvider());
         QCOMPARE(settings.value("transport").toString(), "ble");
         QCOMPARE(settings.value("blePeer").toString(), "AA:BB:CC:DD:EE:FF");
         AutoConnectTestWindow restored;

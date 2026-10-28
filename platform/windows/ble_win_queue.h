@@ -51,6 +51,21 @@ public:
     void clear() { reports.clear(); mouse_seen = false; last_mouse = {}; }
 };
 
+/* Keep any already-issued notification outside this queue in flight. The
+ * worker must finish it before these releases; no old queued press survives. */
+inline void queue_releases(Queue& queue, std::array<uint8_t, 8> mouse,
+                           uint64_t epoch, bool can_send)
+{
+    queue.clear();
+    if (!can_send) return;
+    mouse[1] = mouse[6] = mouse[7] = 0;
+    mouse[0] = (mouse[0] & 2) ? 2 : 0;
+    queue.push({1, {}, false, epoch});
+    queue.push({2, mouse, false, epoch});
+    mouse[0] = 0;
+    queue.push({2, mouse, false, epoch});
+}
+
 /* Bridge descriptors are report-ID-free USB application collections. HOGP
  * combines them and puts the ID in Report Reference, not the notification. */
 inline bool append_descriptor(std::vector<uint8_t>& map,

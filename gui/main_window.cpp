@@ -67,7 +67,12 @@ void MainWindow::retranslateUi()
     m_mouseMode->setItemText(0, qtTrId("otg.mouse.absolute"));
     m_mouseMode->setItemText(1, qtTrId("otg.mouse.relative"));
     m_transport->setItemText(0, qtTrId("otg.transport.usb"));
-    if (m_transport->count() > 1) m_transport->setItemText(1, qtTrId("otg.transport.ble"));
+    if (m_transport->count() > 1)
+#ifdef Q_OS_WIN
+        m_transport->setItemText(1, qtTrId("otg.transport.ble_windows"));
+#else
+        m_transport->setItemText(1, qtTrId("otg.transport.ble"));
+#endif
     QSignalBlocker languageBlocker(m_language);
     m_language->setItemText(0, qtTrId("otg.language.chinese"));
     m_language->setItemText(1, qtTrId("otg.language.english"));
@@ -209,6 +214,8 @@ MainWindow::MainWindow() : m_session(this), m_autoConnect(this)
     m_transport->addItem(qtTrId("otg.transport.usb"), "usb");
 #if defined(Q_OS_LINUX) && defined(OTG_GUI_HAVE_BLE)
     m_transport->addItem(qtTrId("otg.transport.ble"), "ble");
+#elif defined(Q_OS_WIN) && defined(OTG_GUI_HAVE_BLE_WIN)
+    m_transport->addItem(qtTrId("otg.transport.ble_windows"), "ble");
 #endif
     addTranslatedRow(deviceForm, "otg.label.transport", m_transport);
     m_adapter = new QLineEdit;
@@ -218,6 +225,9 @@ MainWindow::MainWindow() : m_session(this), m_autoConnect(this)
     m_blePeer->setObjectName("blePeer");
     m_blePeer->setPlaceholderText("AA:BB:CC:DD:EE:FF");
     setTranslatedProperty(m_blePeer, "toolTip", "otg.ble.peer_hint");
+#ifdef Q_OS_WIN
+    setTranslatedProperty(m_blePeer, "toolTip", "otg.ble.windows_peer_hint");
+#endif
     addTranslatedRow(deviceForm, "otg.ble.peer", m_blePeer);
     m_bleIsolate = translated(new QCheckBox, "text", "otg.ble.isolate");
     m_bleIsolate->setObjectName("bleIsolate");
@@ -229,6 +239,10 @@ MainWindow::MainWindow() : m_session(this), m_autoConnect(this)
         if (QMessageBox::warning(this, qtTrId("otg.ble.stop_service"), qtTrId("otg.ble.stop_confirm"),
                                  QMessageBox::Ok | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Ok)
             return;
+#ifdef Q_OS_WIN
+        m_session.stopBleProvider();
+        return;
+#endif
         m_stoppingBleService = true;
         updateEnabled();
         runCommand(this, bridgeExecutable(), {"--ble-stop-service", "--adapter", m_adapter->text().trimmed()},
@@ -387,7 +401,11 @@ MainWindow::MainWindow() : m_session(this), m_autoConnect(this)
     m_autoConnect.setKnownSerials(m_profiles.keys());
     m_autoConnectEnabled->setChecked(settings.value("autoConnect", false).toBool());
     if (m_transport->currentData() == "ble")
+#ifdef Q_OS_WIN
+        setTranslatedProperty(m_deviceStatus, "text", "otg.ble.windows_setup_hint");
+#else
         setTranslatedProperty(m_deviceStatus, "text", "otg.ble.setup_hint");
+#endif
     connect(m_autoConnectEnabled, &QCheckBox::toggled, this, [this](bool enabled) {
         QSettings().setValue("autoConnect", enabled);
         m_autoConnect.setEnabled(enabled && m_transport->currentData() == "usb");
@@ -418,13 +436,18 @@ MainWindow::MainWindow() : m_session(this), m_autoConnect(this)
     connect(m_transport, &QComboBox::currentIndexChanged, this, [this] {
         if (m_transport->currentData() == "ble") m_mouseMode->setCurrentIndex(0);
         setTranslatedProperty(m_deviceStatus, "text", m_transport->currentData() == "ble" ?
+#ifdef Q_OS_WIN
+                              "otg.ble.windows_setup_hint" : "otg.device.manual_hint");
+#else
                               "otg.ble.setup_hint" : "otg.device.manual_hint");
+#endif
         m_autoConnect.setEnabled(m_autoConnectEnabled->isChecked() && m_transport->currentData() == "usb");
         updateEnabled();
     });
     connect(m_connect, &QPushButton::clicked, this, &MainWindow::connectDevice);
     connect(m_disconnect, &QPushButton::clicked, &m_session, &Session::stop);
     connect(&m_session, &Session::log, this, &MainWindow::appendLog);
+    connect(&m_session, &Session::bleProviderChanged, this, &MainWindow::updateEnabled);
     connect(&m_session, &Session::usbAttached, &m_autoConnect, &UsbAutoConnect::suppressAttachment);
     connect(&m_session, &Session::changed, this, [this](Session::State state, const QString &message) {
         m_sessionStatus = true;
@@ -466,10 +489,15 @@ void MainWindow::updateEnabled()
 {
     const bool idle = m_session.state() == Session::State::Idle;
     const bool ble = m_transport->currentData() == "ble";
-    m_deviceForm->setRowVisible(m_adapter, ble);
+#ifdef Q_OS_LINUX
+    const bool linuxBle = ble;
+#else
+    const bool linuxBle = false;
+#endif
+    m_deviceForm->setRowVisible(m_adapter, linuxBle);
     m_deviceForm->setRowVisible(m_blePeer, ble);
-    m_deviceForm->setRowVisible(m_bleIsolate, ble);
-    m_deviceForm->setRowVisible(m_stopBleService, ble);
+    m_deviceForm->setRowVisible(m_bleIsolate, linuxBle);
+    m_deviceForm->setRowVisible(m_stopBleService, linuxBle || (ble && m_session.hasBleProvider()));
     m_deviceForm->setRowVisible(m_devices->parentWidget(), !ble);
     m_deviceForm->setRowVisible(m_serial, !ble);
     m_deviceForm->setRowVisible(m_autoConnectEnabled, !ble);
@@ -490,10 +518,10 @@ void MainWindow::updateEnabled()
     m_refresh->setEnabled(!ble);
     m_adb->setEnabled(!ble);
     m_autoConnectEnabled->setEnabled(!ble);
-    m_adapter->setEnabled(ble);
+    m_adapter->setEnabled(linuxBle);
     m_blePeer->setEnabled(ble);
-    m_bleIsolate->setEnabled(ble);
-    m_stopBleService->setEnabled(ble && !m_stoppingBleService);
+    m_bleIsolate->setEnabled(linuxBle);
+    m_stopBleService->setEnabled((linuxBle || m_session.hasBleProvider()) && !m_stoppingBleService);
     m_mouseMode->setEnabled(!ble);
     updateTray();
 }
@@ -642,9 +670,13 @@ void MainWindow::connectDevice()
     options.deskflow = m_deskflow->text().trimmed();
     options.serial = m_serial->text().trimmed();
     options.transport = m_transport->currentData().toString();
-    options.adapter = m_adapter->text().trimmed();
     options.blePeer = m_blePeer->text().trimmed().toUpper();
+#ifdef Q_OS_LINUX
+    options.adapter = m_adapter->text().trimmed();
     options.bleIsolate = m_bleIsolate->isChecked();
+#else
+    options.adapter.clear(); // Windows uses the default adapter, never an hciN selector.
+#endif
     if (options.transport == "ble" && options.bleIsolate &&
         QMessageBox::warning(this, qtTrId("otg.ble.confirm_title"),
                              qtTrId("otg.ble.confirm").arg(options.adapter),
@@ -754,7 +786,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
         hide();
         return;
     }
-    if (m_session.state() == Session::State::Idle) {
+    if (m_session.state() == Session::State::Idle && !m_session.hasBleProvider()) {
         m_closing = true;
         m_autoConnect.setEnabled(false);
         m_tray->hide();
@@ -764,6 +796,6 @@ void MainWindow::closeEvent(QCloseEvent *event)
     }
     m_closing = true;
     event->ignore();
-    m_session.stop();
+    m_session.shutdown();
     updateEnabled();
 }

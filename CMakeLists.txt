@@ -74,13 +74,13 @@ add_executable(deskflow-otg
 )
 
 option(BUILD_BLE "Build the Linux BLE HID backend" ${LINUX})
-option(BUILD_BLE_WIN "Build the experimental Windows BLE HID CLI backend (MSVC/Windows SDK)" OFF)
+option(BUILD_BLE_WIN "Build the experimental Windows BLE HID backend (CLI/GUI, MSVC/Windows SDK)" OFF)
 if(BUILD_BLE_WIN)
   if(NOT WIN32 OR NOT MSVC)
     message(FATAL_ERROR "BUILD_BLE_WIN requires Windows, MSVC and a Windows SDK with C++/WinRT")
   endif()
   enable_language(CXX)
-  target_sources(deskflow-otg PRIVATE platform/windows/ble_win.cpp)
+  target_sources(deskflow-otg PRIVATE platform/windows/ble_win.cpp src/ble_win_control.c)
   # Coroutine support is confined to this adapter; core C and GUI stay C11/C++17.
   target_compile_features(deskflow-otg PRIVATE cxx_std_20)
   target_compile_definitions(deskflow-otg PRIVATE OTG_HAVE_BLE_WIN=1 NOMINMAX WIN32_LEAN_AND_MEAN)
@@ -122,7 +122,21 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+  add_executable(test_ble_win_control tests/test_ble_win_control.c src/ble_win_control.c)
+  target_include_directories(test_ble_win_control PRIVATE src)
+  add_test(NAME ble_win_control COMMAND test_ble_win_control)
   if(BUILD_BLE_WIN)
+    add_executable(test_ble_win_control_peer src/main.c src/ble_win_control.c src/bridge.c
+      src/keymap.c src/aoa_hid.c src/usb_scan.c tests/ble_win_control_peer.c)
+    target_compile_definitions(test_ble_win_control_peer PRIVATE OTG_HAVE_BLE_WIN=1)
+    target_include_directories(test_ble_win_control_peer PRIVATE src
+      "${PROJECT_BINARY_DIR}/generated" ${LIBUSB_INCLUDE_DIR})
+    get_target_property(OTG_NATIVE_LINK_LIBS deskflow-otg LINK_LIBRARIES)
+    target_link_libraries(test_ble_win_control_peer PRIVATE ${OTG_NATIVE_LINK_LIBS})
+    get_target_property(OTG_NATIVE_RUNTIME deskflow-otg MSVC_RUNTIME_LIBRARY)
+    if(OTG_NATIVE_RUNTIME)
+      set_property(TARGET test_ble_win_control_peer PROPERTY MSVC_RUNTIME_LIBRARY "${OTG_NATIVE_RUNTIME}")
+    endif()
     add_executable(test_ble_win_queue tests/test_ble_win_queue.cpp)
     target_include_directories(test_ble_win_queue PRIVATE platform/windows)
     target_compile_features(test_ble_win_queue PRIVATE cxx_std_17)
@@ -198,7 +212,8 @@ if(BUILD_BLE_WIN)
 else()
   set(OTG_BLE_WIN_FEATURE false)
 endif()
-# 'ble' remains the Linux resident/GUI feature, not the Windows CLI experiment.
+# 'ble' remains the Linux resident feature. Keep windowsBleCli for compatibility;
+# the same Windows backend also supports GUI-owned foreground sessions.
 file(WRITE "${PROJECT_BINARY_DIR}/BUILD_FEATURES.json" "{\"ble\":${OTG_BLE_FEATURE},\"windowsBleCli\":${OTG_BLE_WIN_FEATURE}}\n")
 install(FILES "${PROJECT_BINARY_DIR}/BUILD_FEATURES.json" DESTINATION share/deskflow-otg)
 if(LINUX)

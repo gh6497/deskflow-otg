@@ -32,6 +32,9 @@
 #endif
 #ifdef OTG_HAVE_BLE_WIN
 #include "ble_win.h"
+#include "ble_win_control.h"
+static int g_ble_control = 0;
+static struct otg_ble_control g_control;
 #endif
 
 #define DEFAULT_PORT   24800
@@ -57,14 +60,30 @@ static int gui_stop_check(void)
 #ifdef _WIN32
     HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
     DWORD available = 0;
-    if (!PeekNamedPipe(input, NULL, 0, NULL, &available, NULL) || available) {
+    if (!PeekNamedPipe(input, NULL, 0, NULL, &available, NULL)) {
         g_stop = 1;
     }
+#ifdef OTG_HAVE_BLE_WIN
+    else if (g_ble_control && available) {
+        char bytes[1536];
+        DWORD read = 0;
+        if (!ReadFile(input, bytes, available < sizeof(bytes) ? available : (DWORD)sizeof(bytes), &read, NULL) ||
+            !read || !otg_ble_control_feed(&g_control, bytes, read)) {
+            fprintf(stderr, "ERROR: invalid Windows BLE GUI control stream\n");
+            g_stop = 1;
+        }
+        if (g_control.stop) g_stop = 1;
+    }
+#endif
+    else if (available) g_stop = 1;
 #else
     struct pollfd input = { .fd = STDIN_FILENO, .events = POLLIN };
     if (poll(&input, 1, 0) > 0) {
         g_stop = 1;
     }
+#endif
+#ifdef OTG_HAVE_BLE_WIN
+    if (g_ble_control && g_control.phase != OTG_BLE_ACTIVE) return 1;
 #endif
     return g_stop != 0;
 }
@@ -200,7 +219,7 @@ static void usage(const char *prog)
             "  -p, --port PORT       Deskflow server port (default %u)\n"
             "  -n, --name NAME       Screen name reported to the server (default %s)\n"
              "  -s, --serial SERIAL   Android USB device serial (USB transport)\n"
-             "      --transport MODE usb (default) or ble (Linux/experimental Windows CLI)\n"
+              "      --transport MODE usb (default) or ble (Linux/experimental Windows)\n"
              "      --adapter NAME    BlueZ adapter for BLE (default hci0)\n"
              "      --ble-isolate     Linux: sudo native BLE-only supervisor; restores on exit\n"
              "      --ble-restore     Linux: recover saved adapter settings without Python\n"
@@ -215,6 +234,7 @@ static void usage(const char *prog)
             "      --height H        Virtual screen height, 1..32767 (default %d)\n"
             "      --mouse-mode MODE absolute (default) or relative (compatibility)\n"
             "      --gui             JSON status on stdout; stdin byte/EOF stops\n"
+            "      --gui-ble-control Windows GUI: pause/resume sessions without recreating GATT\n"
             "      --usb-scan        List USB attachments as JSON (no ADB or HID)\n"
             "      --usb-watch       Watch USB hotplug as JSON lines; stdin/EOF stops\n"
             "  -h, --help            Show this help\n"
@@ -418,6 +438,31 @@ static bool ble_wait(app_state *s, bool require_ready, unsigned delay_ms)
 }
 #endif
 
+#ifdef OTG_HAVE_BLE_WIN
+/* This runs only after the TCP client has stopped. No input can overtake the
+ * release barrier, and no new session is accepted before ble-idle is emitted. */
+static bool windows_ble_control_wait(app_state *s)
+{
+    gui_stop_check();
+    if (g_stop) return false;
+    if (g_control.phase == OTG_BLE_PAUSING) {
+        otg_ble_win_release_inputs(s->transport_owner);
+        otg_bridge_reset_input(&s->bridge);
+    }
+    while (!g_stop && g_control.phase != OTG_BLE_ACTIVE) {
+        gui_stop_check();
+        if (!otg_bridge_check(&s->bridge)) return false;
+        if (g_control.phase == OTG_BLE_PAUSING && otg_ble_win_input_idle(s->transport_owner)) {
+            g_control.phase = OTG_BLE_IDLE;
+            gui_event("ble-idle");
+            fprintf(stderr, "INFO: Windows BLE session detached; GATT provider and subscriptions retained\n");
+        }
+        Sleep(5);
+    }
+    return !g_stop;
+}
+#endif
+
 int main(int argc, char **argv)
 {
     const char *host = DEFAULT_HOST;
@@ -504,6 +549,10 @@ int main(int argc, char **argv)
             height = parse_screen_size(argv[++i]);
         } else if (strcmp(a, "--gui") == 0) {
             g_gui = 1;
+#ifdef OTG_HAVE_BLE_WIN
+        } else if (strcmp(a, "--gui-ble-control") == 0) {
+            g_ble_control = 1;
+#endif
         } else if (strcmp(a, "--mouse-mode") == 0 && i + 1 < argc) {
             const char *mode = argv[++i];
             if (strcmp(mode, "absolute") == 0) {
@@ -572,12 +621,25 @@ int main(int argc, char **argv)
         }
     }
 #ifdef OTG_HAVE_BLE_WIN
+    if (g_ble_control && (!g_gui || strcmp(transport, "ble") || background ||
+        strlen(host) >= sizeof(g_control.host) || strlen(name) >= sizeof(g_control.name))) {
+        fprintf(stderr, "ERROR: --gui-ble-control requires foreground --gui --transport ble\n");
+        return 2;
+    }
+    if (g_ble_control) {
+        strcpy(g_control.host, host); strcpy(g_control.name, name);
+        g_control.port = port; g_control.width = (unsigned)width; g_control.height = (unsigned)height;
+    }
     if (!strcmp(transport, "ble") && !ble_service && !ble_status && !ble_stop_service && !ble_restore &&
-        (ble_session || ble_isolate || serial || g_gui || adapter_explicit || mouse_mode != OTG_MOUSE_ABSOLUTE)) {
-        fprintf(stderr, "ERROR: Windows BLE supports CLI, default adapter and absolute pointer only; Linux service/isolation options, --serial and --gui are unsupported\n");
+        (ble_session || ble_isolate || serial || adapter_explicit || mouse_mode != OTG_MOUSE_ABSOLUTE)) {
+        fprintf(stderr, "ERROR: Windows BLE supports default adapter and absolute pointer only; Linux service/isolation options and --serial are unsupported\n");
         return 2;
     }
 #ifdef _WIN32
+    if (background && g_gui) {
+        fprintf(stderr, "ERROR: --background cannot be combined with --gui (GUI owns the bridge lifetime)\n");
+        return 2;
+    }
     if (background && strcmp(transport, "ble") != 0) {
         fprintf(stderr, "ERROR: --background is supported only with Windows BLE\n");
         return 2;
@@ -624,7 +686,7 @@ int main(int argc, char **argv)
     }
     if (g_gui) {
         df_client_set_stop_check(gui_stop_check);
-        if (gui_stop_check()) {
+        if (gui_stop_check() && g_stop) {
             return 0;
         }
     }
@@ -680,7 +742,7 @@ int main(int argc, char **argv)
                (unsigned)libusb_get_device_address(state.bridge.aoa.device));
         fflush(stdout);
     }
-    if (g_gui && gui_stop_check()) {
+    if (g_gui && gui_stop_check() && g_stop) {
         otg_bridge_close(&state.bridge);
         destroy_transport_owner(&state);
         return 0;
@@ -710,8 +772,19 @@ int main(int argc, char **argv)
     if (state.transport_owner) {ble_app=&state;df_client_set_stop_check(ble_stop_check);}
 #endif
     do {
+#ifdef OTG_HAVE_BLE_WIN
+        if (g_ble_control) {
+            if (!windows_ble_control_wait(&state)) break;
+            host = g_control.host; name = g_control.name; port = g_control.port;
+            width = (int)g_control.width; height = (int)g_control.height;
+            state.bridge.screen_w = width; state.bridge.screen_h = height;
+        }
+#endif
 #if defined(OTG_HAVE_BLE) || defined(OTG_HAVE_BLE_WIN)
         if (state.transport_owner && !ble_wait(&state,true,0)) {
+#ifdef OTG_HAVE_BLE_WIN
+            if (g_ble_control && !g_stop && g_control.phase != OTG_BLE_ACTIVE) continue;
+#endif
             if (!g_stop) ret = 1;
             break;
         }
@@ -723,6 +796,14 @@ int main(int argc, char **argv)
             df_client_disconnect(client);
         } else ret=1;
         if(!state.transport_owner || g_stop) break;
+#ifdef OTG_HAVE_BLE_WIN
+        if (g_ble_control && g_control.phase != OTG_BLE_ACTIVE) {
+            /* Do not enqueue leave/reset into a nearly full old queue. The
+             * next iteration discards it before adding release barriers. */
+            state.deskflow_connected = state.input_ready_reported = false;
+            continue;
+        }
+#endif
         otg_bridge_leave(&state.bridge);
         otg_bridge_reset_input(&state.bridge);
         state.deskflow_connected=state.input_ready_reported=false;
@@ -730,6 +811,9 @@ int main(int argc, char **argv)
         fprintf(stderr,"INFO: BLE service retained; reconnect phone without removing pairing; retrying Deskflow when ready\n");
 #if defined(OTG_HAVE_BLE) || defined(OTG_HAVE_BLE_WIN)
         if(!ble_wait(&state,false,1000)) {
+#ifdef OTG_HAVE_BLE_WIN
+            if (g_ble_control && !g_stop && g_control.phase != OTG_BLE_ACTIVE) continue;
+#endif
             if (!g_stop) ret = 1;
             break;
         }

@@ -780,16 +780,7 @@ static void close_transport(void *ctx)
         s->closing = true;
         // On exit, discard unsent actions, then release after any in-flight
         // notification. Never send queued presses after the final release.
-        s->queue.clear();
-        if (s->ready && !s->failed) {
-            auto mouse = s->last_mouse;
-            mouse[1] = mouse[6] = mouse[7] = 0;
-            mouse[0] = (mouse[0] & 2) ? 2 : 0;
-            s->queue.push({1, {}, false, s->epoch});
-            s->queue.push({2, mouse, false, s->epoch});
-            mouse[0] = 0;
-            s->queue.push({2, mouse, false, s->epoch});
-        }
+        otg_ble_win_detail::queue_releases(s->queue, s->last_mouse, s->epoch, s->ready && !s->failed);
         s->cv.notify_all();
         s->cv.wait_for(lock, 2s, [&] {
             // Let a failed worker attempt its own releases before cancelling
@@ -801,6 +792,22 @@ static void close_transport(void *ctx)
     s->stopping = true;
     s->cv.notify_all();
     b->thread.join();
+}
+
+extern "C" void otg_ble_win_release_inputs(otg_ble_win *b)
+{
+    auto s = b->state;
+    std::lock_guard<std::mutex> lock(s->mutex);
+    otg_ble_win_detail::queue_releases(s->queue, s->last_mouse, s->epoch,
+                                     s->ready && !s->failed && !s->closing);
+    s->cv.notify_all();
+}
+
+extern "C" bool otg_ble_win_input_idle(otg_ble_win *b)
+{
+    auto s = b->state;
+    std::lock_guard<std::mutex> lock(s->mutex);
+    return s->queue.empty() && !s->in_flight;
 }
 
 extern "C" otg_ble_win *otg_ble_win_create(const char *peer)

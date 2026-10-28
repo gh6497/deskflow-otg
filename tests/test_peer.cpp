@@ -6,6 +6,7 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTimer>
+#include <memory>
 #include <cstdio>
 #include <thread>
 
@@ -19,6 +20,8 @@ int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
     const auto args = app.arguments();
+    if (qEnvironmentVariableIsSet("OTG_TEST_BLE_WINDOWS") &&
+        (args.contains("--ble-status") || args.contains("--ble-service"))) return 10;
     if (args.contains("--ble-status")) {
         const auto mode = qEnvironmentVariable("OTG_TEST_BLE_STATUS");
         if (mode == "busy")
@@ -140,18 +143,56 @@ int main(int argc, char **argv)
                 server.nextPendingConnection()->deleteLater();
         });
     } else if (args.contains("--gui")) {
-        const bool ble = args.contains("--ble-session");
+        const bool ble = args.value(args.indexOf("--transport") + 1) == "ble";
         if (ble && (!args.contains("--ble-peer") || args.contains("--serial") ||
                     args.value(args.indexOf("--mouse-mode") + 1) != "absolute")) return 9;
+        if (ble && qEnvironmentVariableIsSet("OTG_TEST_BLE_WINDOWS") &&
+            (args.contains("--ble-session") || args.contains("--adapter") ||
+             args.contains("--ble-isolate") || args.contains("--background"))) return 10;
+        if (args.contains("--gui-ble-control")) {
+            auto generation = std::make_shared<int>(0);
+            auto connectSession = [&app, generation] {
+                const int current = ++*generation;
+                if (qEnvironmentVariableIsSet("OTG_TEST_BLE_WAIT")) return;
+                QTimer::singleShot(100, &app, [generation, current] {
+                    if (*generation == current) output("{\"event\":\"connected\"}\n");
+                });
+                if (qEnvironmentVariableIsSet("OTG_TEST_BLE_RECONNECT")) {
+                    QTimer::singleShot(250, &app, [generation, current] {
+                        if (*generation == current) output("{\"event\":\"disconnected\"}\n");
+                    });
+                    QTimer::singleShot(600, &app, [generation, current] {
+                        if (*generation == current) output("{\"event\":\"connected\"}\n");
+                    });
+                }
+            };
+            connectSession();
+            std::thread([&app, generation, connectSession] {
+                char bytes[1600];
+                while (std::fgets(bytes, sizeof(bytes), stdin)) {
+                    const QByteArray line(bytes);
+                    QMetaObject::invokeMethod(&app, [&app, generation, connectSession, line] {
+                        if (line == "pause\n") {
+                            ++*generation;
+                            output("{\"event\":\"ble-idle\"}\n");
+                        } else if (line.startsWith("resume\t")) connectSession();
+                        else app.quit();
+                    }, Qt::QueuedConnection);
+                }
+                QMetaObject::invokeMethod(&app, &QCoreApplication::quit, Qt::QueuedConnection);
+            }).detach();
+            return app.exec();
+        }
         const auto serial = args.value(args.indexOf("--serial") + 1);
         if (serial == "reject")
             return 5;
         if (!ble) output("{\"event\":\"usb-ready\",\"usb-id\":\"1:2\"}\n");
-        if (ble && qEnvironmentVariableIsSet("OTG_TEST_BLE_RECONNECT")) {
+        if (ble && qEnvironmentVariableIsSet("OTG_TEST_BLE_RECONNECT") &&
+            !qEnvironmentVariableIsSet("OTG_TEST_BLE_WAIT")) {
             QTimer::singleShot(250, &app, [] { output("{\"event\":\"disconnected\"}\n"); });
             QTimer::singleShot(600, &app, [] { output("{\"event\":\"connected\"}\n"); });
         }
-        if (serial != "slow") {
+        if (serial != "slow" && !(ble && qEnvironmentVariableIsSet("OTG_TEST_BLE_WAIT"))) {
             // Split across reads to exercise the line protocol framing.
             output("{\"event\":");
             QTimer::singleShot(100, &app, [] { output("\"connected\"}\n"); });
