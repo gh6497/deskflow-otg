@@ -168,6 +168,21 @@ for f in src/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only -Isrc -Ibu
 
 ## 约束与已知限制
 
+- Windows 原生 BLE CLI 为显式开启的实验选项 `-DBUILD_BLE_WIN=ON`，不等同 Linux
+  `BUILD_BLE`，也未接 GUI。`platform/windows/ble_win.cpp` 使用 C++20/WinRT；
+  `src/ble_win.h` 暴露 C ABI，桥接核心保持 C11。专用线程管理 GATT/身份核对和单条
+  在途通知，64 条有界队列仅合并相邻纯移动，按钮/范围/滚轮/键盘保持屏障。
+  必须 `--transport ble --ble-peer MAC`、默认适配器和 absolute；不支持 Linux 服务、
+  隔离选项或 `--gui`。身份读取在线 BluetoothLEDevice 地址及已配对状态，通知定向发送；
+  失联/订阅变化清队列并断开 Deskflow，恢复先释放输入；退出释放为尽力而为。
+  WinRT 等待按会话 epoch 取消并记录操作名；断线取消不算致命超时。Cancel 不等于完成，
+  旧通知真正完成/取消前不得恢复 ready 或发送新通知；5 秒仍未结束则失败退出。
+  当前 Windows 排障版所有通知统一30ms间隔（非实测interval），降低切屏状态突发；
+  致命通知超时先关闭ready再释放/注销，日志含发送计数/队列/在线及session状态。
+  nova 9 的独立原型键盘/悬停/点击/拖拽/滚轮已过，不能等同连续 Deskflow 输入、
+  重连/休眠/进程重启已验收。Redmi Android14 ROM 的 LHDC 白名单超91字节导致
+  配对时蓝牙崩溃，未修改手机配置。用法与限制见 `docs/WINDOWS_BLE.md`。
+
 - Linux BLE 实验后端通过 `sudo deskflow-otg --transport ble --ble-isolate` 原生启动，
   不依赖 Python。`src/ble_supervisor.c` 使用 Linux MGMT API 快照/隔离/核对恢复，
   通过 `/usr/sbin/runuser` 降权运行自己的桥接子进程；父进程用 `src/ble_link.c` 监控 HCI。

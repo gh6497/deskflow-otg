@@ -805,7 +805,11 @@ int df_client_run(df_client *c, volatile sig_atomic_t *stop)
             break;
         }
         if (plen < 0) {
-            LOG_ERR("socket read failed: %d\n", df_socket_error());
+            if ((stop && *stop) || (stop_check && stop_check())) {
+                LOG_INFO("socket read cancelled by stop check\n");
+            } else {
+                LOG_ERR("socket read failed: %d\n", df_socket_error());
+            }
             result = -1;
             break;
         }

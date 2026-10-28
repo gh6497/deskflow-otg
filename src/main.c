@@ -30,6 +30,9 @@
 #include "ble_session.h"
 #include <glib.h>
 #endif
+#ifdef OTG_HAVE_BLE_WIN
+#include "ble_win.h"
+#endif
 
 #define DEFAULT_PORT   24800
 #define DEFAULT_HOST   "127.0.0.1"
@@ -85,20 +88,20 @@ static void usage(const char *prog)
     fprintf(stderr,
             "Usage: %s [options]\n"
             "\n"
-            "Bridge between a Deskflow server and an Android phone (USB AOA HID).\n"
+            "Bridge between a Deskflow server and an Android phone (USB AOA / optional BLE HID).\n"
             "\n"
             "Options:\n"
             "  -H, --host HOST       Deskflow server address (default %s)\n"
             "  -p, --port PORT       Deskflow server port (default %u)\n"
             "  -n, --name NAME       Screen name reported to the server (default %s)\n"
              "  -s, --serial SERIAL   Android USB device serial (USB transport)\n"
-             "      --transport MODE usb (default) or ble (Linux)\n"
+             "      --transport MODE usb (default) or ble (Linux/experimental Windows CLI)\n"
              "      --adapter NAME    BlueZ adapter for BLE (default hci0)\n"
              "      --ble-isolate     Linux: sudo native BLE-only supervisor; restores on exit\n"
              "      --ble-restore     Linux: recover saved adapter settings without Python\n"
              "      --ble-service     Linux: resident user GATT service (keep running)\n"
              "      --ble-session     Linux: BLE bridge via an existing resident service\n"
-             "      --ble-peer MAC    Target phone's BlueZ identity address (required for BLE bridge)\n"
+             "      --ble-peer MAC    Target phone identity (Linux) / Windows BLE address (required)\n"
              "      --ble-status      Read resident service JSON status without attaching\n"
              "      --ble-stop-service Stop an idle user service (loses GATT subscription continuity)\n"
             "      --width W         Virtual screen width, 1..32767 (default %d)\n"
@@ -252,28 +255,48 @@ static void destroy_transport_owner(app_state *s)
         else otg_ble_hid_destroy(s->transport_owner);
         s->transport_owner = NULL;
     }
+#elif defined(OTG_HAVE_BLE_WIN)
+    if (s->transport_owner) {
+        otg_ble_win_destroy(s->transport_owner);
+        s->transport_owner = NULL;
+    }
 #else
     (void)s;
 #endif
 }
 
-#ifdef OTG_HAVE_BLE
+#if defined(OTG_HAVE_BLE) || defined(OTG_HAVE_BLE_WIN)
 static app_state *ble_app;
 static int ble_stop_check(void)
 {
     if (g_stop || (g_gui && gui_stop_check())) return 1;
     if (!ble_app || !otg_bridge_check(&ble_app->bridge)) return 1;
+#ifdef OTG_HAVE_BLE_WIN
+    /* The phone was ready before TCP connect; losing it during the handshake
+     * must cancel partial reads too, not only an already connected session. */
+    return !otg_bridge_ready(&ble_app->bridge);
+#else
     return ble_app->input_ready_reported && !otg_bridge_ready(&ble_app->bridge);
+#endif
 }
 
 static bool ble_wait(app_state *s, bool require_ready, unsigned delay_ms)
 {
+#ifdef _WIN32
+    ULONGLONG until = GetTickCount64() + delay_ms;
+#else
     gint64 until=g_get_monotonic_time()+(gint64)delay_ms*1000;
+#endif
     while (!g_stop && !(g_gui && gui_stop_check())) {
         if (!otg_bridge_check(&s->bridge)) return false;
         if (require_ready && otg_bridge_ready(&s->bridge)) return true;
+#ifdef _WIN32
+        if (!require_ready && GetTickCount64() >= until) return true;
+        Sleep(5);
+#else
         if (!require_ready && g_get_monotonic_time()>=until) return true;
         g_usleep(5000);
+#endif
     }
     return false;
 }
@@ -286,6 +309,9 @@ int main(int argc, char **argv)
     const char *serial = NULL;
     const char *transport = "usb";
     const char *adapter = "hci0";
+#ifdef OTG_HAVE_BLE_WIN
+    bool adapter_explicit = false;
+#endif
     const char *ble_peer = NULL;
     int ble_isolate = 0, ble_restore = 0;
     int ble_service = 0, ble_session = 0, ble_status = 0, ble_stop_service = 0;
@@ -327,6 +353,9 @@ int main(int argc, char **argv)
             transport = argv[++i];
         } else if (strcmp(a, "--adapter") == 0 && i + 1 < argc) {
             adapter = argv[++i];
+#ifdef OTG_HAVE_BLE_WIN
+            adapter_explicit = true;
+#endif
         } else if (strcmp(a, "--ble-isolate") == 0) {
             ble_isolate = 1;
         } else if (strcmp(a, "--ble-restore") == 0) {
@@ -399,6 +428,13 @@ int main(int argc, char **argv)
             fprintf(stderr,"ERROR: --ble-peer requires BLE bridge mode and an identity MAC address\n");return 2;
         }
     }
+#ifdef OTG_HAVE_BLE_WIN
+    if (!strcmp(transport, "ble") && !ble_service && !ble_status && !ble_stop_service && !ble_restore &&
+        (ble_session || ble_isolate || serial || g_gui || adapter_explicit || mouse_mode != OTG_MOUSE_ABSOLUTE)) {
+        fprintf(stderr, "ERROR: Windows BLE supports CLI, default adapter and absolute pointer only; Linux service/isolation options, --serial and --gui are unsupported\n");
+        return 2;
+    }
+#endif
     if(ble_status || ble_stop_service) {
         if((ble_status && ble_stop_service) || ble_service || ble_session || ble_isolate || ble_restore || g_gui || serial)return 2;
 #ifdef OTG_HAVE_BLE
@@ -467,6 +503,14 @@ int main(int argc, char **argv)
             return 1;
         }
         fprintf(stderr, "INFO:  BLE HID advertisement started on %s; waiting for phone subscriptions\n", adapter);
+#elif defined(OTG_HAVE_BLE_WIN)
+        state.transport_owner = otg_ble_win_create(ble_peer);
+        if (!state.transport_owner || otg_bridge_open_transport(&state.bridge,
+                otg_ble_win_ops(), state.transport_owner, width, height, mouse_mode) != 0) {
+            destroy_transport_owner(&state);
+            return 1;
+        }
+        fprintf(stderr, "INFO: Windows BLE target %s; starting GATT worker, waiting for paired phone subscriptions\n", ble_peer);
 #else
         fprintf(stderr, "ERROR: BLE HID requires Linux with BUILD_BLE=ON (adapter %s)\n", adapter);
         return 2;
@@ -507,12 +551,15 @@ int main(int argc, char **argv)
     };
 
     int ret = 0;
-#ifdef OTG_HAVE_BLE
+#if defined(OTG_HAVE_BLE) || defined(OTG_HAVE_BLE_WIN)
     if (state.transport_owner) {ble_app=&state;df_client_set_stop_check(ble_stop_check);}
 #endif
     do {
-#ifdef OTG_HAVE_BLE
-        if (state.transport_owner && !ble_wait(&state,true,0)) break;
+#if defined(OTG_HAVE_BLE) || defined(OTG_HAVE_BLE_WIN)
+        if (state.transport_owner && !ble_wait(&state,true,0)) {
+            if (!g_stop) ret = 1;
+            break;
+        }
 #endif
         df_client *client=df_client_connect(host,(uint16_t)port,name,width,height,&cbs,&state);
         if(client) {
@@ -526,8 +573,11 @@ int main(int argc, char **argv)
         state.deskflow_connected=state.input_ready_reported=false;
         gui_event("disconnected");
         fprintf(stderr,"INFO: BLE service retained; reconnect phone without removing pairing; retrying Deskflow when ready\n");
-#ifdef OTG_HAVE_BLE
-        if(!ble_wait(&state,false,1000)) break;
+#if defined(OTG_HAVE_BLE) || defined(OTG_HAVE_BLE_WIN)
+        if(!ble_wait(&state,false,1000)) {
+            if (!g_stop) ret = 1;
+            break;
+        }
 #endif
     } while(!g_stop);
     otg_bridge_close(&state.bridge);
