@@ -1,4 +1,4 @@
-/* Windows HID over GATT adapter. GATT layout follows src/ble_hid.c; reports
+/* Windows HID over GATT adapter. GATT layout follows platform/linux/ble_hid.c; reports
  * come from bridge.c (scrcpy keyboard / absolute tablet), not the prototype.
  * SPDX-License-Identifier: Apache-2.0 */
 #include "ble_win.h"

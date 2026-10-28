@@ -10,7 +10,7 @@ static int fake_close(int fd);
 #define bind fake_bind
 #define setsockopt fake_setsockopt
 #define close fake_close
-#include "../src/ble_link.c"
+#include "../platform/linux/ble_link.c"
 #undef socket
 #undef bind
 #undef setsockopt

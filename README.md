@@ -644,11 +644,16 @@ src/
   deskflow_client.c   极简 Deskflow 客户端协议 (TCP 握手 + 消息循环)
   aoa_hid.c           USB AOA HID (libusb 枚举/打开/注册/发送报告)
   usb_scan.c          USB 设备快照与 libusb 热插拔事件监听
-  ble_hid.c           Linux GATT/HID、稳定句柄与已配对设备重连
-  ble_supervisor.c    原生隔离、降权子进程、模式快照与异常恢复
-  ble_link.c          root 父进程的 HCI 参数监控与低延迟请求
   bridge.c            键鼠状态机 + HID 报告生成 (对应 scrcpy 的 hid_*)
   keymap.c            deskflow KeyID → USB HID usage 映射
+platform/
+  linux/
+    ble_hid.c         Linux GATT/HID、稳定句柄与已配对设备重连
+    ble_supervisor.c  原生隔离、降权子进程、模式快照与异常恢复
+    ble_link.c        root 父进程的 HCI 参数监控与低延迟请求
+    ble_session.c     常驻 GATT 服务与本地桥接会话
+  windows/
+    ble_win.cpp       实验性 Windows 原生 BLE HID 后端
 gui/
   main_window.cpp     Qt Widgets 界面、ADB 自动识别和设置保存
   session.cpp         Deskflow 配置/启动、桥接状态及进程生命周期

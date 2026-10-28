@@ -1,6 +1,6 @@
 /* No hardware/root: exercise native MGMT transition planning and recovery.
  * SPDX-License-Identifier: Apache-2.0 */
-#include "../src/ble_supervisor.c"
+#include "../platform/linux/ble_supervisor.c"
 
 bool otg_ble_service_wait_idle(uid_t uid,const char *adapter)
 {(void)uid;(void)adapter;return true;}
