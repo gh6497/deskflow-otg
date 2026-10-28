@@ -14,6 +14,9 @@ target_link_libraries(otg_gui_support PUBLIC Qt6::Network)
 if(BUILD_BLE)
   target_compile_definitions(otg_gui_support PUBLIC OTG_GUI_HAVE_BLE=1)
 endif()
+if(BUILD_BLE_WIN)
+  target_compile_definitions(otg_gui_support PUBLIC OTG_GUI_HAVE_BLE_WIN=1)
+endif()
 # Keep all display text in the two catalogs; code references stable IDs only.
 # Catalogs are maintained explicitly, not regenerated from source literals.
 qt_add_lrelease(otg_gui_support
@@ -131,6 +134,11 @@ if(BUILD_TESTING)
   )
   target_link_libraries(test_window PRIVATE otg_gui_support Qt6::Widgets Qt6::Test)
   add_dependencies(test_gui test_peer)
+  if(BUILD_BLE_WIN)
+    add_dependencies(test_gui test_ble_win_control_peer)
+    target_compile_definitions(test_gui PRIVATE
+      OTG_TEST_NATIVE_BLE_PEER="$<TARGET_FILE:test_ble_win_control_peer>")
+  endif()
   add_dependencies(test_window test_peer)
   if(MSVC)
     target_compile_options(test_gui PRIVATE /utf-8)

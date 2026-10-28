@@ -56,6 +56,22 @@ int main()
     CHECK(queue.size() == 3);
     CHECK(!queue.push({3, {}, false, 1}));
 
+    // Disconnect retains the provider, but must not replay queued presses.
+    queue_releases(queue, {3, 1, 123, 1, 234, 2, 1, 1}, 7, true);
+    CHECK(queue.size() == 3);
+    auto key_release = queue.pop();
+    CHECK(key_release.id == 1 && key_release.epoch == 7);
+    CHECK((key_release.bytes == std::array<uint8_t, 8>{}));
+    auto button_release = queue.pop();
+    CHECK(button_release.id == 2 && button_release.bytes[0] == 2 && button_release.bytes[1] == 0);
+    CHECK(button_release.bytes[2] == 123 && button_release.bytes[4] == 234);
+    CHECK(button_release.bytes[6] == 0 && button_release.bytes[7] == 0);
+    auto range_release = queue.pop();
+    CHECK(range_release.bytes[0] == 0 && queue.empty());
+    CHECK(queue.push(mouse(3, 1, 5)));
+    queue_releases(queue, {}, 8, false); // Link loss discards, later readiness releases first.
+    CHECK(queue.empty());
+
     const uint8_t desc[] = {0x05, 1, 0x09, 6, 0xa1, 1, 0xc0};
     std::vector<uint8_t> map;
     CHECK(append_descriptor(map, desc, sizeof(desc), 1));

@@ -66,6 +66,12 @@ jobs:
       - name: Check CLI
         if: runner.os != 'Windows'
         run: ./build/deskflow-otg --help
+      - name: USB-only Windows GUI compatibility
+        if: runner.os == 'Windows'
+        run: |
+          cmake -S . -B build-usb -DBUILD_GUI=ON -DBUILD_BLE_WIN=OFF -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static
+          cmake --build build-usb --config Release --parallel
+          ctest --test-dir build-usb -C Release --output-on-failure
       - name: Check CLI (Windows)
         if: runner.os == 'Windows'
         run: ./build/Release/deskflow-otg.exe --help

@@ -3,6 +3,14 @@
 <TS version="2.1" language="zh_CN" sourcelanguage="en">
 <context>
   <name></name>
+  <message id="otg.ble.pause_failed"><source>BLE session release timed out; the GUI-owned provider was stopped. GATT continuity was lost.</source><translation>BLE 会话释放超时，已停止此 GUI 创建的服务，GATT 连续性已丢失。</translation></message>
+  <message id="otg.ble.provider_target"><source>A retained BLE provider belongs to another phone or bridge executable. Stop the idle Bluetooth service explicitly before changing it.</source><translation>保留的 BLE 服务属于另一台手机或桥接程序，请先显式停止空闲蓝牙服务再切换。</translation></message>
+  <message id="otg.ble.provider_retained"><source>Session disconnected; Windows GATT and phone subscriptions are retained until service stop or GUI exit.</source><translation>会话已断开，Windows GATT 与手机订阅继续保留，直到停止服务或退出 GUI。</translation></message>
+  <message id="otg.ble.provider_reused"><source>Reusing the retained Windows GATT provider for this session.</source><translation>本次会话复用已保留的 Windows GATT 服务。</translation></message>
+  <message id="otg.ble.provider_ended"><source>The retained Windows BLE provider exited; GATT continuity was lost.</source><translation>保留的 Windows BLE 进程已退出，GATT 连续性已丢失。</translation></message>
+  <message id="otg.transport.ble_windows"><source>Bluetooth LE (Windows, experimental)</source><translation>低功耗蓝牙（Windows，实验性）</translation></message>
+  <message id="otg.ble.windows_setup_hint"><source>Experimental Windows BLE: enter the phone address and screen dimensions, then connect and pair/connect from the phone. No ADB or USB required; uses the default adapter. Disconnect releases input but retains GATT for the next session while the GUI runs. Stop idle Bluetooth service or Quit ends GATT; phone cache recovery may then be needed.</source><translation>Windows BLE 为实验功能：填写手机地址与屏幕尺寸，点击连接后在手机蓝牙设置中配对或连接。无需 ADB 或 USB，使用默认适配器。点击「断开」释放输入，但在 GUI 运行期间保留 GATT 供下次连接复用；「停止空闲蓝牙服务」或「退出」才注销 GATT，之后可能需要恢复手机缓存。</translation></message>
+  <message id="otg.ble.windows_peer_hint"><source>Enter the paired phone's Bluetooth LE address as reported by Windows, not the PC adapter address. In BluetoothLE#BluetoothLE&lt;PC&gt;-&lt;phone&gt;, use the final phone address. Identity and pairing are checked online; no arbitrary phone is selected. Stop any standalone BLE prototype or background bridge before connecting.</source><translation>填写 Windows 报告的已配对手机 Bluetooth LE 地址，不是电脑适配器地址。BluetoothLE#BluetoothLE&lt;电脑&gt;-&lt;手机&gt; 中取最后一段手机地址。程序会在线核对身份及配对状态，不会任意选择手机。连接前请先停止独立 BLE 原型或后台桥接。</translation></message>
   <message id="otg.ble.setup_hint"><source>Enter the phone's identity address and screen dimensions. Pair/connect in system Bluetooth settings; no ADB or USB required. Disconnecting retains the resident service.</source><translation>填写手机身份地址与屏幕尺寸，通过系统蓝牙设置配对或连接，无需 ADB 或 USB。断开会话后常驻服务仍保留。</translation></message>
   <message id="otg.ble.stop_service"><source>Stop idle Bluetooth service</source><translation>停止空闲蓝牙服务</translation></message>
   <message id="otg.ble.stop_confirm"><source>This unregisters GATT and loses subscription continuity. The phone may need a Bluetooth reconnect or cache recovery afterward. Other active sessions cannot be stopped here. Continue?</source><translation>这会注销 GATT 并失去订阅连续性，之后手机可能需要重新连接蓝牙或恢复缓存。此操作不会停止其他活动会话。是否继续？</translation></message>
@@ -20,7 +28,7 @@
   <message id="otg.ble.waiting"><source>Waiting for the target phone's HID connection (pair/connect in Bluetooth settings)</source><translation>等待目标手机 HID 就绪（请在系统蓝牙设置中配对或连接）</translation></message>
   <message id="otg.ble.reconnecting"><source>Bluetooth/Deskflow disconnected — waiting to reconnect; pairing retained</source><translation>蓝牙或 Deskflow 已断开，等待重新连接；配对保留</translation></message>
   <message id="otg.ble.recovery_wait"><source>Waiting for the privileged Bluetooth supervisor to restore settings. It will not be forcibly killed; check the log if recovery fails.</source><translation>正在等待蓝牙权限监督进程恢复设置，不会强杀该进程；恢复失败请查看日志。</translation></message>
-  <message id="otg.ble.unsupported"><source>Bluetooth LE is only supported on Linux.</source><translation>低功耗蓝牙目前仅支持 Linux。</translation></message>
+  <message id="otg.ble.unsupported"><source>Bluetooth LE is unavailable on this platform or in this build.</source><translation>当前平台或构建未提供低功耗蓝牙支持。</translation></message>
   <message id="otg.ble.busy"><source>The Bluetooth service is busy or its cleanup is incomplete. Stop the other session or recover it explicitly.</source><translation>蓝牙服务已有会话或清理尚未完成，请结束另一会话或显式恢复。</translation></message>
   <message id="otg.ble.service_failed"><source>Bluetooth service unavailable or incompatible. Check the BLE service log and stop old service versions explicitly: %1</source><translation>蓝牙服务不可用或版本不兼容，请检查 BLE 服务日志并显式停止旧版服务：%1</translation></message>
   <message id="otg.ble.service_retained"><source>Starting the resident Bluetooth service as the current user. It stays running across sessions and GUI exits to preserve phone subscriptions.</source><translation>正在以当前用户启动常驻蓝牙服务；会话断开和 GUI 退出后仍保留，以维持手机订阅。</translation></message>
@@ -42,7 +50,7 @@
   <message id="otg.action.browse"><source>Browse…</source><translation>浏览…</translation></message>
   <message id="otg.dialog.select_executable"><source>Select executable</source><translation>选择可执行程序</translation></message>
   <message id="otg.window.title"><source>Deskflow OTG · Android keyboard and mouse bridge</source><translation>Deskflow OTG · 安卓键鼠桥接</translation></message>
-  <message id="otg.window.intro"><source>Share your computer's keyboard and mouse with Android (USB / Linux Bluetooth LE)</source><translation>将电脑键鼠共享到安卓手机（USB / Linux 低功耗蓝牙）</translation></message>
+  <message id="otg.window.intro"><source>Share your computer's keyboard and mouse with Android</source><translation>将电脑键鼠共享到安卓手机</translation></message>
   <message id="otg.section.device"><source>1  Select phone</source><translation>1  选择手机</translation></message>
   <message id="otg.device.manual"><source>Enter USB serial number manually</source><translation>手动填写 USB 序列号</translation></message>
   <message id="otg.action.refresh"><source>Refresh devices</source><translation>刷新设备</translation></message>

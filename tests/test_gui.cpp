@@ -88,20 +88,176 @@ static QStringList placeholders(const QString &text)
 class GuiTest : public QObject {
     Q_OBJECT
 private slots:
-    void bleLifecycle()
+    void windowsBleProviderReuse()
     {
-#ifndef Q_OS_LINUX
-        QSKIP("Linux BLE only");
+#ifdef OTG_TEST_NATIVE_BLE_PEER
+        ConnectionOptions options;
+        options.transport = "ble";
+        options.blePeer = "AA:BB:CC:DD:EE:FF";
+        options.bridge = OTG_TEST_NATIVE_BLE_PEER;
+        options.manageServer = false;
+        Session session;
+        QString logs;
+        connect(&session, &Session::log, this, [&logs](const QString &line) { logs += line + '\n'; });
+        for (int i = 0; i < 3; ++i) {
+            options.host = QString("127.0.0.%1").arg(i + 1);
+            options.port = 24800 + i;
+            options.phone = QString("phone-%1").arg(i);
+            options.width = 540 + i;
+            options.height = 1170 + i;
+            session.start(options);
+            QTRY_COMPARE(session.state(), Session::State::Connected);
+            QTRY_VERIFY(logs.contains(QString("session=%1,%2,%3,%4,%5")
+                .arg(options.host).arg(options.port).arg(options.phone).arg(options.width).arg(options.height)));
+            session.stop();
+            QCOMPARE(session.state(), Session::State::Stopping);
+            QTRY_COMPARE(session.state(), Session::State::Idle);
+            QVERIFY(session.hasBleProvider());
+            QTRY_COMPARE(logs.count("input-released"), i + 1);
+            QCOMPARE(logs.count("provider-created"), 1);
+            QVERIFY(!logs.contains("provider-closed"));
+            const int sessions = logs.count("FAKE session=");
+            QTest::qWait(120);
+            QCOMPARE(logs.count("FAKE session="), sessions); // Idle is not an automatic TCP retry.
+        }
+        // USB can be used without destroying a parked Windows provider.
+        auto usb = options;
+        usb.transport = "usb"; usb.serial = "TEST123"; usb.bridge = peerPath();
+        session.start(usb);
+        QTRY_COMPARE(session.state(), Session::State::Connected);
+        session.stop();
+        QTRY_COMPARE(session.state(), Session::State::Idle);
+        QVERIFY(session.hasBleProvider());
+        auto other = options; other.blePeer = "11:22:33:44:55:66";
+        session.start(other);
+        QCOMPARE(session.state(), Session::State::Idle);
+        QCOMPARE(session.statusMessage(), qtTrId("otg.ble.provider_target"));
+        QVERIFY(session.hasBleProvider());
+        QVERIFY(!logs.contains("provider-closed"));
+        session.stopBleProvider();
+        QTRY_COMPARE(session.state(), Session::State::Idle);
+        QVERIFY(!session.hasBleProvider());
+        QTRY_COMPARE(logs.count("provider-closed"), 1);
+        session.start(other); // Explicit service stop permits choosing another target.
+        QTRY_COMPARE(session.state(), Session::State::Connected);
+        session.shutdown(); // Also covers final exit with held key/button.
+        QTRY_COMPARE(session.state(), Session::State::Idle);
+        QVERIFY(!session.hasBleProvider());
+        QTRY_COMPARE(logs.count("provider-closed"), 2);
+#else
+        QSKIP("Windows BLE native control harness only");
+#endif
+    }
+    void windowsBleControlEof_data()
+    {
+        QTest::addColumn<int>("phase");
+        QTest::newRow("active") << 0;
+        QTest::newRow("parked") << 1;
+        QTest::newRow("waiting-phone") << 2;
+    }
+    void windowsBleControlEof()
+    {
+#ifdef OTG_TEST_NATIVE_BLE_PEER
+        QFETCH(int, phase);
+        QProcess child;
+        if (phase == 2) {
+            auto env = QProcessEnvironment::systemEnvironment();
+            env.insert("OTG_TEST_NATIVE_BLE_WAIT", "1");
+            child.setProcessEnvironment(env);
+        }
+        child.start(OTG_TEST_NATIVE_BLE_PEER, {"--gui", "--gui-ble-control", "--transport", "ble",
+                                           "--ble-peer", "AA:BB:CC:DD:EE:FF"});
+        QVERIFY(child.waitForStarted());
+        QByteArray events;
+        QByteArray errors;
+        auto connected = [&] { events += child.readAllStandardOutput(); return events.contains("connected"); };
+        if (phase != 2) QTRY_VERIFY(connected());
+        else {
+            auto started = [&] { errors += child.readAllStandardError(); return errors.contains("provider-created"); };
+            QTRY_VERIFY(started());
+        }
+        if (phase == 1) {
+            child.write("pause\n");
+            auto idle = [&] { events += child.readAllStandardOutput(); return events.contains("ble-idle"); };
+            QTRY_VERIFY(idle());
+        }
+        child.closeWriteChannel(); // Parent crash / EOF while parked must not orphan a provider.
+        QVERIFY(child.waitForFinished(5000));
+        QCOMPARE(child.exitCode(), 0);
+        errors += child.readAllStandardError();
+        QCOMPARE(errors.count("provider-closed"), 1);
+#else
+        QSKIP("Windows BLE native control harness only");
+#endif
+    }
+    void windowsBleReleaseTimeout()
+    {
+#ifdef OTG_TEST_NATIVE_BLE_PEER
+        qputenv("OTG_TEST_NATIVE_BLE_RELEASE_STALL", "1");
+        const auto restore = qScopeGuard([] { qunsetenv("OTG_TEST_NATIVE_BLE_RELEASE_STALL"); });
+        ConnectionOptions options;
+        options.transport = "ble"; options.blePeer = "AA:BB:CC:DD:EE:FF";
+        options.bridge = OTG_TEST_NATIVE_BLE_PEER; options.manageServer = false;
+        Session session;
+        session.start(options);
+        QTRY_COMPARE(session.state(), Session::State::Connected);
+        session.stop();
+        QTRY_COMPARE_WITH_TIMEOUT(session.state(), Session::State::Idle, 12000);
+        QVERIFY(!session.hasBleProvider());
+        QCOMPARE(session.statusMessage(), qtTrId("otg.ble.pause_failed"));
+#else
+        QSKIP("Windows BLE native control harness only");
+#endif
+    }
+    void bleUnavailable()
+    {
+#if defined(Q_OS_LINUX) || defined(OTG_GUI_HAVE_BLE_WIN)
+        QSKIP("BLE session platform available");
 #endif
         ConnectionOptions options;
+        options.bridge = peerPath();
         options.manageServer = false;
+        options.transport = "ble";
+        options.blePeer = "AA:BB:CC:DD:EE:FF";
+        Session session;
+        session.start(options);
+        QCOMPARE(session.state(), Session::State::Idle);
+        QCOMPARE(session.statusMessage(), qtTrId("otg.ble.unsupported"));
+    }
+    void bleLifecycle_data()
+    {
+        QTest::addColumn<bool>("manageServer");
+        QTest::newRow("external-server") << false;
+        QTest::newRow("managed-server") << true;
+    }
+    void bleLifecycle()
+    {
+#if !defined(Q_OS_LINUX) && !defined(OTG_GUI_HAVE_BLE_WIN)
+        QSKIP("BLE-enabled platform only");
+#endif
+        QFETCH(bool, manageServer);
+        ConnectionOptions options;
+        options.manageServer = manageServer;
+        options.deskflow = peerPath();
+        QTcpServer port;
+        QVERIFY(port.listen(QHostAddress::LocalHost, 0));
+        options.port = port.serverPort();
+        port.close();
         options.bridge = peerPath();
         options.transport = "ble";
         options.blePeer = "AA:BB:CC:DD:EE:FF";
         Session session;
         QSignalSpy usb(&session, &Session::usbAttached);
         qputenv("OTG_TEST_BLE_RECONNECT", "1");
-        const auto restore = qScopeGuard([] { qunsetenv("OTG_TEST_BLE_RECONNECT"); qunsetenv("OTG_TEST_BLE_STATUS"); });
+#ifdef Q_OS_WIN
+        qputenv("OTG_TEST_BLE_WINDOWS", "1");
+#endif
+        const auto restore = qScopeGuard([] {
+            qunsetenv("OTG_TEST_BLE_RECONNECT");
+            qunsetenv("OTG_TEST_BLE_STATUS");
+            qunsetenv("OTG_TEST_BLE_WINDOWS");
+            qunsetenv("OTG_TEST_BLE_WAIT");
+        });
         session.start(options);
         QTRY_COMPARE(session.state(), Session::State::Connected);
         QTRY_COMPARE(session.state(), Session::State::Starting);
@@ -110,11 +266,13 @@ private slots:
         QVERIFY(usb.isEmpty());
         session.stop();
         QTRY_COMPARE(session.state(), Session::State::Idle);
+#ifdef Q_OS_LINUX
         qputenv("OTG_TEST_BLE_STATUS", "busy");
         session.start(options);
         QTRY_COMPARE(session.state(), Session::State::Idle);
         QVERIFY(session.statusMessage().contains("已有会话"));
         qunsetenv("OTG_TEST_BLE_STATUS");
+#endif
         session.start(options);
         session.stop(); // Cancel an in-flight service probe, not another user's service.
         QTRY_COMPARE(session.state(), Session::State::Idle);
@@ -127,6 +285,31 @@ private slots:
         options.mouseMode = "relative";
         session.start(options);
         QCOMPARE(session.state(), Session::State::Idle);
+#ifdef Q_OS_WIN
+        options.mouseMode = "absolute";
+        options.bleIsolate = true;
+        session.start(options);
+        QCOMPARE(session.state(), Session::State::Idle);
+        options.bleIsolate = false;
+        options.adapter = "hci0";
+        session.start(options);
+        QCOMPARE(session.state(), Session::State::Idle);
+        options.adapter.clear();
+        session.stopBleProvider();
+        QTRY_COMPARE(session.state(), Session::State::Idle);
+        QVERIFY(!session.hasBleProvider());
+        // Stop while waiting for the phone (before any connected event).
+        qputenv("OTG_TEST_BLE_WAIT", "1");
+        session.start(options);
+        QTRY_COMPARE(session.statusMessage(), qtTrId("otg.ble.waiting"));
+        QTest::qWait(200);
+        QCOMPARE(session.state(), Session::State::Starting);
+        session.stop();
+        QTRY_COMPARE(session.state(), Session::State::Idle);
+        session.shutdown();
+        QTRY_VERIFY(!session.hasBleProvider());
+        QTRY_COMPARE(session.state(), Session::State::Idle);
+#endif
     }
     void initTestCase()
     {

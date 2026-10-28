@@ -43,7 +43,7 @@
 Linux 另提供 **Bluetooth LE HID** 传输，可不接 USB 控制手机。CLI 与 GUI 使用同一
 `deskflow-otg` 程序，常驻 GATT 服务和桥接会话是不同进程，不是额外的可执行程序。
 USB 仍为默认方式；macOS 暂不提供蓝牙后端。Windows 提供需显式编译开启的
-[实验性 BLE CLI 后端](docs/WINDOWS_BLE.md)（尚未接入 GUI）。
+[实验性 BLE 后端](docs/WINDOWS_BLE.md)，可由 CLI 或 GUI 使用。
 
 Windows 原生 BLE HID 的独立[最小测试原型](experiments/windows-ble-hid/README.md)
 保留用于逐项真机验证；nova 9 的手动键盘、悬停、点击、拖拽及滚轮已通过，
@@ -123,6 +123,27 @@ GUI 支持中文和英文，可在窗口右上角切换，立即生效并自动�
 桥接核心与实际 USB 描述符精确匹配，不回退到任意设备。若厂商的 ADB 与 USB 标识不同，
 根据桥接日志列出的候选 USB 序列号手动修正。未开启 USB 调试时可选择手动模式填写序列号和宽高。
 Windows 原生 ADB USB 后端可能返回 `unknown` 路径，此时继续读取尺寸，并由桥接核心核对 USB 标识。
+
+### Windows 蓝牙连接（实验性）
+
+构建时同时开启 `-DBUILD_GUI=ON -DBUILD_BLE_WIN=ON`，GUI 的「连接方式」即可选择
+「低功耗蓝牙（Windows，实验性）」。默认 USB 构建和 macOS 不显示该选项。
+
+1. 填写 Windows 报告的目标手机 BLE 地址与屏幕宽高；地址不是电脑适配器地址。
+   `BluetoothLE#BluetoothLE<电脑地址>-<手机地址>` 中取最后一段手机地址。
+2. 配置自动启动或已有 Deskflow 服务，点击「连接」，再从手机蓝牙设置配对/连接电脑。
+   无需 ADB 或 USB 调试；使用默认蓝牙适配器和绝对指针，不提供 Linux 隔离或常驻服务操作。
+3. 手机身份、配对和键鼠订阅就绪，且 Deskflow 完整握手后才显示「已连接」。同进程内
+   手机或 Deskflow 掉线会等待重新连接；配对等待期间可点「断开」取消。
+4. 点击「断开」只关闭 Deskflow 会话：丢弃未发送动作、等待释放报告处理后，保留同一
+   Windows GATT 进程与订阅。保持 GUI 运行，再点「连接」复用服务，也可更新地址、屏幕名和尺寸。
+   关闭窗口隐藏到托盘同样保留服务；「停止空闲蓝牙服务」或「退出」才停止该 GUI 创建的 GATT。
+   换手机/桥接程序前需显式停止旧服务。与 Linux 不同，GUI 退出后不保留独立常驻服务，
+   进程/系统重启仍可能遇到手机 GATT 缓存问题，不保证任意重启免重配。
+   不要与独立原型或 CLI 后台实例同时使用。
+
+此接入不代表连续输入、重连、休眠或重启的真机验收完成，详见
+[Windows BLE 用法与限制](docs/WINDOWS_BLE.md)。
 
 ### 插入 USB 自动连接（无需 USB 调试）
 

@@ -1,8 +1,8 @@
-# Windows BLE CLI（实验性）
+# Windows BLE CLI / GUI（实验性）
 
 Windows 原生 GATT Server 将电脑作为 BLE HID 键盘 + 绝对指针外设，手机作为主机。
 不需要手机 App、ADB 或 USB 调试。此后端接入现有 Deskflow 协议与 bridge 状态机，
-不是把终端输入字符转发到手机；暂不支持 GUI、常驻服务或 Linux 蓝牙隔离选项。
+不是把终端输入字符转发到手机；支持 GUI 管理的桥接进程，但不支持 Linux 常驻服务或蓝牙隔离选项。
 
 独立原型的 nova 9 手动测试已通过，见
 [`experiments/windows-ble-hid/README.md`](../experiments/windows-ble-hid/README.md)。
@@ -25,7 +25,37 @@ ctest --test-dir build-win-ble -C Release --output-on-failure
 
 产物：`build-win-ble/Release/deskflow-otg.exe`。
 Windows CI 也编译此 CLI 后端并执行不访问蓝牙的回归测试。
-`BUILD_FEATURES.json` 的 `windowsBleCli` 表示此特性；原有 `ble` 仍指 Linux 常驻/GUI 后端。
+`BUILD_FEATURES.json` 的 `windowsBleCli` 为兼容保留的特性标记，也适用于 GUI 的 Windows 后端；
+原有 `ble` 仍指 Linux 常驻后端。
+
+### GUI 构建与使用
+
+安装 Qt 6.8+ 后，在上述配置中改用 `-DBUILD_GUI=ON`，并通过 `-DCMAKE_PREFIX_PATH`
+指定 Qt 前缀。启动 `build-win-ble/Release/deskflow-otg-gui.exe`，选择
+「低功耗蓝牙（Windows，实验性）」，填写手机地址与屏幕尺寸即可连接。GUI 可自动配置并
+启动自己管理的 Deskflow server，也可使用已有的明文 server；蓝牙模式不调用 ADB、不自动连接 USB。
+
+GUI 使用 `--gui --gui-ble-control --transport ble --ble-peer MAC` 前台子进程，不传 `--adapter`、
+`--ble-session`、隔离/提权或 `--background` 参数。等待配对无固定超时，可随时点「断开」取消；
+身份/订阅就绪并完成 Deskflow DSOP 后才显示已连接，手机掉线时显示等待重连。
+「断开」通过 stdin 发 `pause`：先关闭 Deskflow TCP，再丢弃未发动作，把键盘、按钮与范围
+释放排在已有在途通知后面。确认队列/在途通知处理完（或手机已失联）才回 `ble-idle`，GUI 才恢复空闲。
+同一 GATT provider、特征和订阅一直保留；空闲时不重连 Deskflow、不接受新输入。
+下次「连接」发 `resume<TAB>host<TAB>port<TAB>screen<TAB>width<TAB>height`（换行结束），
+复用该进程，并可更新服务器/屏幕名/尺寸，不重新注册 HID。协议有长度、状态与数值校验，
+只通过 GUI 私有的子进程 stdin 使用，不能改变目标手机或 HID 描述符。普通 `--gui` 仍为任意字节停止。
+释放/控制超时（8 秒）会失败关闭自己的 provider，日志明确提示 GATT 连续性丢失，不假报成功保留。
+释放是尽力而为，手机失联或驱动错误时不能保证送达。
+
+关闭窗口隐藏到托盘不停止桥接（无托盘时关闭仍退出）。「停止空闲蓝牙服务」或「退出」才
+停止 GUI 自己的 provider 并注销 GATT，stdin EOF/父 GUI 崩溃也会退出，避免孤儿进程。
+GUI 退出后不保留 Linux 风格的独立常驻服务，也不停止其他 CLI/原型进程。
+目标身份在 provider 生命周期中固定，换手机或桥接程序须先显式停止旧服务，不能静默重建。
+临时切到 USB 不停止空闲的 Windows provider，但退出 GUI 时会一并停止。
+进程重启可能触发 Android 缓存恢复，不能承诺免重配；开始前请显式停止其他 BLE 原型或后台实例。
+GUI 参数、状态和停止流程有离线模拟测试；真实 `main.c` + bridge + fake BLE/Deskflow
+回归验证重复会话只创建一次 provider、释放确认、配置更新、USB 切换、显式停止、超时关闭与
+活动/空闲/等待配对时 EOF。它不访问真实蓝牙，不能代替手机连续输入与重连验收。
 
 ## 配置 Deskflow
 
@@ -69,8 +99,10 @@ Windows CI 也编译此 CLI 后端并执行不访问蓝牙的回归测试。
 也不改变配对或删除手机缓存。
 
 把示例 MAC 替换为自己的手机地址；宽高按手机当前方向填写。
-只支持默认适配器和默认 absolute 指针；不接受 `--adapter`、`--serial`、`--gui`、
+只支持默认适配器和默认 absolute 指针；不接受 `--adapter`、`--serial`、
 `--mouse-mode relative`、`--ble-service`、`--ble-session` 或隔离/恢复选项。
+`--gui` 供桌面端使用，stdin 任意字节或 EOF 请求优雅退出，stdout 输出 JSON 状态；
+它不能与 CLI 的 `--background` 合用。
 
 1. 在手机蓝牙设置连接/配对电脑，确认配对提示。首次从原型迁移时 Windows 的 GATT
    动态句柄可能改变；若手机保留旧缓存而无法订阅，才单独解除这对实验配对后重新配对。

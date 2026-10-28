@@ -18,6 +18,42 @@ Session::Session(QObject *parent) : QObject(parent)
     m_deadline.setSingleShot(true);
     m_killBridge.setSingleShot(true);
     m_killServer.setSingleShot(true);
+    m_killBle.setSingleShot(true);
+    connect(&m_killBle, &QTimer::timeout, this, [this] {
+        if (!m_shutdown && !m_stoppingBleProvider) {
+            m_failureId = "otg.ble.pause_failed";
+            emit log(qtTrId("otg.ble.pause_failed"));
+        }
+        m_bleProvider.kill(); // Only this GUI's provider, never another CLI.
+    });
+    connect(&m_bleProvider, &QProcess::started, this, [this] {
+        emit bleProviderChanged();
+        if (m_shutdown || m_stoppingBleProvider) endBleProvider();
+        else if (m_state == State::Stopping) m_bleProvider.write("pause\n");
+    });
+    connect(&m_bleProvider, &QProcess::readyReadStandardOutput, this, &Session::readBleEvents);
+    connect(&m_bleProvider, &QProcess::readyReadStandardError, this, [this] {
+        emit log(qtTrId("otg.log.bridge_prefix") + QString::fromUtf8(m_bleProvider.readAllStandardError()).trimmed());
+    });
+    connect(&m_bleProvider, &QProcess::errorOccurred, this, [this](QProcess::ProcessError e) {
+        if (e == QProcess::FailedToStart) {
+            m_bleActive = false;
+            fail("otg.error.bridge_start", m_bleProvider.errorString());
+            stopServer();
+            emit bleProviderChanged();
+        }
+    });
+    connect(&m_bleProvider, &QProcess::finished, this, [this](int code, QProcess::ExitStatus) {
+        m_killBle.stop();
+        readBleEvents();
+        const bool wasActive = m_bleActive;
+        m_bleActive = false;
+        m_blePeer.clear();
+        if (wasActive && m_state != State::Stopping) fail("otg.error.bridge_exited", QString::number(code));
+        if (wasActive || m_state == State::Stopping) stopServer();
+        else emit log(qtTrId("otg.ble.provider_ended"));
+        emit bleProviderChanged();
+    });
     m_retry.setInterval(250);
     connect(&m_deadline, &QTimer::timeout, this, [this] {
         fail("otg.error.connection_timeout");
@@ -97,6 +133,15 @@ QString Session::statusMessage() const
     return message.contains("%1") ? message.arg(m_statusDetail) : message;
 }
 
+bool Session::windowsBle() const
+{
+#if defined(Q_OS_WIN) && defined(OTG_GUI_HAVE_BLE_WIN)
+    return m_options.transport == "ble";
+#else
+    return false;
+#endif
+}
+
 void Session::setState(State state, const char *id, const QString &detail)
 {
     m_state = state;
@@ -109,6 +154,7 @@ void Session::start(const ConnectionOptions &options)
 {
     if (m_state != State::Idle)
         return;
+    m_shutdown = false;
     m_options = options;
     m_failureId.clear();
     m_failureDetail.clear();
@@ -116,29 +162,47 @@ void Session::start(const ConnectionOptions &options)
     ++m_generation;
     setState(State::Starting, "otg.status.connecting");
     const bool ble = options.transport == "ble";
-    static const QRegularExpression adapterPattern("^hci[0-9]{1,5}$");
     static const QRegularExpression peerPattern("^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$");
     if ((!ble && options.serial.isEmpty()) ||
         (options.transport != "usb" && !ble) ||
-        (ble && (!adapterPattern.match(options.adapter).hasMatch() ||
-                 options.adapter.mid(3).toUInt() >= 65535 ||
-                 !peerPattern.match(options.blePeer).hasMatch() || options.mouseMode != "absolute")) ||
+        (ble && (!peerPattern.match(options.blePeer).hasMatch() || options.mouseMode != "absolute")) ||
         !validScreenName(options.phone) ||
-        options.host.trimmed().isEmpty() || options.port < 1 || options.port > 65535 ||
+        options.host.trimmed().isEmpty() || options.host.contains(QRegularExpression("[\\x00-\\x20\\x7f]")) ||
+        options.host.toUtf8().size() > 1024 || options.phone.toUtf8().size() > 255 ||
+        options.port < 1 || options.port > 65535 ||
         options.width < 1 || options.width > 32767 || options.height < 1 || options.height > 32767) {
         fail("otg.error.invalid_options");
         return;
     }
-#ifndef Q_OS_LINUX
+#if defined(Q_OS_LINUX)
+    static const QRegularExpression adapterPattern("^hci[0-9]{1,5}$");
+    if (ble && (!adapterPattern.match(options.adapter).hasMatch() ||
+                options.adapter.mid(3).toUInt() >= 65535)) {
+        fail("otg.error.invalid_options");
+        return;
+    }
+#elif defined(Q_OS_WIN) && defined(OTG_GUI_HAVE_BLE_WIN)
+    if (ble && (options.bleIsolate || !options.adapter.isEmpty())) {
+        fail("otg.error.invalid_options");
+        return;
+    }
+#else
     if (ble) {
         fail("otg.ble.unsupported");
         return;
     }
 #endif
+    if (windowsBle() && hasBleProvider() &&
+        (m_blePeer.compare(options.blePeer, Qt::CaseInsensitive) != 0 || m_bleProgram != options.bridge)) {
+        fail("otg.ble.provider_target");
+        return;
+    }
+#ifdef Q_OS_LINUX
     if (ble) {
         prepareBle();
         return;
     }
+#endif
     startConnection();
 }
 
@@ -281,7 +345,7 @@ void Session::launchServer(const QString &help)
 
 void Session::launchBridge()
 {
-    if (m_bridge.state() != QProcess::NotRunning)
+    if (!windowsBle() && m_bridge.state() != QProcess::NotRunning)
         return;
     const bool ble = m_options.transport == "ble";
     emit log(qtTrId(ble ? "otg.ble.waiting" : "otg.log.usb_initializing"));
@@ -291,17 +355,36 @@ void Session::launchBridge()
                     "--height", QString::number(m_options.height), "--mouse-mode", m_options.mouseMode};
     if (ble) {
         m_deadline.stop(); // Pairing and desktop authentication are user paced.
-        args << "--transport" << "ble" << "--ble-session" << "--adapter" << m_options.adapter
-             << "--ble-peer" << m_options.blePeer;
+        args << "--transport" << "ble" << "--ble-peer" << m_options.blePeer;
         setState(State::Starting, "otg.ble.waiting");
+#ifdef Q_OS_LINUX
+        args << "--ble-session" << "--adapter" << m_options.adapter;
         if (m_options.bleIsolate) {
             args.prepend(m_options.bridge);
             args << "--ble-isolate";
             m_bridge.start("/usr/bin/pkexec", args);
             return;
         }
+#endif
     } else {
         args << "--serial" << m_options.serial;
+    }
+    if (windowsBle()) {
+        m_bleActive = true;
+        if (hasBleProvider()) {
+            const auto resume = QString("resume\t%1\t%2\t%3\t%4\t%5\n")
+                .arg(m_options.manageServer ? "127.0.0.1" : m_options.host)
+                .arg(m_options.port).arg(m_options.phone).arg(m_options.width).arg(m_options.height).toUtf8();
+            m_bleProvider.write(resume);
+            emit log(qtTrId("otg.ble.provider_reused"));
+        } else {
+            m_bleEvents.clear();
+            m_blePeer = m_options.blePeer;
+            m_bleProgram = m_options.bridge;
+            args << "--gui-ble-control";
+            m_bleProvider.start(m_options.bridge, args);
+        }
+        return;
     }
     m_bridge.start(m_options.bridge, args);
 }
@@ -318,20 +401,50 @@ void Session::readBridgeEvents()
     while ((end = m_events.indexOf('\n')) >= 0) {
         const auto line = m_events.left(end);
         m_events.remove(0, end + 1);
-        const auto object = QJsonDocument::fromJson(line).object();
-        const auto event = object.value("event").toString();
-        if (event == "connected" && m_state == State::Starting) {
-            m_deadline.stop();
-            setState(State::Connected, "otg.status.connected");
-        } else if (event == "disconnected" && m_options.transport == "ble" &&
-                   m_state == State::Connected) {
-            setState(State::Starting, "otg.ble.reconnecting");
-        } else if (event == "usb-ready") {
-            const auto id = object.value("usb-id").toString();
-            if (!id.isEmpty())
-                emit usbAttached(id, m_options.serial);
-            emit log(qtTrId("otg.log.usb_ready"));
+        handleBridgeEvent(QJsonDocument::fromJson(line).object());
+    }
+}
+
+void Session::readBleEvents()
+{
+    m_bleEvents += m_bleProvider.readAllStandardOutput();
+    if (m_bleEvents.size() > 65536) {
+        m_bleEvents.clear();
+        fail("otg.error.bridge_output");
+        endBleProvider();
+        return;
+    }
+    int end;
+    while ((end = m_bleEvents.indexOf('\n')) >= 0) {
+        const auto object = QJsonDocument::fromJson(m_bleEvents.left(end)).object();
+        m_bleEvents.remove(0, end + 1);
+        if (object.value("event") == "ble-idle") {
+            m_bleActive = false;
+            if (!m_shutdown && !m_stoppingBleProvider) {
+                m_killBle.stop();
+                emit log(qtTrId("otg.ble.provider_retained"));
+                if (m_state == State::Stopping) stopServer();
+            }
+        } else if (m_bleActive && windowsBle()) {
+            handleBridgeEvent(object);
         }
+    }
+}
+
+void Session::handleBridgeEvent(const QJsonObject &object)
+{
+    const auto event = object.value("event").toString();
+    if (event == "connected" && m_state == State::Starting) {
+        m_deadline.stop();
+        setState(State::Connected, "otg.status.connected");
+    } else if (event == "disconnected" && m_options.transport == "ble" &&
+               m_state == State::Connected) {
+        setState(State::Starting, "otg.ble.reconnecting");
+    } else if (event == "usb-ready") {
+        const auto id = object.value("usb-id").toString();
+        if (!id.isEmpty())
+            emit usbAttached(id, m_options.serial);
+        emit log(qtTrId("otg.log.usb_ready"));
     }
 }
 
@@ -355,12 +468,51 @@ void Session::stop()
     m_deadline.stop();
     m_probe.abort();
     setState(State::Stopping, "otg.status.disconnecting");
+    if (m_shutdown) endBleProvider();
+    if (windowsBle() && m_bleActive && hasBleProvider()) {
+        if (!m_shutdown) {
+            m_bleProvider.write("pause\n");
+            m_killBle.start(8000);
+        }
+        return;
+    }
     if (m_bridge.state() != QProcess::NotRunning) {
         m_bridge.write("stop\n");
         m_bridge.closeWriteChannel();
         m_killBridge.start(8000);
     } else {
         stopServer();
+    }
+}
+
+void Session::endBleProvider()
+{
+    if (!hasBleProvider()) return;
+    m_bleProvider.write("stop\n");
+    m_bleProvider.closeWriteChannel();
+    m_killBle.start(8000);
+}
+
+void Session::stopBleProvider()
+{
+    if (m_state != State::Idle || !hasBleProvider()) return;
+    m_stoppingBleProvider = true;
+    m_failureId.clear();
+    m_failureDetail.clear();
+    setState(State::Stopping, "otg.status.disconnecting");
+    endBleProvider();
+}
+
+void Session::shutdown()
+{
+    m_shutdown = true;
+    if (m_state == State::Idle && hasBleProvider()) {
+        setState(State::Stopping, "otg.status.disconnecting");
+        endBleProvider();
+    } else if (m_state == State::Stopping) {
+        endBleProvider();
+    } else {
+        stop();
     }
 }
 
@@ -377,9 +529,11 @@ void Session::stopServer()
 
 void Session::finishStop()
 {
-    if (m_bridge.state() != QProcess::NotRunning || m_server.state() != QProcess::NotRunning)
+    if (m_bridge.state() != QProcess::NotRunning || m_server.state() != QProcess::NotRunning ||
+        m_bleActive || ((m_shutdown || m_stoppingBleProvider) && hasBleProvider()))
         return;
     m_killBridge.stop();
     m_killServer.stop();
+    m_stoppingBleProvider = false;
     setState(State::Idle, m_failureId.isEmpty() ? "otg.status.disconnected" : m_failureId.constData(), m_failureDetail);
 }
