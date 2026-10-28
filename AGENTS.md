@@ -173,14 +173,14 @@ for f in platform/linux/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only
 
 - Windows 原生 BLE 为显式开启的实验选项 `-DBUILD_BLE_WIN=ON`，不等同 Linux
   `BUILD_BLE`；同时开启 `BUILD_GUI` 时提供 Windows GUI 连接选项。`platform/windows/ble_win.cpp` 使用 C++20/WinRT；
-  `src/ble_win.h` 暴露 C ABI，桥接核心保持 C11。专用线程管理 GATT/身份核对和单条
+  `platform/windows/ble_win.h` 暴露 C ABI，桥接核心保持 C11。专用线程管理 GATT/身份核对和单条
   在途通知，64 条有界队列仅合并相邻纯移动，按钮/范围/滚轮/键盘保持屏障。
   必须 `--transport ble --ble-peer MAC`、默认适配器和 absolute；不支持 Linux 服务、
   隔离选项。GUI 以 `--gui --gui-ble-control --transport ble --ble-peer MAC` 管理前台桥接，不传 Linux
   `--adapter/--ble-session`，不与 `--background` 合用；隐藏托盘保留进程，退出停止
   自己的 GATT。断开使用有界 stdin `pause`，停止 TCP、丢弃待发动作，等待在途通知与释放报告
   处理完才回 `ble-idle`；空闲保留原 provider/订阅，下次 `resume` 更新 host/port/name/尺寸。
-  `src/ble_win_control.c` 校验协议/状态，目标手机与描述符固定；换目标前显式停止空闲服务。
+  `platform/windows/ble_win_control.c` 校验协议/状态，目标手机与描述符固定；换目标前显式停止空闲服务。
   USB 会话可并存一个空闲 provider；GUI 退出/EOF 才停止，8 秒释放超时失败关闭并提示连续性丢失。
   不保留独立常驻服务、不触碰其他 CLI 实例。`test_ble_win_control` 测试解析，GUI 用真实
   main/bridge + fake BLE/Deskflow 验证创建次数、重复连接、更新参数、释放确认、超时及 EOF，均不访问硬件。

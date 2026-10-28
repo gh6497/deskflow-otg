@@ -654,6 +654,8 @@ platform/
     ble_session.c     常驻 GATT 服务与本地桥接会话
   windows/
     ble_win.cpp       实验性 Windows 原生 BLE HID 后端
+    ble_win.h         Windows BLE 后端的 C 接口
+    ble_win_control.c/.h Windows GUI 的 BLE 会话控制解析器
 gui/
   main_window.cpp     Qt Widgets 界面、ADB 自动识别和设置保存
   session.cpp         Deskflow 配置/启动、桥接状态及进程生命周期
