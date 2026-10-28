@@ -42,7 +42,12 @@
 
 Linux 另提供 **Bluetooth LE HID** 传输，可不接 USB 控制手机。CLI 与 GUI 使用同一
 `deskflow-otg` 程序，常驻 GATT 服务和桥接会话是不同进程，不是额外的可执行程序。
-USB 仍为默认方式；macOS/Windows 暂不提供蓝牙后端。
+USB 仍为默认方式；macOS 暂不提供蓝牙后端。Windows 提供需显式编译开启的
+[实验性 BLE CLI 后端](docs/WINDOWS_BLE.md)（尚未接入 GUI）。
+
+Windows 原生 BLE HID 的独立[最小测试原型](experiments/windows-ble-hid/README.md)
+保留用于逐项真机验证；nova 9 的手动键盘、悬停、点击、拖拽及滚轮已通过，
+不代表连续 Deskflow 输入、重连或所有手机兼容性已验收。
 
 ## 依赖
 

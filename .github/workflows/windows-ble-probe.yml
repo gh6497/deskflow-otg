@@ -1,0 +1,39 @@
+name: Windows BLE HID prototype
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'experiments/windows-ble-hid/**'
+      - '.github/workflows/windows-ble-probe.yml'
+  pull_request:
+    paths:
+      - 'experiments/windows-ble-hid/**'
+      - '.github/workflows/windows-ble-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check descriptor snapshots and HID layouts (no Bluetooth access)
+        run: ./experiments/windows-ble-hid/test-descriptors.ps1
+      - name: Configure standalone probe
+        run: cmake -S experiments/windows-ble-hid -B build-win-ble-probe -A x64
+      - name: Build
+        run: cmake --build build-win-ble-probe --config Release --parallel
+      - name: Packet self-test (no Bluetooth access)
+        run: ctest --test-dir build-win-ble-probe -C Release --output-on-failure
+      - name: Upload test executable and instructions
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-ble-hid-prototype-x64
+          path: |
+            build-win-ble-probe/Release/deskflow-otg-ble-probe.exe
+            experiments/windows-ble-hid/README.md
+            experiments/windows-ble-hid/main.cpp
+            experiments/windows-ble-hid/reports.h
+            experiments/windows-ble-hid/CMakeLists.txt

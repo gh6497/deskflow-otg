@@ -52,7 +52,7 @@ jobs:
         run: cmake -S . -B build -DBUILD_GUI=ON -DOTG_RELEASE_TAG="${{ github.ref_type == 'tag' && github.ref_name || '' }}" -DADB_BUNDLE_DIR="$PWD/adb-bundle/platform-tools" -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-Wall -Wextra -Werror" -DCMAKE_CXX_FLAGS="-Wall -Wextra -Werror"
       - name: Configure Windows with vcpkg
         if: runner.os == 'Windows'
-        run: cmake -S . -B build -DBUILD_GUI=ON -DOTG_RELEASE_TAG="${{ github.ref_type == 'tag' && github.ref_name || '' }}" -DADB_BUNDLE_DIR="$pwd/adb-bundle/platform-tools" -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static
+        run: cmake -S . -B build -DBUILD_GUI=ON -DBUILD_BLE_WIN=ON -DOTG_RELEASE_TAG="${{ github.ref_type == 'tag' && github.ref_name || '' }}" -DADB_BUNDLE_DIR="$pwd/adb-bundle/platform-tools" -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static
       - name: Build
         run: cmake --build build --config Release --parallel
       - name: Test
