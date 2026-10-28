@@ -42,6 +42,10 @@
 
 static volatile sig_atomic_t g_stop = 0;
 static int g_gui = 0;
+#ifdef _WIN32
+static HANDLE g_ble_stop_event = NULL;
+static HANDLE g_ble_instance_mutex = NULL;
+#endif
 
 /* GUI owns stdin. A byte or EOF requests graceful shutdown, including when
  * the parent crashes. PeekNamedPipe avoids blocking on Windows console stdin. */
@@ -104,6 +108,86 @@ static BOOL WINAPI on_console_ctrl(DWORD type)
 }
 #endif
 
+#ifdef _WIN32
+static int windows_ble_stop_background(void)
+{
+    HANDLE event = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"Local\\DeskflowOtgBleStop");
+    if (!event) {
+        fprintf(stderr, "INFO: no Windows BLE background process is running\n");
+        return 1;
+    }
+    SetEvent(event);
+    CloseHandle(event);
+    fprintf(stderr, "INFO: Windows BLE background stop requested\n");
+    return 0;
+}
+
+static int windows_ble_start_background_child(void)
+{
+    const wchar_t *original = GetCommandLineW();
+    size_t length = wcslen(original);
+    size_t extra = wcslen(L" --background-child") + 1;
+    wchar_t *command = HeapAlloc(GetProcessHeap(), 0,
+                                 (length + extra) * sizeof(*command));
+    if (!command) {
+        fprintf(stderr, "ERROR: could not allocate background command line\n");
+        return 1;
+    }
+    memcpy(command, original, length * sizeof(*command));
+    wcscpy(command + length, L" --background-child");
+
+    STARTUPINFOW startup;
+    PROCESS_INFORMATION process;
+    memset(&startup, 0, sizeof(startup));
+    memset(&process, 0, sizeof(process));
+    startup.cb = sizeof(startup);
+    BOOL created = CreateProcessW(NULL, command, NULL, NULL, FALSE,
+                                  CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP,
+                                  NULL, NULL, &startup, &process);
+    HeapFree(GetProcessHeap(), 0, command);
+    if (!created) {
+        fprintf(stderr, "ERROR: could not start Windows BLE background process (%lu)\n",
+                (unsigned long)GetLastError());
+        return 1;
+    }
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    fprintf(stderr, "INFO: Windows BLE is now running in the background\n");
+    return 0;
+}
+
+static int windows_ble_background_init(void)
+{
+    g_ble_instance_mutex = CreateMutexW(NULL, TRUE, L"Local\\DeskflowOtgBleInstance");
+    if (!g_ble_instance_mutex) {
+        fprintf(stderr, "ERROR: could not create Windows BLE instance mutex\n");
+        return 0;
+    }
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+        fprintf(stderr, "ERROR: Windows BLE background process is already running\n");
+        CloseHandle(g_ble_instance_mutex);
+        g_ble_instance_mutex = NULL;
+        return 0;
+    }
+    g_ble_stop_event = CreateEventW(NULL, TRUE, FALSE, L"Local\\DeskflowOtgBleStop");
+    if (!g_ble_stop_event) {
+        fprintf(stderr, "ERROR: could not create Windows BLE stop event\n");
+        CloseHandle(g_ble_instance_mutex);
+        g_ble_instance_mutex = NULL;
+        return 0;
+    }
+    return 1;
+}
+
+static void windows_ble_background_cleanup(void)
+{
+    if (g_ble_stop_event) CloseHandle(g_ble_stop_event);
+    if (g_ble_instance_mutex) CloseHandle(g_ble_instance_mutex);
+    g_ble_stop_event = NULL;
+    g_ble_instance_mutex = NULL;
+}
+#endif
+
 static void usage(const char *prog)
 {
     fprintf(stderr,
@@ -121,9 +205,11 @@ static void usage(const char *prog)
              "      --ble-isolate     Linux: sudo native BLE-only supervisor; restores on exit\n"
              "      --ble-restore     Linux: recover saved adapter settings without Python\n"
              "      --ble-service     Linux: resident user GATT service (keep running)\n"
-             "      --ble-session     Linux: BLE bridge via an existing resident service\n"
-             "      --ble-peer MAC    Target phone identity (Linux) / Windows BLE address (required)\n"
-             "      --ble-status      Read resident service JSON status without attaching\n"
+              "      --ble-session     Linux: BLE bridge via an existing resident service\n"
+              "      --ble-peer MAC    Target phone identity (Linux) / Windows BLE address (required)\n"
+              "      --background       Windows BLE: keep the provider alive after closing the console\n"
+              "      --background-stop  Stop the Windows BLE background process\n"
+              "      --ble-status      Read resident service JSON status without attaching\n"
              "      --ble-stop-service Stop an idle user service (loses GATT subscription continuity)\n"
             "      --width W         Virtual screen width, 1..32767 (default %d)\n"
             "      --height H        Virtual screen height, 1..32767 (default %d)\n"
@@ -281,6 +367,9 @@ static void destroy_transport_owner(app_state *s)
         otg_ble_win_destroy(s->transport_owner);
         s->transport_owner = NULL;
     }
+#ifdef _WIN32
+    windows_ble_background_cleanup();
+#endif
 #else
     (void)s;
 #endif
@@ -291,6 +380,12 @@ static app_state *ble_app;
 static int ble_stop_check(void)
 {
     if (g_stop || (g_gui && gui_stop_check())) return 1;
+#ifdef _WIN32
+    if (g_ble_stop_event && WaitForSingleObject(g_ble_stop_event, 0) == WAIT_OBJECT_0) {
+        g_stop = 1;
+        return 1;
+    }
+#endif
     if (!ble_app || !otg_bridge_check(&ble_app->bridge)) return 1;
 #ifdef OTG_HAVE_BLE_WIN
     /* The phone was ready before TCP connect; losing it during the handshake
@@ -336,6 +431,9 @@ int main(int argc, char **argv)
     const char *ble_peer = NULL;
     int ble_isolate = 0, ble_restore = 0;
     int ble_service = 0, ble_session = 0, ble_status = 0, ble_stop_service = 0;
+#ifdef _WIN32
+    int background = 0, background_child = 0, background_stop = 0;
+#endif
     unsigned port = DEFAULT_PORT;
     int width = DEFAULT_WIDTH;
     int height = DEFAULT_HEIGHT;
@@ -391,6 +489,15 @@ int main(int argc, char **argv)
             ble_stop_service = 1;
         } else if (strcmp(a, "--ble-peer") == 0 && i + 1 < argc) {
             ble_peer = argv[++i];
+#ifdef _WIN32
+        } else if (strcmp(a, "--background") == 0) {
+            background = 1;
+        } else if (strcmp(a, "--background-child") == 0) {
+            background = 1;
+            background_child = 1;
+        } else if (strcmp(a, "--background-stop") == 0) {
+            background_stop = 1;
+#endif
         } else if (strcmp(a, "--width") == 0 && i + 1 < argc) {
             width = parse_screen_size(argv[++i]);
         } else if (strcmp(a, "--height") == 0 && i + 1 < argc) {
@@ -418,6 +525,16 @@ int main(int argc, char **argv)
         fprintf(stderr, "screen width and height must be integers in 1..32767\n");
         return 2;
     }
+
+#ifdef _WIN32
+    if (background_stop) {
+        if (argc != 2) {
+            fprintf(stderr, "ERROR: --background-stop takes no other arguments\n");
+            return 2;
+        }
+        return windows_ble_stop_background();
+    }
+#endif
 
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
@@ -460,6 +577,18 @@ int main(int argc, char **argv)
         fprintf(stderr, "ERROR: Windows BLE supports CLI, default adapter and absolute pointer only; Linux service/isolation options, --serial and --gui are unsupported\n");
         return 2;
     }
+#ifdef _WIN32
+    if (background && strcmp(transport, "ble") != 0) {
+        fprintf(stderr, "ERROR: --background is supported only with Windows BLE\n");
+        return 2;
+    }
+    if (background && !background_child) {
+        return windows_ble_start_background_child();
+    }
+    if (background_child && !windows_ble_background_init()) {
+        return 1;
+    }
+#endif
 #endif
     if(ble_status || ble_stop_service) {
         if((ble_status && ble_stop_service) || ble_service || ble_session || ble_isolate || ble_restore || g_gui || serial)return 2;
