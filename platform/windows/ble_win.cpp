@@ -271,6 +271,7 @@ class Service {
     uint64_t sent_keyboard = 0, sent_pointer = 0;
     hstring peer_id;
     Clock::time_point pairing_refresh{};
+    Clock::time_point advertisement_retry{};
     bool paired = false;
     BluetoothLEDevice::ConnectionParametersChanged_revoker parameters_changed;
 
@@ -314,6 +315,39 @@ class Service {
 
 public:
     explicit Service(std::shared_ptr<State> state) : s(std::move(state)) {}
+
+    void ensure_advertising()
+    {
+        const auto status = provider.AdvertisementStatus();
+        if (status == GattServiceProviderAdvertisementStatus::Started ||
+            status == GattServiceProviderAdvertisementStatus::StartedWithoutAllAdvertisementData)
+            return;
+
+        // Windows can transiently report Aborted while an advertisement is
+        // being replaced (notably when a central connects).  Do not tear down
+        // the GATT provider in that window: retry the advertisement instead.
+        if (status != GattServiceProviderAdvertisementStatus::Aborted &&
+            status != GattServiceProviderAdvertisementStatus::Stopped)
+            return;
+        // StartAdvertising is asynchronous.  In particular, Windows may
+        // briefly expose Aborted before the initial request reaches Started;
+        // calling StartAdvertising again immediately fails with
+        // RPC_E_WRONG_THREAD/invalid timing ("called at an unexpected time").
+        // Give the original request time to settle before retrying.
+        const auto now = Clock::now();
+        if (now < advertisement_retry) return;
+        advertisement_retry = now + 500ms;
+        GattServiceProviderAdvertisingParameters advertising;
+        advertising.IsConnectable(true);
+        advertising.IsDiscoverable(true);
+        log("WARN", "BLE advertisement stopped; restarting it");
+        try {
+            provider.StartAdvertising(advertising);
+        } catch (const hresult_error& e) {
+            log("WARN", "BLE advertisement restart deferred: " + describe(e));
+        }
+    }
+
     ~Service()
     {
         connection_changed.revoke();
@@ -372,8 +406,10 @@ public:
         provider.AdvertisementStatusChanged([state](auto const&, auto const& args) {
             log("INFO", "advertisement status=" + std::to_string(static_cast<int>(args.Status())) +
                 " BluetoothError=" + std::to_string(static_cast<int>(args.Error())));
-            if (!state->stopping && args.Error() != BluetoothError::Success)
-                fail(state, "advertisement failed");
+            // Aborted is a transient status on some Windows Bluetooth
+            // drivers.  The worker checks the status and restarts advertising;
+            // failing the transport here makes the PC disappear from scans.
+            (void)state;
         });
         GattServiceProviderAdvertisingParameters advertising;
         advertising.IsConnectable(true);
@@ -643,6 +679,7 @@ static void worker(const std::shared_ptr<State>& s)
                 while (!s->stopping) {
                     try {
                         if (Clock::now() >= next_refresh) {
+                            service.ensure_advertising();
                             service.refresh();
                             next_refresh = Clock::now() + 100ms;
                         }
