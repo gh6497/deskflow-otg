@@ -48,6 +48,26 @@ Windows CI 也编译此 CLI 后端并执行不访问蓝牙的回归测试。
   --host 127.0.0.1 --port 24800 --name android --width 1080 --height 2340
 ```
 
+如果希望关闭 PowerShell/命令行后仍保持同一个 GATT provider（避免 Android 下次连接时
+丢失 HID 订阅），使用 `--background`：
+
+```powershell
+.\build-win-ble\Release\deskflow-otg.exe --transport ble `
+  --ble-peer AA:BB:CC:DD:EE:FF `
+  --host 127.0.0.1 --port 24800 --name android --width 1080 --height 2340 `
+  --background
+```
+
+父命令会立即返回，后台子进程继续持有 GATT 服务并在 Deskflow/手机暂时断开后重试连接。
+同一用户只允许一个后台实例；停止时使用：
+
+```powershell
+.\build-win-ble\Release\deskflow-otg.exe --background-stop
+```
+
+`--background-stop` 会请求后台进程优雅释放 HID 输入、停止广播并退出。后台模式不接入 GUI，
+也不改变配对或删除手机缓存。
+
 把示例 MAC 替换为自己的手机地址；宽高按手机当前方向填写。
 只支持默认适配器和默认 absolute 指针；不接受 `--adapter`、`--serial`、`--gui`、
 `--mouse-mode relative`、`--ble-service`、`--ble-session` 或隔离/恢复选项。
