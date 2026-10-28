@@ -66,8 +66,14 @@ Windows CI 也编译此 CLI 后端并执行不访问蓝牙的回归测试。
 - WinRT 服务、设备身份检查、通知完成等待均在专用工作线程，Deskflow 回调只入队。
 - 队列最多 64 条；仅相邻且同按钮/范围状态的纯移动可合并。首次位置、按下/松开、
   键盘、滚轮及其清零、In Range 变化均作为顺序屏障保留。
-- 当前排障版所有通知统一至少间隔 30ms（包括键盘和范围/按钮屏障），降低切屏时的突发压力；
-  顺序仍保留，不丢弃状态屏障。此值是保守实验参数，不是实测连接间隔，可能增加输入延迟。
+- 默认通知间隔为 30ms（包括键盘和范围/按钮屏障），用于 Windows 10 或无法读取链路参数
+  的驱动；顺序仍保留，不丢弃状态屏障。Windows 11 会在可用时改用实测协商间隔。
+- Windows 11 如果系统暴露已协商的 LE connection interval，通知节流会跟随该间隔，并在
+  `ConnectionParametersChanged` 时更新；Windows 10 或驱动不支持时回退到 30ms。状态屏障
+  仍与指针移动共享同一顺序队列，不会因自适应节流而丢失。
+- HID 服务补充 `Protocol Mode`（当前固定 Report Protocol；Boot Protocol 会明确拒绝）、
+  `HID Information` 的 `RemoteWake | NormallyConnectable` flags，以及只读 Battery
+  Service（100%）。这些是兼容性补全，不改变当前绝对 Digitizer 报告格式。
 - 同时需要键盘和指针各一个订阅者，必须是同一个在线、已配对、匹配目标地址的手机。
   多订阅者/身份不匹配时关闭输入，通知只定向发给已验证目标。
 - 订阅变化、断线、挂起会撤销 ready、清空待发事件；主循环断开 Deskflow TCP、重置
