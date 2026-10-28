@@ -1,6 +1,6 @@
 /* Real D-Bus dispatch on a private bus, not system Bluetooth.
  * SPDX-License-Identifier: Apache-2.0 */
-#include "../src/ble_hid.c"
+#include "../platform/linux/ble_hid.c"
 
 #define CHECK(x) do {if(!(x)){fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x);exit(1);}} while(0)
 struct mock_bluez {

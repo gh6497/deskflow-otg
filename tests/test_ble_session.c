@@ -1,6 +1,6 @@
 /* Real Unix seqpacket IPC, fake HID backend; no root or system Bluetooth.
  * SPDX-License-Identifier: Apache-2.0 */
-#include "../src/ble_session.c"
+#include "../platform/linux/ble_session.c"
 #include <sys/wait.h>
 static volatile sig_atomic_t stop_service;
 static void stop_signal(int signal_number){(void)signal_number;stop_service=1;}

@@ -1,4 +1,4 @@
-/* Windows BLE HID feasibility probe; HOGP layout follows src/ble_hid.c.
+/* Windows BLE HID feasibility probe; HOGP layout follows platform/linux/ble_hid.c.
  * Not a Deskflow backend. SPDX-License-Identifier: Apache-2.0 */
 #include "reports.h"
 #include <winrt/Windows.Foundation.h>

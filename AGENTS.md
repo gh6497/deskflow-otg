@@ -43,7 +43,8 @@ sudo ./build/deskflow-otg --host 127.0.0.1 --port 24800 --name android \
 CMakeLists.txt 用 `find_path`/`find_library` 直接找 libusb，**不依赖 pkg-config**。
 支持 Linux 和 macOS；macOS 默认查找 `/opt/homebrew`、`/usr/local` 及 libusb opt 前缀，
 自定义路径可用 `-DCMAKE_PREFIX_PATH=...`。macOS 通常不需要 sudo，也不使用 udev。
-程序源码在 `src/*.c`，回归测试在 `tests/`，没有第三方 vendored 代码。
+共享程序源码在 `src/*.c`，Linux 专用源码与头文件在 `platform/linux/`，
+Windows 后端在 `platform/windows/`，回归测试在 `tests/`，没有第三方 vendored 代码。
 
 ## 源码结构（每个文件干什么）
 
@@ -164,6 +165,8 @@ sh /tmp/opencode/mouse-regression/run.sh
 
 ```bash
 for f in src/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only -Isrc -Ibuild/generated "$f"; done
+# Linux BLE 后端（需要 GLib/GIO 开发包）
+for f in platform/linux/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only -Isrc $(pkg-config --cflags gio-2.0) "$f"; done
 ```
 
 ## 约束与已知限制
@@ -192,8 +195,8 @@ for f in src/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only -Isrc -Ibu
   配对时蓝牙崩溃，未修改手机配置。用法与限制见 `docs/WINDOWS_BLE.md`。
 
 - Linux BLE 实验后端通过 `sudo deskflow-otg --transport ble --ble-isolate` 原生启动，
-  不依赖 Python。`src/ble_supervisor.c` 使用 Linux MGMT API 快照/隔离/核对恢复，
-  通过 `/usr/sbin/runuser` 降权运行自己的桥接子进程；父进程用 `src/ble_link.c` 监控 HCI。
+  不依赖 Python。`platform/linux/ble_supervisor.c` 使用 Linux MGMT API 快照/隔离/核对恢复，
+  通过 `/usr/sbin/runuser` 降权运行自己的桥接子进程；父进程用 `platform/linux/ble_link.c` 监控 HCI。
   桥接通过继承的 Unix datagram FD（`OTG_BLE_LATENCY_FD`）传递订阅就绪
   与实测连接间隔。只对唯一、已加密、本机为 peripheral 的已观测 LE 连接请求 7.5～15ms；
   HCI Command Status 成功不等于参数已更新，必须等待 LE Connection Update Complete。
@@ -215,7 +218,7 @@ for f in src/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only -Isrc -Ibu
   构建/模拟不等于真机免重配或硬件恢复验证完成，仍需用户实测确认。
   新实验路径：普通用户前台 `--ble-service --adapter hciN` 保持 GATT 注册，
   桥接通过 `--transport ble --ble-session` 接入，可叠加 `--ble-isolate`。
-  `src/ble_session.c` 使用私有 Unix seqpacket、双方 UID/版本/包长核对和独占会话；
+  `platform/linux/ble_session.c` 使用私有 Unix seqpacket、双方 UID/版本/包长核对和独占会话；
   断开/EOF/5 秒无 IPC 释放输入、停广告、恢复名称，不注销 GATT。父进程在模式恢复前
   通过只读状态检查空闲；失败保留快照。仅支持 absolute、固定描述符，禁止伪造 CCC。
   服务终止/BlueZ 或主机重启后不保证 CCC 连续性，不能声称任意重启已免重配。

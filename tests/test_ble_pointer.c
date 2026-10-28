@@ -1,6 +1,6 @@
 /* Offline BLE coalescing tests: no system bus or adapter access.
  * SPDX-License-Identifier: Apache-2.0 */
-#include "../src/ble_hid.c"
+#include "../platform/linux/ble_hid.c"
 
 #define CHECK(condition) do { \
     if (!(condition)) { \

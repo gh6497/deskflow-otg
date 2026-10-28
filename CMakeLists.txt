@@ -94,7 +94,13 @@ if(BUILD_BLE)
   endif()
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(GLIB REQUIRED IMPORTED_TARGET gio-2.0)
-  target_sources(deskflow-otg PRIVATE src/ble_hid.c src/ble_supervisor.c src/ble_link.c src/ble_session.c)
+  target_sources(deskflow-otg PRIVATE
+    platform/linux/ble_hid.c
+    platform/linux/ble_supervisor.c
+    platform/linux/ble_link.c
+    platform/linux/ble_session.c
+  )
+  target_include_directories(deskflow-otg PRIVATE platform/linux)
   target_link_libraries(deskflow-otg PRIVATE PkgConfig::GLIB)
   target_compile_definitions(deskflow-otg PRIVATE OTG_HAVE_BLE=1)
 endif()
@@ -158,7 +164,7 @@ if(BUILD_TESTING)
     target_include_directories(test_ble_pointer PRIVATE src ${LIBUSB_INCLUDE_DIR})
     target_link_libraries(test_ble_pointer PRIVATE PkgConfig::GLIB)
     add_test(NAME ble_pointer COMMAND test_ble_pointer)
-    add_executable(test_ble_supervisor tests/test_ble_supervisor.c src/ble_link.c)
+    add_executable(test_ble_supervisor tests/test_ble_supervisor.c platform/linux/ble_link.c)
     target_include_directories(test_ble_supervisor PRIVATE src)
     target_link_libraries(test_ble_supervisor PRIVATE PkgConfig::GLIB)
     add_test(NAME ble_supervisor COMMAND test_ble_supervisor)

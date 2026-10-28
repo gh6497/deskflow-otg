@@ -67,10 +67,10 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/bridge.h/.c` | `otg_hid_transport_ops`，默认 AOA 适配器、共享描述符/报告编码、输入复位 |
-| `src/ble_hid.h/.c` | GIO/BlueZ GATT、广告、HID 报告、Device1 在线/配对状态、坐标合并与 IPC |
-| `src/ble_supervisor.h/.c` | 原生 root 隔离父进程，MGMT 快照/切换/核对恢复、runuser 子进程、锁 |
-| `src/ble_link.h/.c` | root 父进程的 HCI 连接/加密/更新事件监控、低延迟请求及实际间隔通知 |
-| `src/ble_session.h/.c` | 普通用户常驻 GATT 服务、私有 Unix IPC 会话、EOF/lease 清理及空闲状态检查 |
+| `platform/linux/ble_hid.h/.c` | GIO/BlueZ GATT、广告、HID 报告、Device1 在线/配对状态、坐标合并与 IPC |
+| `platform/linux/ble_supervisor.h/.c` | 原生 root 隔离父进程，MGMT 快照/切换/核对恢复、runuser 子进程、锁 |
+| `platform/linux/ble_link.h/.c` | root 父进程的 HCI 连接/加密/更新事件监控、低延迟请求及实际间隔通知 |
+| `platform/linux/ble_session.h/.c` | 普通用户常驻 GATT 服务、私有 Unix IPC 会话、EOF/lease 清理及空闲状态检查 |
 | `src/main.c` | 新 CLI 参数、BLE 等待与 Deskflow TCP 重连；USB 仍使用原有单次连接流程 |
 | `src/deskflow_client.h/.c` | `on_tick`、可配置 poll 间隔，持续 TCP 流量期间也驱动 BLE 事件泵 |
 | `scripts/ble_latency.py` | 历史 Python 隔离入口的参数监控实现，仅兼容/测试参考；原生入口不加载它 |
@@ -110,7 +110,7 @@
 - 正常退出/可捕获信号触发恢复。普通桥接子进程 SIGKILL 后，存活的常驻服务/父进程可清理；
   root supervisor 自身 SIGKILL、断电不能自动清理；`/run` 不跨重启持久化。
 - `--ble-restore` 仅识别原生 `.state`，不读取旧 Python 实验脚本的 JSON 文件。
-- `src/ble_link.c` 仅对唯一、已加密、本机为 peripheral 的已观测 LE 链路请求 7.5～15ms。
+- `platform/linux/ble_link.c` 仅对唯一、已加密、本机为 peripheral 的已观测 LE 链路请求 7.5～15ms。
   通过专用 Unix datagram FD 传递 `ready:hciN` 和实测间隔，不接受子进程指定 HCI 命令/句柄。
 - Command Status 成功只表示请求被接受；必须看到 LE Connection Update Complete 才能确认
   新参数。拒绝或 5 秒未确认时保留链路，不无限重试。
@@ -247,7 +247,7 @@ sudo ./build/deskflow-otg --ble-restore --adapter hci0
 
 ## 7. 常驻 GATT / 会话分离实现（待切换真机）
 
-用户批准按服务生命周期分离方向实施。新增 `src/ble_session.c/.h`：
+用户批准按服务生命周期分离方向实施。新增 `platform/linux/ble_session.c/.h`：
 
 - `--ble-service`：普通用户前台服务，不隐式安装/后台运行；首次会话才创建 BlueZ GATT，
   空闲时不广告、不修改名称、不发送输入，但保留应用及真实订阅状态。
