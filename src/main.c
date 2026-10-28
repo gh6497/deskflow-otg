@@ -83,6 +83,27 @@ static void on_signal(int sig)
     g_stop = 1;
 }
 
+#ifdef _WIN32
+/* The CRT SIGINT handler is not delivered consistently for every Windows
+ * console host (notably when the process is waiting in WinSock/WinRT code).
+ * Use the native console control path as well; the handler only sets the
+ * async-safe stop flag and all cleanup remains on the main thread. */
+static BOOL WINAPI on_console_ctrl(DWORD type)
+{
+    switch (type) {
+    case CTRL_C_EVENT:
+    case CTRL_BREAK_EVENT:
+    case CTRL_CLOSE_EVENT:
+    case CTRL_LOGOFF_EVENT:
+    case CTRL_SHUTDOWN_EVENT:
+        g_stop = 1;
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+#endif
+
 static void usage(const char *prog)
 {
     fprintf(stderr,
@@ -400,6 +421,11 @@ int main(int argc, char **argv)
 
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
+#ifdef _WIN32
+    if (!SetConsoleCtrlHandler(on_console_ctrl, TRUE)) {
+        fprintf(stderr, "WARN: could not install Windows console control handler\n");
+    }
+#endif
 #ifndef _WIN32
     /* This must precede the supervisor dispatch too: losing the GUI's log
      * pipes must not kill the root process before it restores adapter modes. */
