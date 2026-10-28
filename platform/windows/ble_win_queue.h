@@ -7,8 +7,8 @@
 #include <vector>
 
 namespace otg_ble_win_detail {
-// Conservative initial Windows pacing: every notification, including keyboard
-// and range transitions, shares one budget. Barriers remain ordered, not lost.
+// Fallback for Windows 10 and adapters which do not expose negotiated
+// connection parameters. Windows 11 uses the live interval when available.
 inline constexpr unsigned notification_interval_ms = 30;
 struct Report {
     uint16_t id = 0;

@@ -40,6 +40,8 @@ struct State {
     bool ready = false, failed = false, closing = false, in_flight = false, worker_done = false;
     bool suspended = false;
     uint64_t peer_address = 0, epoch = 0;
+    unsigned notification_interval_ms = otg_ble_win_detail::notification_interval_ms;
+    uint8_t protocol_mode = 1; // Report Protocol; Boot Protocol is not implemented.
     std::string waiting;
     otg_ble_win_detail::Queue queue;
     std::array<uint8_t, 8> keyboard{}, pointer{}, last_mouse{};
@@ -211,10 +213,56 @@ static fire_and_forget write_value(GattWriteRequestedEventArgs args,
     deferral.Complete();
 }
 
+static fire_and_forget write_protocol_mode(GattWriteRequestedEventArgs args,
+    std::shared_ptr<State> s)
+{
+    auto deferral = args.GetDeferral();
+    try {
+        auto request = co_await args.GetRequestAsync();
+        if (request) {
+            uint8_t error = 0;
+            if (!(co_await authorized(args.Session(), s))) error = 0x08;
+            else if (request.Offset() || request.Value().Length() != 1) error = 0x0d;
+            else {
+                auto value = DataReader::FromBuffer(request.Value()).ReadByte();
+                // The bridge only has Report Protocol reports. Do not accept
+                // Boot Protocol and then silently send the wrong packet shape.
+                if (value != 1) error = 0x03; // write not permitted
+                else {
+                    std::lock_guard<std::mutex> lock(s->mutex);
+                    s->protocol_mode = value;
+                }
+            }
+            if (request.Option() == GattWriteOption::WriteWithResponse) {
+                if (error) request.RespondWithProtocolError(error);
+                else request.Respond();
+            }
+        }
+    } catch (const hresult_error& e) { log("WARN", "protocol mode write: " + describe(e)); }
+    deferral.Complete();
+}
+
+static fire_and_forget read_protocol_mode(GattReadRequestedEventArgs args,
+    std::shared_ptr<State> s)
+{
+    auto deferral = args.GetDeferral();
+    try {
+        auto request = co_await args.GetRequestAsync();
+        if (request) {
+            uint8_t mode;
+            { std::lock_guard<std::mutex> lock(s->mutex); mode = s->protocol_mode; }
+            request.RespondWithValue(buffer(std::array<uint8_t, 1>{mode}));
+        }
+    } catch (const hresult_error& e) { log("WARN", "protocol mode read: " + describe(e)); }
+    deferral.Complete();
+}
+
 class Service {
     std::shared_ptr<State> s;
     GattServiceProvider provider{nullptr};
     GattLocalCharacteristic keyboard{nullptr}, pointer{nullptr};
+    GattLocalCharacteristic protocol_mode{nullptr};
+    GattServiceProvider battery_provider{nullptr};
     BluetoothLEDevice peer{nullptr};
     GattSubscribedClient key_client{nullptr}, pointer_client{nullptr};
     BluetoothLEDevice::ConnectionStatusChanged_revoker connection_changed;
@@ -224,6 +272,7 @@ class Service {
     hstring peer_id;
     Clock::time_point pairing_refresh{};
     bool paired = false;
+    BluetoothLEDevice::ConnectionParametersChanged_revoker parameters_changed;
 
     GattLocalCharacteristic characteristic(uint16_t id, GattCharacteristicProperties properties,
         const std::vector<uint8_t>& value = {})
@@ -268,6 +317,7 @@ public:
     ~Service()
     {
         connection_changed.revoke();
+        parameters_changed.revoke();
         if (provider) { try { provider.StopAdvertising(); } catch (...) {} }
     }
 
@@ -281,18 +331,44 @@ public:
             throw std::runtime_error("create HID service: BluetoothError=" +
                 std::to_string(static_cast<int>(result.Error())));
         provider = result.ServiceProvider();
-        characteristic(0x2a4a, GattCharacteristicProperties::Read, {0x11,0x01,0,0x02});
+        characteristic(0x2a4a, GattCharacteristicProperties::Read, {0x11,0x01,0,0x03});
         characteristic(0x2a4b, GattCharacteristicProperties::Read, s->report_map);
+        protocol_mode = characteristic(0x2a4e,
+            GattCharacteristicProperties::Read | GattCharacteristicProperties::WriteWithoutResponse);
+        auto state = s;
+        protocol_mode.ReadRequested([state](auto const&, auto const& args) {
+            read_protocol_mode(args, state);
+        });
+        protocol_mode.WriteRequested([state](auto const&, auto const& args) {
+            write_protocol_mode(args, state);
+        });
         keyboard = input(1, 0);
         pointer = input(2, 1);
         auto led = characteristic(0x2a4d, GattCharacteristicProperties::Read |
             GattCharacteristicProperties::Write | GattCharacteristicProperties::WriteWithoutResponse);
         reference(led, 1, 2);
-        auto state = s;
         led.ReadRequested([state](auto const&, auto const& args) { read_report(args, state, 2); });
         led.WriteRequested([state](auto const&, auto const& args) { write_value(args, state, false); });
         auto control = characteristic(0x2a4c, GattCharacteristicProperties::WriteWithoutResponse);
         control.WriteRequested([state](auto const&, auto const& args) { write_value(args, state, true); });
+        try {
+            auto battery = wait(s, GattServiceProvider::CreateAsync(uuid(0x180f)), "create battery service");
+            if (battery.Error() == BluetoothError::Success) {
+                battery_provider = battery.ServiceProvider();
+                GattLocalCharacteristicParameters parameters;
+                parameters.CharacteristicProperties(GattCharacteristicProperties::Read);
+                parameters.ReadProtectionLevel(GattProtectionLevel::Plain);
+                parameters.StaticValue(buffer(std::array<uint8_t, 1>{100}));
+                auto level = wait(s, battery_provider.Service().CreateCharacteristicAsync(
+                    uuid(0x2a19), parameters), "create battery level");
+                if (level.Error() != BluetoothError::Success)
+                    log("WARN", "create battery level failed: BluetoothError=" +
+                        std::to_string(static_cast<int>(level.Error())));
+            } else {
+                log("WARN", "create battery service failed: BluetoothError=" +
+                    std::to_string(static_cast<int>(battery.Error())));
+            }
+        } catch (const hresult_error& e) { log("WARN", "battery service: " + describe(e)); }
         provider.AdvertisementStatusChanged([state](auto const&, auto const& args) {
             log("INFO", "advertisement status=" + std::to_string(static_cast<int>(args.Status())) +
                 " BluetoothError=" + std::to_string(static_cast<int>(args.Error())));
@@ -350,11 +426,47 @@ public:
                 connection_changed = peer.ConnectionStatusChanged(auto_revoke,
                     [state, key_session, mouse_session](auto const& device, auto const&) {
                         if (device.ConnectionStatus() != BluetoothConnectionStatus::Connected) {
+                            {
+                                std::lock_guard<std::mutex> lock(state->mutex);
+                                state->notification_interval_ms =
+                                    otg_ble_win_detail::notification_interval_ms;
+                            }
                             log("INFO", "device ConnectionStatus=disconnected; observed sessions keyboard=" +
                                 session_text(key_session) + " pointer=" + session_text(mouse_session));
                             invalidate(state, "phone disconnected", true);
                         }
                     });
+                try {
+                    parameters_changed = peer.ConnectionParametersChanged(auto_revoke,
+                        [state](auto const& device, auto const&) {
+                            try {
+                                const auto parameters = device.GetConnectionParameters();
+                                if (!parameters.ConnectionInterval()) return;
+                                const auto ms = static_cast<unsigned>(
+                                    (static_cast<uint32_t>(parameters.ConnectionInterval()) * 125 + 99) / 100);
+                                if (ms == 0) return;
+                                {
+                                    std::lock_guard<std::mutex> lock(state->mutex);
+                                    state->notification_interval_ms = ms;
+                                }
+                                log("INFO", "BLE negotiated connection interval=" + std::to_string(ms) + "ms");
+                            } catch (const hresult_error& e) {
+                                log("WARN", "connection parameters: " + describe(e));
+                            }
+                        });
+                    const auto parameters = peer.GetConnectionParameters();
+                    if (parameters.ConnectionInterval()) {
+                        const auto ms = static_cast<unsigned>(
+                            (static_cast<uint32_t>(parameters.ConnectionInterval()) * 125 + 99) / 100);
+                        {
+                            std::lock_guard<std::mutex> lock(s->mutex);
+                            s->notification_interval_ms = ms;
+                        }
+                        log("INFO", "BLE negotiated connection interval=" + std::to_string(ms) + "ms");
+                    }
+                } catch (const hresult_error& e) {
+                    log("INFO", "negotiated BLE interval unavailable; using 30ms fallback: " + describe(e));
+                }
             }
         }
         if (!peer) {
@@ -550,8 +662,9 @@ static void worker(const std::shared_ptr<State>& s)
                             s->in_flight = true;
                         }
                         service.send(report);
-                        next_notification = Clock::now() +
-                            std::chrono::milliseconds(otg_ble_win_detail::notification_interval_ms);
+                        unsigned interval_ms;
+                        { std::lock_guard<std::mutex> lock(s->mutex); interval_ms = s->notification_interval_ms; }
+                        next_notification = Clock::now() + std::chrono::milliseconds(interval_ms);
                         {
                             std::lock_guard<std::mutex> lock(s->mutex);
                             s->in_flight = false;
