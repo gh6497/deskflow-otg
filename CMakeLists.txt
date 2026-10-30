@@ -10,6 +10,12 @@ include(cmake/Version.cmake)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
+option(BUILD_AUDIO "Build scrcpy-compatible ADB audio forwarding" OFF)
+set(SCRCPY_SERVER "" CACHE FILEPATH
+  "Matching scrcpy-server jar/apk to install for BUILD_AUDIO")
+set(SCRCPY_VERSION "" CACHE STRING
+  "Version of SCRCPY_SERVER (required by the GUI audio integration)")
+
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
@@ -71,7 +77,30 @@ add_executable(deskflow-otg
   src/bridge.c
   src/deskflow_client.c
   src/keymap.c
+  src/audio_session.c
 )
+
+if(BUILD_AUDIO)
+  if(NOT LINUX)
+    message(FATAL_ERROR "BUILD_AUDIO currently requires Linux and ALSA")
+  endif()
+  find_package(ALSA REQUIRED)
+  find_package(Threads REQUIRED)
+  target_compile_definitions(deskflow-otg PRIVATE OTG_HAVE_AUDIO=1)
+  target_link_libraries(deskflow-otg PRIVATE ALSA::ALSA Threads::Threads)
+  if(SCRCPY_SERVER)
+    if(NOT EXISTS "${SCRCPY_SERVER}")
+      message(FATAL_ERROR "SCRCPY_SERVER does not exist: ${SCRCPY_SERVER}")
+    endif()
+    install(FILES "${SCRCPY_SERVER}" DESTINATION share/deskflow-otg
+            RENAME scrcpy-server)
+    if(SCRCPY_VERSION)
+      file(WRITE "${PROJECT_BINARY_DIR}/SCRCPY_VERSION.txt" "${SCRCPY_VERSION}\n")
+      install(FILES "${PROJECT_BINARY_DIR}/SCRCPY_VERSION.txt"
+              DESTINATION share/deskflow-otg)
+    endif()
+  endif()
+endif()
 
 option(BUILD_BLE "Build the Linux BLE HID backend" ${LINUX})
 option(BUILD_BLE_WIN "Build the experimental Windows BLE HID backend (CLI/GUI, MSVC/Windows SDK)" OFF)
@@ -221,7 +250,13 @@ else()
 endif()
 # 'ble' remains the Linux resident feature. Keep windowsBleCli for compatibility;
 # the same Windows backend also supports GUI-owned foreground sessions.
-file(WRITE "${PROJECT_BINARY_DIR}/BUILD_FEATURES.json" "{\"ble\":${OTG_BLE_FEATURE},\"windowsBleCli\":${OTG_BLE_WIN_FEATURE}}\n")
+if(BUILD_AUDIO)
+  set(OTG_AUDIO_FEATURE true)
+else()
+  set(OTG_AUDIO_FEATURE false)
+endif()
+file(WRITE "${PROJECT_BINARY_DIR}/BUILD_FEATURES.json"
+  "{\"audio\":${OTG_AUDIO_FEATURE},\"ble\":${OTG_BLE_FEATURE},\"windowsBleCli\":${OTG_BLE_WIN_FEATURE}}\n")
 install(FILES "${PROJECT_BINARY_DIR}/BUILD_FEATURES.json" DESTINATION share/deskflow-otg)
 if(LINUX)
   # pkexec strips LD_LIBRARY_PATH. Both native CLI and elevated supervisor must
@@ -235,4 +270,7 @@ if(BUILD_GUI)
   set(CMAKE_CXX_STANDARD 17)
   set(CMAKE_CXX_STANDARD_REQUIRED ON)
   add_subdirectory(gui)
+  if(BUILD_AUDIO)
+    target_compile_definitions(otg_gui_support PUBLIC OTG_GUI_HAVE_AUDIO=1)
+  endif()
 endif()

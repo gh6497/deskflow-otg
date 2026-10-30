@@ -7,6 +7,7 @@
 #include <QFileInfo>
 #include <QProcess>
 #include <QPointer>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QTimer>
 #include <memory>
@@ -74,6 +75,53 @@ QString findAdb()
 {
     const auto bundled = executable(QCoreApplication::applicationDirPath() + "/platform-tools/adb");
     return bundled.isEmpty() ? QStandardPaths::findExecutable("adb") : bundled;
+}
+
+QString findScrcpyServer()
+{
+    QStringList paths{
+        QCoreApplication::applicationDirPath() + "/scrcpy-server",
+        QCoreApplication::applicationDirPath() + "/share/scrcpy/scrcpy-server",
+        QCoreApplication::applicationDirPath() + "/../share/deskflow-otg/scrcpy-server",
+        QDir::homePath() + "/.local/share/scrcpy/scrcpy-server",
+        "/usr/local/share/scrcpy/scrcpy-server",
+        "/usr/share/scrcpy/scrcpy-server",
+        "/usr/local/share/deskflow-otg/scrcpy-server",
+        "/usr/share/deskflow-otg/scrcpy-server",
+    };
+    for (const auto &path : paths) {
+        if (QFileInfo(path).isFile() && QFileInfo(path).isReadable())
+            return path;
+    }
+    return {};
+}
+
+QString findScrcpyVersion()
+{
+    const QStringList versionFiles{
+        QCoreApplication::applicationDirPath() + "/../share/deskflow-otg/SCRCPY_VERSION.txt",
+        QCoreApplication::applicationDirPath() + "/share/deskflow-otg/SCRCPY_VERSION.txt",
+        "/usr/local/share/deskflow-otg/SCRCPY_VERSION.txt",
+        "/usr/share/deskflow-otg/SCRCPY_VERSION.txt",
+    };
+    for (const auto &path : versionFiles) {
+        QFile file(path);
+        if (file.open(QIODevice::ReadOnly)) {
+            const auto version = QString::fromUtf8(file.readAll()).trimmed();
+            if (QRegularExpression("^[0-9]+\\.[0-9]+\\.[0-9]+$").match(version).hasMatch())
+                return version;
+        }
+    }
+    QString program = QStandardPaths::findExecutable("scrcpy");
+    if (program.isEmpty() && QFileInfo(QDir::homePath() + "/.local/bin/scrcpy").isExecutable())
+        program = QDir::homePath() + "/.local/bin/scrcpy";
+    if (program.isEmpty()) return {};
+    QProcess process;
+    process.start(program, {"--version"});
+    if (!process.waitForFinished(3000)) return {};
+    const auto text = QString::fromUtf8(process.readAllStandardOutput() + process.readAllStandardError());
+    const auto match = QRegularExpression("scrcpy\\s+([0-9]+\\.[0-9]+\\.[0-9]+)").match(text);
+    return match.hasMatch() ? match.captured(1) : QString();
 }
 
 QString findDeskflow()

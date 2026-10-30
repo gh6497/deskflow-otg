@@ -75,6 +75,8 @@
   <message id="otg.label.server_port"><source>Server port</source><translation>Server port</translation></message>
   <message id="otg.section.programs"><source>Programs and mode</source><translation>Programs and mode</translation></message>
   <message id="otg.path.adb_hint"><source>Use bundled ADB by default, or select an external executable</source><translation>Use bundled ADB by default, or select an external executable</translation></message>
+  <message id="otg.audio.enabled"><source>Forward Android audio (Linux)</source><translation>Forward Android audio (Linux)</translation></message>
+  <message id="otg.audio.tooltip"><source>Uses the matching scrcpy-server and ADB; requires BUILD_AUDIO and an installed scrcpy-server</source><translation>Uses the matching scrcpy-server and ADB; requires BUILD_AUDIO and an installed scrcpy-server</translation></message>
   <message id="otg.path.deskflow_hint"><source>Select an installed deskflow-core or deskflow-server</source><translation>Select an installed deskflow-core or deskflow-server</translation></message>
   <message id="otg.mouse.absolute"><source>Absolute (recommended)</source><translation>Absolute (recommended)</translation></message>
   <message id="otg.mouse.relative"><source>Relative (compatibility mode)</source><translation>Relative (compatibility mode)</translation></message>

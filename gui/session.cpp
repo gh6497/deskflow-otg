@@ -144,6 +144,8 @@ void Session::start(const ConnectionOptions &options)
     const bool ble = options.transport == "ble";
     static const QRegularExpression peerPattern("^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$");
     if ((!ble && options.serial.isEmpty()) ||
+        (options.audio && (ble || options.adb.isEmpty() || options.scrcpyServer.isEmpty() ||
+                           options.scrcpyVersion.isEmpty())) ||
         (options.transport != "usb" && !ble) ||
         (ble && (!peerPattern.match(options.blePeer).hasMatch() || options.mouseMode != "absolute")) ||
         !validScreenName(options.phone) ||
@@ -275,6 +277,11 @@ void Session::launchBridge()
 #endif
     } else {
         args << "--serial" << m_options.serial;
+        if (m_options.audio) {
+            args << "--audio" << "--adb" << m_options.adb
+                 << "--scrcpy-server" << m_options.scrcpyServer
+                 << "--scrcpy-version" << m_options.scrcpyVersion;
+        }
     }
     if (windowsBle()) {
         m_bleActive = true;
