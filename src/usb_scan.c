@@ -1,6 +1,11 @@
 /* USB descriptor enumeration, following scrcpy's usb/usb.c. */
 /* SPDX-License-Identifier: Apache-2.0 */
 #include "usb_scan.h"
+#ifdef _WIN32
+#include <winsock2.h>
+#else
+#include <sys/time.h>
+#endif
 #include <libusb-1.0/libusb.h>
 #include <stdio.h>
 
