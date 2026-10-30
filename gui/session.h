@@ -12,6 +12,9 @@ class QJsonObject;
 struct ConnectionOptions {
     QString deskflow;
     QString bridge;
+    QString adb;
+    QString scrcpyServer;
+    QString scrcpyVersion;
     QString serial;
     QString host = "127.0.0.1";
     QString computer = "computer";
@@ -30,6 +33,7 @@ struct ConnectionOptions {
     int width = 1080;
     int height = 1920;
     bool manageServer = true;
+    bool audio = false;
 };
 
 // Only owned bridge/server processes are stopped. A resident BLE service is

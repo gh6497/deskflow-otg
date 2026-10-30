@@ -24,6 +24,7 @@
 #include "build_version.h"
 #include "deskflow_client.h"
 #include "usb_scan.h"
+#include "audio_session.h"
 #ifdef OTG_HAVE_BLE
 #include "ble_hid.h"
 #include "ble_supervisor.h"
@@ -232,8 +233,12 @@ static void usage(const char *prog)
              "      --ble-stop-service Stop an idle user service (loses GATT subscription continuity)\n"
             "      --width W         Virtual screen width, 1..32767 (default %d)\n"
             "      --height H        Virtual screen height, 1..32767 (default %d)\n"
-            "      --mouse-mode MODE absolute (default) or relative (compatibility)\n"
-            "      --gui             JSON status on stdout; stdin byte/EOF stops\n"
+             "      --mouse-mode MODE absolute (default) or relative (compatibility)\n"
+             "      --audio             Forward Android output audio through ADB (Linux)\n"
+             "      --adb PATH          ADB executable for audio (default adb)\n"
+             "      --scrcpy-server PATH  Matching scrcpy-server jar/apk for audio\n"
+             "      --scrcpy-version VER  Matching scrcpy server version for audio\n"
+             "      --gui             JSON status on stdout; stdin byte/EOF stops\n"
             "      --gui-ble-control Windows GUI: pause/resume sessions without recreating GATT\n"
             "      --usb-scan        List USB attachments as JSON (no ADB or HID)\n"
             "      --usb-watch       Watch USB hotplug as JSON lines; stdin/EOF stops\n"
@@ -262,6 +267,7 @@ static int parse_screen_size(const char *arg)
 
 struct app_state {
     struct otg_bridge bridge;
+    struct audio_session audio;
     const char *serial;
     void *transport_owner;
     bool resident_session;
@@ -469,6 +475,9 @@ int main(int argc, char **argv)
     const char *name = DEFAULT_NAME;
     const char *serial = NULL;
     const char *transport = "usb";
+    const char *adb_path = "adb";
+    const char *scrcpy_server = NULL;
+    const char *scrcpy_version = NULL;
     const char *adapter = "hci0";
 #ifdef OTG_HAVE_BLE_WIN
     bool adapter_explicit = false;
@@ -483,6 +492,7 @@ int main(int argc, char **argv)
     int width = DEFAULT_WIDTH;
     int height = DEFAULT_HEIGHT;
     enum otg_mouse_mode mouse_mode = OTG_MOUSE_ABSOLUTE;
+    int audio = 0;
 
     if (argc == 2 && strcmp(argv[1], "--usb-scan") == 0) {
         return otg_usb_scan();
@@ -563,6 +573,14 @@ int main(int argc, char **argv)
                 fprintf(stderr, "invalid mouse mode: %s (use absolute or relative)\n", mode);
                 return 2;
             }
+        } else if (strcmp(a, "--audio") == 0) {
+            audio = 1;
+        } else if (strcmp(a, "--adb") == 0 && i + 1 < argc) {
+            adb_path = argv[++i];
+        } else if (strcmp(a, "--scrcpy-server") == 0 && i + 1 < argc) {
+            scrcpy_server = argv[++i];
+        } else if (strcmp(a, "--scrcpy-version") == 0 && i + 1 < argc) {
+            scrcpy_version = argv[++i];
         } else {
             fprintf(stderr, "unknown argument: %s\n", a);
             usage(argv[0]);
@@ -574,6 +592,20 @@ int main(int argc, char **argv)
         fprintf(stderr, "screen width and height must be integers in 1..32767\n");
         return 2;
     }
+    if (audio && (!serial || !scrcpy_server || !scrcpy_version)) {
+        fprintf(stderr, "ERROR: --audio requires -s/--serial, --scrcpy-server and --scrcpy-version\n");
+        return 2;
+    }
+    if (audio && strcmp(transport, "usb") != 0) {
+        fprintf(stderr, "ERROR: --audio currently requires --transport usb\n");
+        return 2;
+    }
+#ifndef OTG_HAVE_AUDIO
+    if (audio) {
+        fprintf(stderr, "ERROR: audio support was not built; configure with -DBUILD_AUDIO=ON\n");
+        return 2;
+    }
+#endif
 
 #ifdef _WIN32
     if (background_stop) {
@@ -702,6 +734,13 @@ int main(int argc, char **argv)
         }
         fprintf(stderr, "INFO:  AOA HID keyboard + %s pointer ready (screen %dx%d)\n",
                 mouse_mode == OTG_MOUSE_ABSOLUTE ? "absolute" : "relative", width, height);
+        if (audio) {
+            if (audio_session_start(&state.audio, adb_path, serial, scrcpy_server,
+                                    scrcpy_version) != 0) {
+                otg_bridge_close(&state.bridge);
+                return 1;
+            }
+        }
     } else if (strcmp(transport, "ble") == 0) {
 #ifdef OTG_HAVE_BLE
         state.resident_session=ble_session;
@@ -743,7 +782,8 @@ int main(int argc, char **argv)
         fflush(stdout);
     }
     if (g_gui && gui_stop_check() && g_stop) {
-        otg_bridge_close(&state.bridge);
+         audio_session_stop(&state.audio);
+         otg_bridge_close(&state.bridge);
         destroy_transport_owner(&state);
         return 0;
     }
@@ -819,6 +859,7 @@ int main(int argc, char **argv)
         }
 #endif
     } while(!g_stop);
+    audio_session_stop(&state.audio);
     otg_bridge_close(&state.bridge);
     destroy_transport_owner(&state);
     gui_event("disconnected");

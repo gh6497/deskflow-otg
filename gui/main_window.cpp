@@ -409,6 +409,10 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this)
     auto *advancedForm = new QFormLayout(advancedBox);
     m_programForm = advancedForm;
     advancedForm->addRow("ADB", pathField(m_adb, "otg.path.adb_hint"));
+    m_audio = translated(new QCheckBox, "text", "otg.audio.enabled");
+    m_audio->setObjectName("audioEnabled");
+    setTranslatedProperty(m_audio, "toolTip", "otg.audio.tooltip");
+    advancedForm->addRow(m_audio);
     advancedForm->addRow("Deskflow", pathField(m_deskflow, "otg.path.deskflow_hint"));
     m_mouseMode = new QComboBox;
     m_mouseMode->setObjectName("mouseMode");
@@ -458,6 +462,7 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this)
     setCentralWidget(central);
 
     m_adb->setText(settings.value("adb", findAdb()).toString());
+    m_audio->setChecked(settings.value("audio", false).toBool());
     m_deskflow->setText(settings.value("deskflow", findDeskflow()).toString());
     m_serial->setText(settings.value("serial").toString());
     m_transport->setCurrentIndex(qMax(0, m_transport->findData(settings.value("transport", "usb"))));
@@ -829,6 +834,9 @@ ConnectionOptions MainWindow::connectionOptions(const QVariantMap &profile) cons
 {
     ConnectionOptions options;
     options.bridge = bridgeExecutable();
+    options.adb = m_adb->text().trimmed();
+    options.scrcpyServer = findScrcpyServer();
+    options.scrcpyVersion = findScrcpyVersion();
     options.deskflow = m_deskflow->text().trimmed();
     options.computer = m_computer->text().trimmed();
     options.host = m_host->text().trimmed();
@@ -837,6 +845,11 @@ ConnectionOptions MainWindow::connectionOptions(const QVariantMap &profile) cons
     options.phone = profile.value("phone", "android").toString();
     options.serial = profile.value("serial").toString();
     options.transport = profile.value("transport", "usb").toString();
+#ifdef OTG_GUI_HAVE_AUDIO
+    options.audio = profile.value("audio", m_audio->isChecked()).toBool();
+#else
+    options.audio = false;
+#endif
     options.mouseMode = options.transport == "ble" ? "absolute" : profile.value("mouseMode", "absolute").toString();
     options.blePeer = profile.value("blePeer").toString();
 #ifdef Q_OS_LINUX
@@ -883,6 +896,11 @@ void MainWindow::updateEnabled()
     m_deviceForm->setRowVisible(m_serial, !ble);
     m_deviceForm->setRowVisible(m_autoConnectEnabled, !ble);
     m_programForm->setRowVisible(m_adb->parentWidget(), !ble);
+#ifdef OTG_GUI_HAVE_AUDIO
+    m_programForm->setRowVisible(m_audio, !ble);
+#else
+    m_programForm->setRowVisible(m_audio, false);
+#endif
     m_deviceForm->setRowVisible(m_mouseMode, !ble);
     m_autoConnect.setReady(!m_closing);
     if (m_closing)
@@ -914,6 +932,7 @@ void MainWindow::updateEnabled()
     m_devices->setEnabled(!ble);
     m_refresh->setEnabled(!ble);
     m_adb->setEnabled(!ble);
+    m_audio->setEnabled(!ble);
     m_autoConnectEnabled->setEnabled(!ble);
     m_adapter->setEnabled(linuxBle);
     m_blePeer->setEnabled(ble);
@@ -1090,9 +1109,9 @@ QVariantMap MainWindow::deviceProfile() const
             {"originalWidth", m_width->value()}, {"originalHeight", m_height->value()},
             {"sensitivityMultiplier", m_sensitivity->value()},
             {"deskflow", m_deskflow->text()}, {"computer", m_computer->text()},
-            {"phone", m_phone->text()}, {"host", m_host->text()}, {"port", m_port->value()},
-            {"manageServer", m_manage->isChecked()}, {"direction", m_direction->currentData()},
-            {"mouseMode", m_mouseMode->currentData()}};
+             {"phone", m_phone->text()}, {"host", m_host->text()}, {"port", m_port->value()},
+             {"manageServer", m_manage->isChecked()}, {"direction", m_direction->currentData()},
+             {"mouseMode", m_mouseMode->currentData()}, {"audio", m_audio->isChecked()}};
 }
 
 void MainWindow::applyDeviceProfile(const QVariantMap &profile)
@@ -1112,6 +1131,7 @@ void MainWindow::applyDeviceProfile(const QVariantMap &profile)
     m_adapter->setText(profile.value("bleAdapter", "hci0").toString());
     m_blePeer->setText(profile.value("blePeer").toString());
     m_bleIsolate->setChecked(profile.value("bleIsolate", false).toBool());
+    m_audio->setChecked(profile.value("audio", false).toBool());
     m_autoConnectEnabled->setChecked(profile.value("autoConnect", false).toBool());
     m_direction->setCurrentIndex(qMax(0, m_direction->findData(profile.value("direction", "right"))));
     m_mouseMode->setCurrentIndex(qMax(0, m_mouseMode->findData(profile.value("mouseMode", "absolute"))));
@@ -1147,6 +1167,7 @@ void MainWindow::saveSettings()
     persistDevices();
     QSettings settings;
     settings.setValue("adb", m_adb->text());
+    settings.setValue("audio", m_audio->isChecked());
     settings.setValue("deskflow", m_deskflow->text());
     settings.setValue("serial", m_serial->text());
     settings.setValue("transport", m_transport->currentData());

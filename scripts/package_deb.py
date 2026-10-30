@@ -24,12 +24,16 @@ def main():
     stage = args.stage.resolve()
     features_path = stage / "share/deskflow-otg/BUILD_FEATURES.json"
     ble = False
+    audio = False
     if features_path.exists():
         try:
             features = json.loads(features_path.read_text(encoding="utf-8"))
             if not isinstance(features.get("ble"), bool):
                 raise ValueError("ble must be boolean")
             ble = features["ble"]
+            if "audio" in features and not isinstance(features["audio"], bool):
+                raise ValueError("audio must be boolean")
+            audio = features.get("audio", False)
         except (ValueError, AttributeError) as exc:
             parser.error(f"Invalid BUILD_FEATURES.json: {exc}")
     try:
@@ -40,6 +44,7 @@ def main():
         parser.error("--stage must contain bin/deskflow-otg-gui and bin/deskflow-otg "
                      "(build with BUILD_GUI=ON and run cmake --install first)")
     arch = subprocess.check_output(["dpkg", "--print-architecture"], text=True).strip()
+    bundled_adb = (stage / "bin/platform-tools/adb").is_file()
     output = args.output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
 
@@ -80,6 +85,10 @@ def main():
                         "libx11-6, libxcb1, libxkbcommon0, libxcb-cursor0")
         if ble:
             dependencies += ", bluez, libglib2.0-0t64 | libglib2.0-0, pkexec"
+        if audio:
+            dependencies += ", libasound2"
+        if not bundled_adb:
+            dependencies += ", adb"
         (control / "control").write_text(
             f"Package: deskflow-otg-gui\nVersion: {version}\nArchitecture: {arch}\n"
             "Maintainer: deskflow-otg contributors <noreply@github.com>\n"
