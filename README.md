@@ -5,7 +5,9 @@
 
 在你的主机电脑上运行一个 Deskflow **server**，再运行本程序，手机通过 USB 线插在主机上，
 当鼠标滑到"手机"这块屏幕时，就可以用主机的键盘鼠标直接操控安卓手机 ——
-**不需要 adb、不需要开启 USB 调试**（和 `scrcpy --otg` 同理）。
+USB HID 数据通道**不需要 adb、不需要开启 USB 调试**（和 `scrcpy --otg` 同理）；
+但 Windows 仍需将手机 USB 接口绑定到 libusb 可用的驱动。Windows 的识别限制和排查
+步骤见 [Windows USB OTG 设备识别](docs/WINDOWS_USB.md)。
 
 提供命令行和可选的 **Qt 桌面 GUI**。GUI 可以通过 ADB 自动识别设备序列号、宽高和
 方向，配置并启动已安装的 Deskflow，再一键连接手机。只有 ADB 读取设备与尺寸需要 USB 调试；
@@ -371,7 +373,8 @@ sudo ./build/deskflow-otg \
 **Windows**：在 PowerShell 中运行 `./build/Release/deskflow-otg.exe --host 127.0.0.1
 --name android --width 1080 --height 1920 -s <手机USB序列号>`。需安装可供 libusb 使用的
 USB 驱动（例如通过 Zadig 将手机对应 USB 接口绑定 WinUSB）；更换驱动可能影响 MTP/ADB，
-请确认选中的设备/接口并备份原驱动。Deskflow 的 TLS 仍需关闭。Windows USB 真机行为尚未验证。
+请确认选中的设备/接口并备份原驱动。若手机无法识别，先看
+[Windows USB OTG 设备识别](docs/WINDOWS_USB.md)。Deskflow 的 TLS 仍需关闭。
 
 ### macOS 运行与权限
 
