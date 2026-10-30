@@ -94,7 +94,7 @@
 - 新增键盘 LED 输出及 HID Control Point，Report Map 长读处理 offset；CCC 仍由 BlueZ 管理。
 - 固定句柄冲突应失败，不得静默换成漂移的新句柄。旧版布局/手机缓存迁移仍需实测。
 - 绝对指针仍是 Digitizer + Stylus + Tip Switch/In Range + 嵌套 Pointer Collection，
-  不得为了降低延迟退回普通相对鼠标并声称无漂移。
+  不得为了降低延迟退回普通相对鼠标并声称无漂移[public.sql](../../../../../Desktop/sql/public.sql)。
 - 旧实现只在约 500ms 空闲时发送最后一个待合并坐标，现使用 5ms BLE 事件泵，持续事件时
   也处理回调。只合并坐标；按键状态、滚轮、范围变化不丢弃。
 - 默认移动约 30Hz；收到实测间隔后使用 `max(连接间隔, 16.67ms)` 的发送周期。
