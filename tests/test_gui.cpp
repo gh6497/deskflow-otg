@@ -2,6 +2,8 @@
 #include "device_info.h"
 #include "process_utils.h"
 #include "session.h"
+#include "connection_manager.h"
+#include <QTemporaryDir>
 #include "i18n.h"
 #include <QFile>
 #include <QMap>
@@ -88,6 +90,160 @@ static QStringList placeholders(const QString &text)
 class GuiTest : public QObject {
     Q_OBJECT
 private slots:
+    void multiScreenLayout()
+    {
+        const QList<ScreenLink> screens{{"a", "computer", "right"}, {"b", "a", "right"}, {"c", "computer", "left"}};
+        const auto config = serverConfiguration("computer", screens);
+        QVERIFY(config.contains("    right = a"));
+        QVERIFY(config.contains("    right = b"));
+        QVERIFY(config.contains("    left = computer"));
+        QVERIFY(serverConfiguration("computer", QList<ScreenLink>{{"a", "computer", "right"}, {"A", "computer", "left"}}).isEmpty());
+        QVERIFY(serverConfiguration("computer", QList<ScreenLink>{{"a", "computer", "right"}, {"b", "computer", "right"}}).isEmpty());
+        QVERIFY(serverConfiguration("computer", QList<ScreenLink>{{"a", "b", "right"}, {"b", "a", "up"}}).isEmpty());
+        QVERIFY(serverConfiguration("computer", QList<ScreenLink>{{"a", "missing", "right"}}).isEmpty());
+    }
+    void multipleManagedSessions_data()
+    {
+        QTest::addColumn<QByteArray>("style");
+        QTest::newRow("modern") << QByteArray("modern");
+        QTest::newRow("legacy") << QByteArray("legacy-disable");
+    }
+    void multipleManagedSessions()
+    {
+        QFETCH(QByteArray, style);
+        QTemporaryDir dir;
+        const auto path = dir.filePath("starts.log");
+        qputenv("OTG_TEST_HELP", style);
+        qputenv("OTG_TEST_SERVER_START_LOG", path.toUtf8());
+        const auto restore = qScopeGuard([] { qunsetenv("OTG_TEST_HELP"); qunsetenv("OTG_TEST_SERVER_START_LOG"); });
+        QTcpServer allocator;
+        QVERIFY(allocator.listen(QHostAddress::LocalHost));
+        ConnectionOptions a;
+        a.port = allocator.serverPort();
+        allocator.close();
+        a.bridge = a.deskflow = peerPath();
+        a.serial = "SERIAL_A";
+        a.phone = "a";
+        auto b = a;
+        b.serial = "SERIAL_B";
+        b.phone = "b";
+        const auto config = serverConfiguration("computer", QList<ScreenLink>{{"a", "computer", "right"}, {"b", "a", "right"}});
+        ConnectionManager manager;
+        manager.addDevice("a");
+        manager.addDevice("b");
+        QSignalSpy logs(&manager, &ConnectionManager::log);
+        QVERIFY(manager.start("a", a, config));
+        QVERIFY(manager.start("b", b, config)); // Both wait on the same server startup.
+        QTRY_COMPARE(manager.state("a"), Session::State::Connected);
+        QTRY_COMPARE(manager.state("b"), Session::State::Connected);
+        QFile starts(path);
+        QVERIFY(starts.open(QIODevice::ReadOnly));
+        QCOMPARE(starts.readAll(), QByteArray("server\n"));
+        manager.stop("a");
+        QTRY_COMPARE(manager.state("a"), Session::State::Idle);
+        QCOMPARE(manager.state("b"), Session::State::Connected);
+        QCOMPARE(manager.serverState(), DeskflowServer::State::Running);
+        QVERIFY(manager.start("a", a, config));
+        QTRY_COMPARE(manager.state("a"), Session::State::Connected);
+        starts.seek(0);
+        QCOMPARE(starts.readAll(), QByteArray("server\n"));
+        manager.shutdown();
+        QTRY_VERIFY(manager.settled());
+        int released = 0;
+        for (const auto &entry : logs) released += entry[1].toString().contains("released");
+        QVERIFY(released >= 3);
+        QVERIFY(allocator.listen(QHostAddress::LocalHost, quint16(a.port)));
+    }
+    void multiDeviceRejectionAndFailure()
+    {
+        ConnectionManager manager;
+        manager.addDevice("a"); manager.addDevice("b"); manager.addDevice("duplicate");
+        ConnectionOptions a;
+        a.manageServer = false;
+        a.bridge = peerPath();
+        a.serial = "crash";
+        a.phone = "a";
+        auto b = a;
+        b.serial = "B";
+        b.phone = "b";
+        QVERIFY(manager.start("a", a, {}));
+        QVERIFY(!manager.start("duplicate", a, {}));
+        auto changedServer = b;
+        ++changedServer.port;
+        QVERIFY(!manager.start("b", changedServer, {}));
+        QVERIFY(manager.start("b", b, {}));
+        QTRY_COMPARE(manager.state("a"), Session::State::Connected);
+        QTRY_COMPARE(manager.state("b"), Session::State::Connected);
+        QTRY_COMPARE(manager.state("a"), Session::State::Idle);
+        QCOMPARE(manager.state("b"), Session::State::Connected);
+        manager.shutdown();
+        QTRY_VERIFY(manager.settled());
+    }
+    void cancelSharedStartup()
+    {
+        ConnectionManager manager;
+        manager.addDevice("a");
+        ConnectionOptions options;
+        options.bridge = options.deskflow = peerPath();
+        options.serial = "A";
+        QTcpServer allocator;
+        QVERIFY(allocator.listen(QHostAddress::LocalHost));
+        options.port = allocator.serverPort(); allocator.close();
+        const auto layout = serverConfiguration(options.computer, options.phone, "right");
+        QSignalSpy logs(&manager, &ConnectionManager::log);
+        QVERIFY(manager.start("a", options, layout));
+        manager.stop("a");
+        QTRY_VERIFY(manager.settled());
+        QTest::qWait(150);
+        for (const auto &entry : logs) QVERIFY(!entry[1].toString().contains("released"));
+        QCOMPARE(manager.state("a"), Session::State::Idle);
+    }
+    void sharedServerCrash()
+    {
+        qputenv("OTG_TEST_SERVER_EXIT_MS", "1000");
+        const auto restore = qScopeGuard([] { qunsetenv("OTG_TEST_SERVER_EXIT_MS"); });
+        QTcpServer allocator;
+        QVERIFY(allocator.listen(QHostAddress::LocalHost));
+        ConnectionOptions a;
+        a.port = allocator.serverPort(); allocator.close();
+        a.bridge = a.deskflow = peerPath(); a.serial = "A"; a.phone = "a";
+        auto b = a; b.serial = "B"; b.phone = "b";
+        const auto config = serverConfiguration("computer", QList<ScreenLink>{{"a", "computer", "right"}, {"b", "a", "right"}});
+        ConnectionManager manager;
+        manager.addDevice("a"); manager.addDevice("b");
+        QVERIFY(manager.start("a", a, config));
+        QVERIFY(manager.start("b", b, config));
+        QTRY_COMPARE(manager.state("a"), Session::State::Connected);
+        QTRY_COMPARE(manager.state("b"), Session::State::Connected);
+        QTRY_VERIFY(manager.settled());
+        QVERIFY(!manager.status("a").isEmpty());
+    }
+    void usbAndSingleBle()
+    {
+#if !defined(OTG_GUI_HAVE_BLE) && !defined(OTG_GUI_HAVE_BLE_WIN)
+        QSKIP("BLE-enabled GUI only");
+#endif
+#ifdef Q_OS_WIN
+        qputenv("OTG_TEST_BLE_WINDOWS", "1");
+        const auto restore = qScopeGuard([] { qunsetenv("OTG_TEST_BLE_WINDOWS"); });
+#endif
+        ConnectionManager manager;
+        manager.addDevice("usb"); manager.addDevice("ble"); manager.addDevice("other");
+        ConnectionOptions usb;
+        usb.bridge = peerPath(); usb.manageServer = false; usb.serial = "A"; usb.phone = "a";
+        auto ble = usb; ble.transport = "ble"; ble.serial.clear(); ble.phone = "b"; ble.blePeer = "AA:BB:CC:DD:EE:FF";
+        QVERIFY(manager.start("usb", usb, {}));
+        QVERIFY(manager.start("ble", ble, {}));
+        QTRY_COMPARE(manager.state("usb"), Session::State::Connected);
+        QTRY_COMPARE(manager.state("ble"), Session::State::Connected);
+        auto other = ble; other.phone = "c"; other.blePeer = "11:22:33:44:55:66";
+        QVERIFY(!manager.start("other", other, {}));
+        manager.stop("ble");
+        QTRY_COMPARE(manager.state("ble"), Session::State::Idle);
+        QCOMPARE(manager.state("usb"), Session::State::Connected);
+        manager.shutdown();
+        QTRY_VERIFY(manager.settled());
+    }
     void windowsBleProviderReuse()
     {
 #ifdef OTG_TEST_NATIVE_BLE_PEER
@@ -349,7 +505,7 @@ private slots:
         // Include indirect ID references in property bindings, states and arrays.
         QSet<QString> references;
         const QRegularExpression pattern("\"(otg\\.[a-z0-9_.]+)\"");
-        for (const char *name : {"main_window.cpp", "session.cpp", "process_utils.cpp"}) {
+        for (const char *name : {"main_window.cpp", "session.cpp", "process_utils.cpp", "deskflow_server.cpp", "connection_manager.cpp"}) {
             QFile source(QString(":/i18n-test/gui/") + name + ".txt");
             QVERIFY(source.open(QIODevice::ReadOnly));
             auto matches = pattern.globalMatch(QString::fromUtf8(source.readAll()));

@@ -18,6 +18,7 @@ public:
     void setProgram(const QString &program) { m_program = program; }
     void setEnabled(bool enabled);
     void setReady(bool ready);
+    void setMultipleDevices(bool enabled) { m_multiple = enabled; }
     void setKnownSerials(const QStringList &serials);
     void suppressSerial(const QString &serial);
     void suppressAttachment(const QString &id, const QString &serial);
@@ -43,6 +44,7 @@ private:
     QSet<QString> m_known, m_attempted, m_suppressed;
     QMap<QString, QString> m_present;
     bool m_enabled = false;
+    bool m_multiple = false;
     bool m_ready = false;
     bool m_scanning = false;
     bool m_scanPending = false;

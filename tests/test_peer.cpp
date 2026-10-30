@@ -8,6 +8,7 @@
 #include <QTimer>
 #include <memory>
 #include <cstdio>
+#include <cstdlib>
 #include <thread>
 
 static void output(const char *text)
@@ -119,6 +120,13 @@ int main(int argc, char **argv)
     }
     QTcpServer server;
     if (args.value(1) == "server" || args.contains("--no-daemon")) {
+        const auto logPath = qEnvironmentVariable("OTG_TEST_SERVER_START_LOG");
+        if (!logPath.isEmpty()) {
+            QFile log(logPath);
+            if (log.open(QIODevice::WriteOnly | QIODevice::Append)) log.write("server\n");
+        }
+        const int exitDelay = qEnvironmentVariableIntValue("OTG_TEST_SERVER_EXIT_MS");
+        if (exitDelay > 0) QTimer::singleShot(exitDelay, &app, [] { QCoreApplication::exit(11); });
         QString layoutPath;
         int port = 0;
         if (args.contains("--settings")) {
@@ -186,6 +194,8 @@ int main(int argc, char **argv)
         const auto serial = args.value(args.indexOf("--serial") + 1);
         if (serial == "reject")
             return 5;
+        // Bypass libc stream cleanup: the fake's input thread is blocked in getchar().
+        if (serial == "crash") QTimer::singleShot(600, &app, [] { std::_Exit(12); });
         if (!ble) output("{\"event\":\"usb-ready\",\"usb-id\":\"1:2\"}\n");
         if (ble && qEnvironmentVariableIsSet("OTG_TEST_BLE_RECONNECT") &&
             !qEnvironmentVariableIsSet("OTG_TEST_BLE_WAIT")) {

@@ -34,7 +34,7 @@
   <message id="otg.ble.service_retained"><source>Starting the resident Bluetooth service as the current user. It stays running across sessions and GUI exits to preserve phone subscriptions.</source><translation>Starting the resident Bluetooth service as the current user. It stays running across sessions and GUI exits to preserve phone subscriptions.</translation></message>
   <message id="otg.auto_connect.hotplug"><source>USB auto-connect is using hotplug event notifications.</source><translation>USB auto-connect is using hotplug event notifications.</translation></message>
   <message id="otg.auto_connect.polling"><source>USB hotplug notifications are unavailable or stopped; auto-connect is using 2-second polling.</source><translation>USB hotplug notifications are unavailable or stopped; auto-connect is using 2-second polling.</translation></message>
-  <message id="otg.auto_connect.enabled"><source>Automatically connect remembered phones on USB insertion</source><translation>Automatically connect remembered phones on USB insertion</translation></message>
+  <message id="otg.auto_connect.enabled"><source>Automatically connect this device on USB insertion after its first successful connection</source><translation>Automatically connect this device on USB insertion after its first successful connection</translation></message>
   <message id="otg.auto_connect.tooltip"><source>No USB debugging required. Remembers each successfully connected phone and its settings. Keep the app running, including in the tray. After a manual disconnect or failure, unplug and reinsert USB to retry.</source><translation>No USB debugging required. Remembers each successfully connected phone and its settings. Keep the app running, including in the tray. After a manual disconnect or failure, unplug and reinsert USB to retry.</translation></message>
   <message id="otg.auto_connect.connecting"><source>USB phone %1 detected; connecting with remembered settings.</source><translation>USB phone %1 detected; connecting with remembered settings.</translation></message>
   <message id="otg.auto_connect.scan_failed"><source>USB auto-connect scan failed. Check bridge installation, USB permissions and drivers; scanning will continue.</source><translation>USB auto-connect scan failed. Check bridge installation, USB permissions and drivers; scanning will continue.</translation></message>
@@ -64,10 +64,10 @@
   <message id="otg.label.virtual_size"><source>Effective virtual size</source><translation>Effective virtual size</translation></message>
   <message id="otg.section.connection"><source>2  Deskflow connection</source><translation>2  Deskflow connection</translation></message>
   <message id="otg.server.manage"><source>Configure and start local Deskflow automatically</source><translation>Configure and start local Deskflow automatically</translation></message>
-  <message id="otg.position.right"><source>Phone to the right of computer</source><translation>Phone to the right of computer</translation></message>
-  <message id="otg.position.left"><source>Phone to the left of computer</source><translation>Phone to the left of computer</translation></message>
-  <message id="otg.position.up"><source>Phone above computer</source><translation>Phone above computer</translation></message>
-  <message id="otg.position.down"><source>Phone below computer</source><translation>Phone below computer</translation></message>
+  <message id="otg.position.right"><source>Right</source><translation>Right</translation></message>
+  <message id="otg.position.left"><source>Left</source><translation>Left</translation></message>
+  <message id="otg.position.up"><source>Above</source><translation>Above</translation></message>
+  <message id="otg.position.down"><source>Below</source><translation>Below</translation></message>
   <message id="otg.label.position"><source>Screen position</source><translation>Screen position</translation></message>
   <message id="otg.label.computer_name"><source>Computer screen name</source><translation>Computer screen name</translation></message>
   <message id="otg.label.phone_name"><source>Phone screen name</source><translation>Phone screen name</translation></message>
@@ -133,5 +133,29 @@
   <message id="otg.status.disconnected"><source>Disconnected</source><translation>Disconnected</translation></message>
   <message id="otg.error.command_output"><source>Command output too large</source><translation>Command output too large</translation></message>
   <message id="otg.error.command_timeout"><source>Command timed out</source><translation>Command timed out</translation></message>
+  <message id="otg.multi.device_tab"><source>Device settings</source><translation>Device settings</translation></message>
+  <message id="otg.multi.layout_tab"><source>Screen layout</source><translation>Screen layout</translation></message>
+  <message id="otg.multi.server_tab"><source>Shared server</source><translation>Shared server</translation></message>
+  <message id="otg.multi.add_device"><source>Add device</source><translation>Add device</translation></message>
+  <message id="otg.multi.connect_all"><source>Connect all</source><translation>Connect all</translation></message>
+  <message id="otg.multi.disconnect_all"><source>Disconnect all</source><translation>Disconnect all</translation></message>
+  <message id="otg.multi.alias"><source>Display name</source><translation>Display name</translation></message>
+  <message id="otg.multi.neighbor"><source>Adjacent screen</source><translation>Adjacent screen</translation></message>
+  <message id="otg.multi.layout_hint"><source>Configure each device relative to an adjacent screen. Disconnect all devices before changing the layout or shared server. External server layouts must be configured in Deskflow.</source><translation>Configure each device relative to an adjacent screen. Disconnect all devices before changing the layout or shared server. External server layouts must be configured in Deskflow.</translation></message>
+  <message id="otg.multi.invalid_layout"><source>Invalid layout: check unique screen names, adjacent screens, occupied edges and connectivity to the computer.</source><translation>Invalid layout: check unique screen names, adjacent screens, occupied edges and connectivity to the computer.</translation></message>
+  <message id="otg.multi.duplicate_device"><source>This USB device or screen name is already in use.</source><translation>This USB device or screen name is already in use.</translation></message>
+  <message id="otg.multi.ble_limit"><source>Only one BLE phone is supported. Stop the other BLE session and its idle Windows provider first.</source><translation>Only one BLE phone is supported. Stop the other BLE session and its idle Windows provider first.</translation></message>
+  <message id="otg.multi.shared_locked"><source>The shared server or layout is in use. Disconnect all devices and wait for shutdown before changing it.</source><translation>The shared server or layout is in use. Disconnect all devices and wait for shutdown before changing it.</translation></message>
+  <message id="otg.multi.connected"><source>Connected</source><translation>Connected</translation></message>
+  <message id="otg.multi.summary"><source>%1 / %2 devices connected · %3</source><translation>%1 / %2 devices connected · %3</translation></message>
+  <message id="otg.multi.server_running"><source>Shared Deskflow running</source><translation>Shared Deskflow running</translation></message>
+  <message id="otg.multi.server_stopped"><source>Shared Deskflow stopped or starting</source><translation>Shared Deskflow stopped or starting</translation></message>
+  <message id="otg.multi.external_server"><source>External Deskflow server</source><translation>External Deskflow server</translation></message>
+  <message id="otg.multi.layout_edge"><source>%1: %3 of %2</source><translation>%1: %3 of %2</translation></message>
+  <message id="otg.multi.remove_device"><source>Remove device</source><translation>Remove device</translation></message>
+  <message id="otg.multi.remove_dependency"><source>Other screens are linked to this device. Change their adjacent screen before removing it.</source><translation>Other screens are linked to this device. Change their adjacent screen before removing it.</translation></message>
+  <message id="otg.multi.failed"><source>Connection failed — see status or logs</source><translation>Connection failed — see status or logs</translation></message>
+  <message id="otg.multi.all_logs"><source>All devices</source><translation>All devices</translation></message>
+  <message id="otg.multi.service_logs"><source>Shared service</source><translation>Shared service</translation></message>
 </context>
 </TS>

@@ -275,7 +275,8 @@ for f in platform/linux/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only
   事件模式只在启动、热插拔、就绪/配置变化时扫描，合并通知并有限次重试权限就绪，不做周期枚举。
   不依赖 ADB、不注册 HID。按 bus/address 记录本次插入是否已尝试，失败/手动断开不重试，拔插后重置；
   拔出事件立即重置该地址并丢弃旧扫描结果，防止快速同地址重插与扫描竞态。
-  不可读序列号不等于拔出，多台已知设备/重复序列号不自动选择。桥接 `usb-ready` 携带
+  不可读序列号不等于拔出。多设备 GUI 逐台接入已启用自动连接的已知手机；USB 快照或配置中的
+  重复序列号不自动选择。`UsbAutoConnect` 默认仍为单候选策略，GUI 显式开启多设备调度。桥接 `usb-ready` 携带
   `usb-id`，避免独占 USB 驱动下手动断开立即重连；退出禁用检测并清理扫描子进程。
   `test_usb_auto_connect.cpp` 和 `test_window.cpp` 覆盖策略、无 ADB、托盘自动连接及配置恢复。
 - GUI 提供系统托盘：关闭窗口只隐藏并保留连接，菜单可恢复窗口、断开或退出；无托盘时关闭仍退出。
@@ -283,6 +284,16 @@ for f in platform/linux/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only
   `quitOnLastWindowClosed` 关闭以支持后台运行。托盘菜单与状态提示支持实时语言切换。
   `test_window.cpp` 模拟托盘可用/不可用，覆盖隐藏、恢复、断开及连接中优雅退出。
   托盘与窗口统一使用嵌入 Qt 资源的 `packaging/deskflow-otg.svg`，DEB 与 AppImage 桌面入口也使用此图。
+- 多设备 GUI：`gui/connection_manager.cpp` 管理按稳定 ID 保存的独立 `Session`，由
+  `gui/deskflow_server.cpp` 管理唯一共享 Deskflow；子会话以 external-server 模式启动桥接，
+  单设备断开/失败不得停止其他桥接。最后一个会话完成释放后停止自建服务；退出等待全部会话
+  和 Windows provider 结束。共享服务失败终止其所有会话；绝不接管外部 Deskflow。
+  单设备 `Session` 仍支持独立管理 server，以复用相同生命周期测试。
+  GUI 左侧设备列表、右侧设备/布局/共享服务页签，输入参数按设备隔离，日志可筛选。
+  活动会话期间禁止新增/移除设备或改共享布局/屏幕名，但允许编辑其他空闲设备的尺寸和连接身份。
+  `serverConfiguration` 验证唯一名称、相邻屏幕、双向边、网格重叠和电脑连通性；预览只读。
+  当前保守限制为多 USB + 至多一台 BLE（包括空闲 Windows provider 的身份占用），不能放宽
+  底层单目标门控。多设备测试全为 fake 子进程，不访问 USB/系统蓝牙，不等于真机验收。
 - `gui/session.cpp` 只管理自己创建的 Deskflow 和桥接进程。自动启动生成独立配置、监听回环地址并关闭 TLS；
   外部服务模式不更改或终止已有 Deskflow。根据 `--help` 区分现代 `deskflow-core server --settings` 与传统 server 参数。
 - `src/main.c --gui` 在 stdout 输出 JSON 行 `usb-ready` / `connected` / `disconnected`；日志仍走 stderr。

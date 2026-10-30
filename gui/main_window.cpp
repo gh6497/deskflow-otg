@@ -3,6 +3,7 @@
 #include "process_utils.h"
 #include "i18n.h"
 #include "build_version.h"
+#include "screen_layout_preview.h"
 
 #include <QCheckBox>
 #include <QAction>
@@ -27,6 +28,10 @@
 #include <QSystemTrayIcon>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <QListWidget>
+#include <QTabWidget>
+#include <QUuid>
+#include <algorithm>
 
 void MainWindow::setTranslatedProperty(QObject *object, const char *property, const char *id)
 {
@@ -77,7 +82,14 @@ void MainWindow::retranslateUi()
     m_language->setItemText(0, qtTrId("otg.language.chinese"));
     m_language->setItemText(1, qtTrId("otg.language.english"));
     if (m_sessionStatus)
-        m_status->setText(m_session.statusMessage());
+        m_status->setText(m_connections.status(m_selectedId));
+    if (m_tabs) {
+        m_tabs->setTabText(0, qtTrId("otg.multi.device_tab"));
+        m_tabs->setTabText(1, qtTrId("otg.multi.layout_tab"));
+        m_tabs->setTabText(2, qtTrId("otg.multi.server_tab"));
+        updateDeviceList();
+        updateLayoutPreview();
+    }
     updateVirtualSize();
     updateTray();
 }
@@ -104,7 +116,8 @@ void MainWindow::setupTray()
     connect(restore, &QAction::triggered, this, &MainWindow::restoreWindow);
     m_trayDisconnect = translated(menu->addAction(QString()), "text", "otg.action.disconnect");
     m_trayDisconnect->setObjectName("trayDisconnect");
-    connect(m_trayDisconnect, &QAction::triggered, &m_session, &Session::stop);
+    setTranslatedProperty(m_trayDisconnect, "text", "otg.multi.disconnect_all");
+    connect(m_trayDisconnect, &QAction::triggered, &m_connections, &ConnectionManager::stopAll);
     menu->addSeparator();
     auto *quit = translated(menu->addAction(QString()), "text", "otg.tray.quit");
     quit->setObjectName("trayQuit");
@@ -137,8 +150,8 @@ void MainWindow::updateTray()
 {
     if (!m_tray)
         return;
-    m_tray->setToolTip(QString("Deskflow OTG · %1").arg(m_status->text()));
-    m_trayDisconnect->setEnabled(m_disconnect->isEnabled());
+    m_tray->setToolTip(QString("Deskflow OTG · %1\n%2").arg(m_summary->text(), m_connections.status(m_selectedId)));
+    m_trayDisconnect->setEnabled(m_connections.busy());
 }
 
 void MainWindow::changeEvent(QEvent *event)
@@ -166,15 +179,23 @@ QWidget *MainWindow::pathField(QLineEdit *&field, const char *placeholderId)
     return row;
 }
 
-MainWindow::MainWindow() : m_session(this), m_autoConnect(this)
+MainWindow::MainWindow() : m_connections(this), m_autoConnect(this)
 {
     QSettings settings;
+    if (settings.beginReadArray("devices") > 0) {
+        settings.setArrayIndex(0);
+        m_selectedId = settings.value("id", "initial").toString();
+        if (m_selectedId.isEmpty()) m_selectedId = "initial";
+    }
+    settings.endArray();
+    m_session = m_connections.addDevice(m_selectedId);
+    m_autoConnect.setMultipleDevices(true);
     auto &languages = LanguageManager::instance();
     const QString savedLanguage = settings.value("language", LanguageManager::systemLanguage()).toString();
     if (!languages.setLanguage(savedLanguage))
         languages.setLanguage(LanguageManager::systemLanguage());
     setTranslatedProperty(this, "windowTitle", "otg.window.title");
-    resize(800, 780);
+    resize(1000, 820);
     auto *central = new QWidget;
     auto *root = new QVBoxLayout(central);
     root->setContentsMargins(20, 16, 20, 16);
@@ -203,12 +224,50 @@ MainWindow::MainWindow() : m_session(this), m_autoConnect(this)
     auto *intro = translated(new QLabel, "text", "otg.window.intro");
     root->addWidget(intro);
 
+    m_summary = new QLabel;
+    m_summary->setObjectName("connectionSummary");
+    root->addWidget(m_summary);
+    auto *splitter = new QSplitter;
+    auto *sidebar = new QWidget;
+    auto *sidebarLayout = new QVBoxLayout(sidebar);
+    sidebarLayout->setContentsMargins(0, 0, 8, 0);
+    m_deviceSidebar = new QListWidget;
+    m_deviceSidebar->setObjectName("deviceSidebar");
+    m_deviceSidebar->setMinimumWidth(180);
+    sidebarLayout->addWidget(m_deviceSidebar, 1);
+    m_addDevice = translated(new QPushButton, "text", "otg.multi.add_device");
+    m_addDevice->setObjectName("addDeviceButton");
+    sidebarLayout->addWidget(m_addDevice);
+    m_removeDevice = translated(new QPushButton, "text", "otg.multi.remove_device");
+    m_removeDevice->setObjectName("removeDeviceButton");
+    sidebarLayout->addWidget(m_removeDevice);
+    m_connectAll = translated(new QPushButton, "text", "otg.multi.connect_all");
+    m_connectAll->setObjectName("connectAllButton");
+    m_disconnectAll = translated(new QPushButton, "text", "otg.multi.disconnect_all");
+    m_disconnectAll->setObjectName("disconnectAllButton");
+    sidebarLayout->addWidget(m_connectAll);
+    sidebarLayout->addWidget(m_disconnectAll);
+    splitter->addWidget(sidebar);
+    auto *right = new QWidget;
+    auto *rightLayout = new QVBoxLayout(right);
+    rightLayout->setContentsMargins(0, 0, 0, 0);
+    m_tabs = new QTabWidget;
+    m_tabs->setObjectName("deviceTabs");
+    rightLayout->addWidget(m_tabs, 1);
+    splitter->addWidget(right);
+    splitter->setStretchFactor(1, 1);
+    root->addWidget(splitter, 3);
+
     m_form = new QWidget;
     auto *formLayout = new QVBoxLayout(m_form);
     formLayout->setContentsMargins(0, 0, 0, 0);
     auto *deviceBox = translated(new QGroupBox, "title", "otg.section.device");
+    m_deviceBox = deviceBox;
     auto *deviceForm = new QFormLayout(deviceBox);
     m_deviceForm = deviceForm;
+    m_alias = new QLineEdit;
+    m_alias->setObjectName("deviceAlias");
+    addTranslatedRow(deviceForm, "otg.multi.alias", m_alias);
     m_transport = new QComboBox;
     m_transport->setObjectName("transportSelector");
     m_transport->addItem(qtTrId("otg.transport.usb"), "usb");
@@ -240,7 +299,7 @@ MainWindow::MainWindow() : m_session(this), m_autoConnect(this)
                                  QMessageBox::Ok | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Ok)
             return;
 #ifdef Q_OS_WIN
-        m_session.stopBleProvider();
+        m_session->stopBleProvider();
         return;
 #endif
         m_stoppingBleService = true;
@@ -315,17 +374,36 @@ MainWindow::MainWindow() : m_session(this), m_autoConnect(this)
     m_direction->addItem(qtTrId("otg.position.left"), "left");
     m_direction->addItem(qtTrId("otg.position.up"), "up");
     m_direction->addItem(qtTrId("otg.position.down"), "down");
-    addTranslatedRow(serverForm, "otg.label.position", m_direction);
+    m_layoutBox = new QWidget;
+    auto *layoutForm = new QFormLayout(m_layoutBox);
+    m_layoutCanvas = new ScreenLayoutPreview;
+    m_layoutCanvas->setObjectName("screenLayoutCanvas");
+    layoutForm->addRow(m_layoutCanvas);
+    m_neighbor = new QComboBox;
+    m_neighbor->setObjectName("screenNeighbor");
+    addTranslatedRow(layoutForm, "otg.multi.neighbor", m_neighbor);
+    addTranslatedRow(layoutForm, "otg.label.position", m_direction);
+    m_layoutPreview = new QLabel;
+    m_layoutPreview->setObjectName("layoutPreview");
+    m_layoutPreview->setWordWrap(true);
+    m_layoutPreview->setTextFormat(Qt::PlainText);
+    layoutForm->addRow(m_layoutPreview);
+    auto *layoutHint = translated(new QLabel, "text", "otg.multi.layout_hint");
+    layoutHint->setWordWrap(true);
+    layoutForm->addRow(layoutHint);
     m_computer = new QLineEdit;
     m_phone = new QLineEdit;
     m_host = new QLineEdit;
     m_port = new QSpinBox;
     m_port->setRange(1, 65535);
     addTranslatedRow(serverForm, "otg.label.computer_name", m_computer);
-    addTranslatedRow(serverForm, "otg.label.phone_name", m_phone);
+    m_phone->setObjectName("screenName");
+    addTranslatedRow(deviceForm, "otg.label.phone_name", m_phone);
     addTranslatedRow(serverForm, "otg.label.server_address", m_host);
     addTranslatedRow(serverForm, "otg.label.server_port", m_port);
-    formLayout->addWidget(serverBox);
+    m_sharedBox = new QWidget;
+    auto *sharedLayout = new QVBoxLayout(m_sharedBox);
+    sharedLayout->addWidget(serverBox);
 
     auto *advancedBox = translated(new QGroupBox, "title", "otg.section.programs");
     auto *advancedForm = new QFormLayout(advancedBox);
@@ -336,13 +414,17 @@ MainWindow::MainWindow() : m_session(this), m_autoConnect(this)
     m_mouseMode->setObjectName("mouseMode");
     m_mouseMode->addItem(qtTrId("otg.mouse.absolute"), "absolute");
     m_mouseMode->addItem(qtTrId("otg.mouse.relative"), "relative");
-    addTranslatedRow(advancedForm, "otg.label.mouse_mode", m_mouseMode);
-    formLayout->addWidget(advancedBox);
+    addTranslatedRow(deviceForm, "otg.label.mouse_mode", m_mouseMode);
+    sharedLayout->addWidget(advancedBox);
+    sharedLayout->addStretch();
+    formLayout->addStretch();
     auto *scroll = new QScrollArea;
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setWidget(m_form);
-    root->addWidget(scroll, 3);
+    m_tabs->addTab(scroll, QString());
+    m_tabs->addTab(m_layoutBox, QString());
+    m_tabs->addTab(m_sharedBox, QString());
 
     auto *buttons = new QHBoxLayout;
     m_status = translated(new QLabel, "text", "otg.status.not_connected");
@@ -354,9 +436,12 @@ MainWindow::MainWindow() : m_session(this), m_autoConnect(this)
     buttons->addWidget(m_status, 1);
     buttons->addWidget(m_connect);
     buttons->addWidget(m_disconnect);
-    root->addLayout(buttons);
+    rightLayout->addLayout(buttons);
     auto *logHeader = new QHBoxLayout;
     logHeader->addWidget(translated(new QLabel, "text", "otg.log.title"), 1);
+    m_logFilter = new QComboBox;
+    m_logFilter->setObjectName("logFilter");
+    logHeader->addWidget(m_logFilter);
     auto *clearLog = translated(new QPushButton, "text", "otg.action.clear_log");
     clearLog->setObjectName("clearLogButton");
     logHeader->addWidget(clearLog);
@@ -368,7 +453,8 @@ MainWindow::MainWindow() : m_session(this), m_autoConnect(this)
     m_log->setMinimumHeight(100);
     setTranslatedProperty(m_log, "placeholderText", "otg.log.placeholder");
     root->addWidget(m_log, 1);
-    connect(clearLog, &QPushButton::clicked, m_log, &QPlainTextEdit::clear);
+    connect(clearLog, &QPushButton::clicked, this, [this] { m_logHistory.clear(); m_log->clear(); });
+    connect(m_logFilter, &QComboBox::currentIndexChanged, this, &MainWindow::refreshLog);
     setCentralWidget(central);
 
     m_adb->setText(settings.value("adb", findAdb()).toString());
@@ -400,6 +486,26 @@ MainWindow::MainWindow() : m_session(this), m_autoConnect(this)
     settings.endArray();
     m_autoConnect.setKnownSerials(m_profiles.keys());
     m_autoConnectEnabled->setChecked(settings.value("autoConnect", false).toBool());
+    m_alias->setText(m_phone->text());
+    m_neighbor->addItem(m_computer->text(), m_computer->text());
+    m_records.insert(m_selectedId, deviceProfile());
+    const int deviceCount = settings.beginReadArray("devices");
+    for (int i = 0; i < deviceCount; ++i) {
+        settings.setArrayIndex(i);
+        const auto id = settings.value("id").toString();
+        const auto profile = settings.value("profile").toMap();
+        if (!id.isEmpty() && !profile.isEmpty()) {
+            if (i == 0) {
+                // Reuse the initial Session so existing single-device settings migrate naturally.
+                m_records[m_selectedId] = profile;
+            } else {
+                m_records[id] = profile;
+                m_connections.addDevice(id);
+            }
+        }
+    }
+    settings.endArray();
+    if (deviceCount > 0) applyDeviceProfile(m_records.value(m_selectedId));
     if (m_transport->currentData() == "ble")
 #ifdef Q_OS_WIN
         setTranslatedProperty(m_deviceStatus, "text", "otg.ble.windows_setup_hint");
@@ -407,15 +513,36 @@ MainWindow::MainWindow() : m_session(this), m_autoConnect(this)
         setTranslatedProperty(m_deviceStatus, "text", "otg.ble.setup_hint");
 #endif
     connect(m_autoConnectEnabled, &QCheckBox::toggled, this, [this](bool enabled) {
+        if (m_loadingDevice) return;
         QSettings().setValue("autoConnect", enabled);
-        m_autoConnect.setEnabled(enabled && m_transport->currentData() == "usb");
+        if (!m_loadingDevice) {
+            storeDevice();
+            persistDevices();
+        }
+        updateAutoConnect();
     });
     connect(&m_autoConnect, &UsbAutoConnect::connectRequested, this, [this](const QString &serial) {
-        if (m_transport->currentData() != "usb" || m_closing || m_scanning || m_session.state() != Session::State::Idle || !m_profiles.contains(serial))
+        if (m_closing || !m_profiles.contains(serial))
             return;
-        applyDeviceProfile(m_profiles.value(serial));
-        appendLog(qtTrId("otg.auto_connect.connecting").arg(serial));
-        connectDevice();
+        storeDevice();
+        for (auto it = m_records.cbegin(); it != m_records.cend(); ++it) {
+            if (it->value("transport", "usb") != "usb" || it->value("serial").toString() != serial ||
+                !it->value("autoConnect", false).toBool() || m_connections.state(it.key()) != Session::State::Idle) continue;
+            auto profile = m_profiles.value(serial);
+            // Global server fields come from the shared form, not an old remembered profile.
+            profile["phone"] = it->value("phone");
+            profile["neighbor"] = it->value("neighbor");
+            profile["direction"] = it->value("direction", "right");
+            profile["alias"] = it->value("alias");
+            profile["autoConnect"] = true;
+            profile["transport"] = "usb";
+            m_records[it.key()] = profile; // Show the exact parameters used, even for a background device.
+            m_pendingProfiles[it.key()] = profile;
+            appendLog(qtTrId("otg.auto_connect.connecting").arg(serial));
+            m_connections.start(it.key(), connectionOptions(profile), layoutConfiguration());
+            if (it.key() == m_selectedId) applyDeviceProfile(profile);
+            break;
+        }
     });
     connect(&m_autoConnect, &UsbAutoConnect::scanFailed, this, [this] {
         appendLog(qtTrId("otg.auto_connect.scan_failed"));
@@ -441,23 +568,45 @@ MainWindow::MainWindow() : m_session(this), m_autoConnect(this)
 #else
                               "otg.ble.setup_hint" : "otg.device.manual_hint");
 #endif
-        m_autoConnect.setEnabled(m_autoConnectEnabled->isChecked() && m_transport->currentData() == "usb");
         updateEnabled();
     });
     connect(m_connect, &QPushButton::clicked, this, &MainWindow::connectDevice);
-    connect(m_disconnect, &QPushButton::clicked, &m_session, &Session::stop);
-    connect(&m_session, &Session::log, this, &MainWindow::appendLog);
-    connect(&m_session, &Session::bleProviderChanged, this, &MainWindow::updateEnabled);
-    connect(&m_session, &Session::usbAttached, &m_autoConnect, &UsbAutoConnect::suppressAttachment);
-    connect(&m_session, &Session::changed, this, [this](Session::State state, const QString &message) {
+    connect(m_disconnect, &QPushButton::clicked, this, [this] { m_connections.stop(m_selectedId); });
+    connect(&m_connections, &ConnectionManager::log, this, [this](const QString &id, const QString &message) {
+        const auto name = m_records.value(id).value("phone", id).toString();
+        appendLog(id.isEmpty() ? message : "[" + name + "] " + message, id);
+    });
+    connect(&m_connections, &ConnectionManager::usbAttached, &m_autoConnect, &UsbAutoConnect::suppressAttachment);
+    connect(&m_connections, &ConnectionManager::changed, this, [this](const QString &id) {
         m_sessionStatus = true;
-        m_status->setText(message);
-        if (state == Session::State::Connected && m_transport->currentData() == "usb")
-            rememberDevice();
+        m_status->setText(m_connections.status(m_selectedId));
+        if (!id.isEmpty() && m_connections.state(id) == Session::State::Connected && m_pendingProfiles.contains(id)) {
+            const auto profile = m_pendingProfiles.take(id);
+            if (profile.value("transport", "usb") == "usb") {
+                m_pendingProfile = profile;
+                rememberDevice();
+            }
+        }
         updateEnabled();
-        if (m_closing && state == Session::State::Idle)
+        updateDeviceList();
+        if (m_closing && m_connections.settled())
             QTimer::singleShot(0, this, &QWidget::close);
     });
+    connect(m_addDevice, &QPushButton::clicked, this, &MainWindow::addDevice);
+    connect(m_removeDevice, &QPushButton::clicked, this, &MainWindow::removeDevice);
+    connect(m_deviceSidebar, &QListWidget::currentItemChanged, this, [this](QListWidgetItem *current) {
+        if (current) selectDevice(current->data(Qt::UserRole).toString());
+    });
+    connect(m_connectAll, &QPushButton::clicked, this, &MainWindow::connectAll);
+    connect(m_disconnectAll, &QPushButton::clicked, &m_connections, &ConnectionManager::stopAll);
+    connect(m_neighbor, &QComboBox::currentIndexChanged, this, [this] {
+        if (!m_loadingDevice) { storeDevice(); updateLayoutPreview(); }
+    });
+    connect(m_direction, &QComboBox::currentIndexChanged, this, [this] {
+        if (!m_loadingDevice) { storeDevice(); updateLayoutPreview(); }
+    });
+    connect(m_phone, &QLineEdit::editingFinished, this, [this] { storeDevice(); updateDeviceList(); updateLayoutPreview(); });
+    connect(m_computer, &QLineEdit::editingFinished, this, &MainWindow::updateLayoutPreview);
     connect(m_language, &QComboBox::currentIndexChanged, this, [this] {
         const QString language = m_language->currentData().toString();
         if (LanguageManager::instance().setLanguage(language)) {
@@ -471,7 +620,7 @@ MainWindow::MainWindow() : m_session(this), m_autoConnect(this)
     updateEnabled();
     QTimer::singleShot(0, this, [this] {
         m_autoConnect.setProgram(bridgeExecutable());
-        m_autoConnect.setEnabled(m_autoConnectEnabled->isChecked() && m_transport->currentData() == "usb");
+        updateAutoConnect();
         // A remembered phone uses its saved dimensions, not ADB. In particular,
         // do not start ADB or prompt for USB debugging during auto-connect.
         if (m_transport->currentData() == "usb" && (!m_autoConnectEnabled->isChecked() || m_profiles.isEmpty()))
@@ -479,15 +628,247 @@ MainWindow::MainWindow() : m_session(this), m_autoConnect(this)
     });
 }
 
-void MainWindow::appendLog(const QString &text)
+void MainWindow::appendLog(const QString &text, const QString &id)
 {
-    if (!text.isEmpty())
-        m_log->appendPlainText(QTime::currentTime().toString("HH:mm:ss ") + text);
+    if (text.isEmpty()) return;
+    const auto line = QTime::currentTime().toString("HH:mm:ss ") + text;
+    m_logHistory.append({id, line});
+    if (m_logHistory.size() > 1200) m_logHistory.removeFirst();
+    const auto filter = m_logFilter->currentData().toString();
+    if (filter == "*" || filter == id) m_log->appendPlainText(line);
+}
+
+void MainWindow::refreshLog()
+{
+    const auto filter = m_logFilter->currentData().toString();
+    QStringList lines;
+    for (const auto &entry : m_logHistory)
+        if (filter == "*" || filter == entry.first) lines.append(entry.second);
+    m_log->setPlainText(lines.join('\n'));
+}
+
+void MainWindow::storeDevice()
+{
+    if (m_loadingDevice || !m_uiReady) return;
+    const auto oldName = m_records.value(m_selectedId).value("phone").toString();
+    m_records[m_selectedId] = deviceProfile();
+    const auto name = m_phone->text().trimmed();
+    if (!oldName.isEmpty() && oldName != name) {
+        for (auto &record : m_records)
+            if (record.value("neighbor").toString() == oldName) record["neighbor"] = name;
+    }
+}
+
+void MainWindow::persistDevices()
+{
+    QSettings settings;
+    settings.beginWriteArray("devices", m_records.size());
+    // Keep the stable initial ID first; selection must never change record identity.
+    QStringList ids = m_records.keys();
+    if (ids.removeAll("initial")) ids.prepend("initial");
+    int index = 0;
+    for (const auto &id : ids) {
+        settings.setArrayIndex(index++);
+        settings.setValue("id", id);
+        settings.setValue("profile", m_records.value(id));
+    }
+    settings.endArray();
+}
+
+void MainWindow::updateAutoConnect()
+{
+    QStringList known;
+    QMap<QString, int> counts;
+    for (const auto &record : m_records)
+        if (record.value("transport", "usb") == "usb") ++counts[record.value("serial").toString()];
+    for (const auto &record : m_records) {
+        const auto serial = record.value("serial").toString();
+        if (record.value("transport", "usb") == "usb" && counts.value(serial) == 1 &&
+            record.value("autoConnect", false).toBool() && m_profiles.contains(serial))
+            known.append(serial);
+    }
+    m_autoConnect.setKnownSerials(known);
+    m_autoConnect.setEnabled(!known.isEmpty() && !m_closing);
+}
+
+void MainWindow::addDevice()
+{
+    if (m_connections.busy() || m_closing) return;
+    storeDevice();
+    auto profile = deviceProfile();
+    QString name;
+    int number = m_records.size() + 1;
+    do {
+        name = "android-" + QString::number(number++);
+    } while (std::any_of(m_records.cbegin(), m_records.cend(), [&](const QVariantMap &record) {
+        return record.value("phone").toString().compare(name, Qt::CaseInsensitive) == 0;
+    }));
+    profile["phone"] = name;
+    profile["alias"] = name;
+    profile["serial"] = "";
+    profile["transport"] = "usb";
+    profile["blePeer"] = "";
+    profile["bleIsolate"] = false;
+    profile["autoConnect"] = false;
+    profile["neighbor"] = m_phone->text().trimmed();
+    profile["direction"] = "right";
+    const auto id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    m_records[id] = profile;
+    m_connections.addDevice(id);
+    selectDevice(id);
+    persistDevices();
+}
+
+void MainWindow::removeDevice()
+{
+    if (m_closing || m_connections.busy() || m_records.size() <= 1) return;
+    storeDevice();
+    const auto name = m_records.value(m_selectedId).value("phone").toString();
+    for (auto it = m_records.cbegin(); it != m_records.cend(); ++it) {
+        if (it.key() != m_selectedId && it->value("neighbor").toString() == name) {
+            QMessageBox::warning(this, qtTrId("otg.multi.remove_device"), qtTrId("otg.multi.remove_dependency"));
+            return;
+        }
+    }
+    if (!m_connections.removeDevice(m_selectedId)) return;
+    m_records.remove(m_selectedId);
+    m_pendingProfiles.remove(m_selectedId);
+    m_selectedId.clear();
+    m_loadingDevice = true;
+    selectDevice(m_records.firstKey());
+    m_loadingDevice = false;
+    persistDevices();
+    updateAutoConnect();
+}
+
+void MainWindow::selectDevice(const QString &id)
+{
+    if (id == m_selectedId || !m_records.contains(id) || m_closing) return;
+    storeDevice();
+    m_selectedId = id;
+    m_session = m_connections.session(id);
+    applyDeviceProfile(m_records.value(id));
+    m_sessionStatus = true;
+    m_status->setText(m_connections.status(id));
+    updateDeviceList();
+    updateLayoutPreview();
+    updateEnabled();
+}
+
+void MainWindow::updateDeviceList()
+{
+    QSignalBlocker blocker(m_deviceSidebar);
+    m_deviceSidebar->clear();
+    int connected = 0;
+    const char *states[] = {"otg.status.not_connected", "otg.status.connecting", "otg.multi.connected", "otg.status.disconnecting"};
+    for (auto it = m_records.cbegin(); it != m_records.cend(); ++it) {
+        const auto state = m_connections.state(it.key());
+        connected += state == Session::State::Connected;
+        const auto alias = it->value("alias").toString();
+        const auto name = it->value("phone").toString();
+        const auto transport = it->value("transport", "usb").toString().toUpper();
+        auto *item = new QListWidgetItem(QString("%1\n%2 · %3\n%4")
+            .arg(alias.isEmpty() ? name : alias, transport, name,
+                 qtTrId(m_connections.hasFailure(it.key()) ? "otg.multi.failed" : states[int(state)])), m_deviceSidebar);
+        item->setData(Qt::UserRole, it.key());
+        item->setToolTip(m_connections.status(it.key()));
+        if (it.key() == "initial") {
+            m_deviceSidebar->takeItem(m_deviceSidebar->row(item));
+            m_deviceSidebar->insertItem(0, item);
+        }
+        if (it.key() == m_selectedId) m_deviceSidebar->setCurrentItem(item);
+    }
+    m_summary->setText(qtTrId("otg.multi.summary").arg(connected).arg(m_records.size()).arg(
+        m_manage->isChecked() ? qtTrId(m_connections.serverState() == DeskflowServer::State::Running ?
+                                    "otg.multi.server_running" : "otg.multi.server_stopped") : qtTrId("otg.multi.external_server")));
+    const auto filter = m_logFilter->currentData();
+    QSignalBlocker logBlocker(m_logFilter);
+    m_logFilter->clear();
+    m_logFilter->addItem(qtTrId("otg.multi.all_logs"), "*");
+    m_logFilter->addItem(qtTrId("otg.multi.service_logs"), "");
+    for (auto it = m_records.cbegin(); it != m_records.cend(); ++it)
+        m_logFilter->addItem(it->value("phone").toString(), it.key());
+    m_logFilter->setCurrentIndex(qMax(0, m_logFilter->findData(filter)));
+    updateTray();
+}
+
+void MainWindow::updateLayoutPreview()
+{
+    const auto selectedNeighbor = m_records.value(m_selectedId).value("neighbor", m_computer->text()).toString();
+    QSignalBlocker blocker(m_neighbor);
+    m_neighbor->clear();
+    m_neighbor->addItem(m_computer->text(), m_computer->text());
+    QStringList lines;
+    QList<ScreenLink> screens;
+    for (auto it = m_records.cbegin(); it != m_records.cend(); ++it) {
+        const auto name = it->value("phone").toString();
+        if (it.key() != m_selectedId) m_neighbor->addItem(name, name);
+        const auto direction = it->value("direction", "right").toString();
+        const auto neighbor = it->value("neighbor", m_computer->text()).toString();
+        screens.append({name, neighbor, direction});
+        const auto index = m_direction->findData(direction);
+        lines.append(qtTrId("otg.multi.layout_edge").arg(name, neighbor, index < 0 ? direction : m_direction->itemText(index)));
+    }
+    if (m_neighbor->findData(selectedNeighbor) < 0) m_neighbor->addItem(selectedNeighbor, selectedNeighbor);
+    m_neighbor->setCurrentIndex(m_neighbor->findData(selectedNeighbor));
+    if (layoutConfiguration().isEmpty()) lines.append(qtTrId("otg.multi.invalid_layout"));
+    m_layoutPreview->setText(lines.join("\n\n"));
+    m_layoutCanvas->setScreens(m_computer->text(), screens, m_phone->text());
+}
+
+QString MainWindow::layoutConfiguration() const
+{
+    QList<ScreenLink> screens;
+    for (const auto &record : m_records)
+        screens.append({record.value("phone").toString(), record.value("neighbor", m_computer->text()).toString(),
+                        record.value("direction", "right").toString()});
+    return serverConfiguration(m_computer->text().trimmed(), screens);
+}
+
+ConnectionOptions MainWindow::connectionOptions(const QVariantMap &profile) const
+{
+    ConnectionOptions options;
+    options.bridge = bridgeExecutable();
+    options.deskflow = m_deskflow->text().trimmed();
+    options.computer = m_computer->text().trimmed();
+    options.host = m_host->text().trimmed();
+    options.port = m_port->value();
+    options.manageServer = m_manage->isChecked();
+    options.phone = profile.value("phone", "android").toString();
+    options.serial = profile.value("serial").toString();
+    options.transport = profile.value("transport", "usb").toString();
+    options.mouseMode = options.transport == "ble" ? "absolute" : profile.value("mouseMode", "absolute").toString();
+    options.blePeer = profile.value("blePeer").toString();
+#ifdef Q_OS_LINUX
+    options.adapter = profile.value("bleAdapter", "hci0").toString();
+    options.bleIsolate = profile.value("bleIsolate", false).toBool();
+#else
+    options.adapter.clear();
+#endif
+    const double multiplier = options.mouseMode == "absolute" ? profile.value("sensitivityMultiplier", 1.0).toDouble() : 1.0;
+    options.width = qMax(1, qRound(profile.value("originalWidth", 1080).toInt() / qMax(1.0, multiplier)));
+    options.height = qMax(1, qRound(profile.value("originalHeight", 1920).toInt() / qMax(1.0, multiplier)));
+    return options;
+}
+
+void MainWindow::connectAll()
+{
+    if (m_closing || m_scanning) return;
+    saveSettings();
+    const auto selected = m_selectedId;
+    const auto ids = m_records.keys();
+    for (const auto &id : ids) {
+        if (m_connections.state(id) != Session::State::Idle) continue;
+        selectDevice(id);
+        connectDevice(); // Includes the existing per-adapter isolation confirmation.
+    }
+    selectDevice(selected);
 }
 
 void MainWindow::updateEnabled()
 {
-    const bool idle = m_session.state() == Session::State::Idle;
+    const bool idle = m_connections.state(m_selectedId) == Session::State::Idle;
+    const bool sharedIdle = !m_connections.busy() && m_connections.serverState() == DeskflowServer::State::Idle;
     const bool ble = m_transport->currentData() == "ble";
 #ifdef Q_OS_LINUX
     const bool linuxBle = ble;
@@ -497,22 +878,38 @@ void MainWindow::updateEnabled()
     m_deviceForm->setRowVisible(m_adapter, linuxBle);
     m_deviceForm->setRowVisible(m_blePeer, ble);
     m_deviceForm->setRowVisible(m_bleIsolate, linuxBle);
-    m_deviceForm->setRowVisible(m_stopBleService, linuxBle || (ble && m_session.hasBleProvider()));
+    m_deviceForm->setRowVisible(m_stopBleService, linuxBle || (ble && m_session->hasBleProvider()));
     m_deviceForm->setRowVisible(m_devices->parentWidget(), !ble);
     m_deviceForm->setRowVisible(m_serial, !ble);
     m_deviceForm->setRowVisible(m_autoConnectEnabled, !ble);
     m_programForm->setRowVisible(m_adb->parentWidget(), !ble);
-    m_programForm->setRowVisible(m_mouseMode, !ble);
-    m_autoConnect.setReady(!ble && idle && !m_scanning && !m_closing);
+    m_deviceForm->setRowVisible(m_mouseMode, !ble);
+    m_autoConnect.setReady(!m_closing);
     if (m_closing)
         m_autoConnect.setEnabled(false);
     m_form->setEnabled(idle && !m_scanning && !m_closing && !m_stoppingBleService);
+    m_sharedBox->setEnabled(sharedIdle && !m_closing);
+    m_layoutBox->setEnabled(!m_closing);
+    m_neighbor->setEnabled(sharedIdle && m_manage->isChecked());
+    m_addDevice->setEnabled(sharedIdle && !m_closing);
+    m_removeDevice->setEnabled(sharedIdle && m_records.size() > 1 && !m_session->hasBleProvider() && !m_closing);
+    m_deviceSidebar->setEnabled(!m_closing);
+    bool connectable = false;
+    for (auto it = m_records.cbegin(); it != m_records.cend(); ++it) {
+        const auto profile = it.key() == m_selectedId ? deviceProfile() : it.value();
+        const auto identity = profile.value(profile.value("transport", "usb") == "ble" ? "blePeer" : "serial").toString();
+        connectable |= m_connections.state(it.key()) == Session::State::Idle && !identity.isEmpty();
+    }
+    m_connectAll->setEnabled(connectable && !m_closing && !m_scanning && m_connections.serverState() != DeskflowServer::State::Stopping);
+    m_disconnectAll->setEnabled(m_connections.busy() && !m_closing);
     m_connect->setEnabled(idle && !m_scanning && !m_closing && !m_stoppingBleService &&
+                          m_connections.serverState() != DeskflowServer::State::Stopping &&
                           !(ble ? m_blePeer : m_serial)->text().trimmed().isEmpty());
-    m_disconnect->setEnabled(!idle && m_session.state() != Session::State::Stopping);
+    m_disconnect->setEnabled(!idle && m_connections.state(m_selectedId) != Session::State::Stopping);
     m_host->setEnabled(!m_manage->isChecked());
-    m_direction->setEnabled(m_manage->isChecked());
+    m_direction->setEnabled(sharedIdle && m_manage->isChecked());
     m_computer->setEnabled(m_manage->isChecked());
+    m_phone->setEnabled(sharedIdle || !m_manage->isChecked());
     m_serial->setEnabled(!ble);
     m_devices->setEnabled(!ble);
     m_refresh->setEnabled(!ble);
@@ -521,7 +918,7 @@ void MainWindow::updateEnabled()
     m_adapter->setEnabled(linuxBle);
     m_blePeer->setEnabled(ble);
     m_bleIsolate->setEnabled(linuxBle);
-    m_stopBleService->setEnabled((linuxBle || m_session.hasBleProvider()) && !m_stoppingBleService);
+    m_stopBleService->setEnabled((linuxBle || m_session->hasBleProvider()) && !m_stoppingBleService);
     m_mouseMode->setEnabled(!ble);
     updateTray();
 }
@@ -544,7 +941,7 @@ void MainWindow::updateVirtualSize()
 
 void MainWindow::refreshDevices()
 {
-    if (m_transport->currentData() != "usb" || m_scanning || m_session.state() != Session::State::Idle || m_closing)
+    if (m_transport->currentData() != "usb" || m_scanning || m_connections.state(m_selectedId) != Session::State::Idle || m_closing)
         return;
     if (m_adb->text().trimmed().isEmpty()) {
         setTranslatedProperty(m_deviceStatus, "text", "otg.device.adb_not_found");
@@ -662,50 +1059,34 @@ void MainWindow::readDevice()
 
 void MainWindow::connectDevice()
 {
-    if (m_closing || m_scanning || m_session.state() != Session::State::Idle)
+    if (m_closing || m_scanning || m_connections.state(m_selectedId) != Session::State::Idle)
         return;
     saveSettings();
-    ConnectionOptions options;
-    options.bridge = bridgeExecutable();
-    options.deskflow = m_deskflow->text().trimmed();
-    options.serial = m_serial->text().trimmed();
-    options.transport = m_transport->currentData().toString();
-    options.blePeer = m_blePeer->text().trimmed().toUpper();
-#ifdef Q_OS_LINUX
-    options.adapter = m_adapter->text().trimmed();
-    options.bleIsolate = m_bleIsolate->isChecked();
-#else
-    options.adapter.clear(); // Windows uses the default adapter, never an hciN selector.
-#endif
+    const auto options = connectionOptions(deviceProfile());
     if (options.transport == "ble" && options.bleIsolate &&
         QMessageBox::warning(this, qtTrId("otg.ble.confirm_title"),
                              qtTrId("otg.ble.confirm").arg(options.adapter),
                              QMessageBox::Ok | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Ok)
         return;
-    options.host = m_host->text().trimmed();
-    options.computer = m_computer->text().trimmed();
-    options.phone = m_phone->text().trimmed();
-    options.direction = m_direction->currentData().toString();
-    options.mouseMode = m_mouseMode->currentData().toString();
-    options.port = m_port->value();
-    const auto size = virtualScreenSize();
-    options.width = size.width();
-    options.height = size.height();
-    options.manageServer = m_manage->isChecked();
     if (options.bridge.isEmpty()) {
         m_sessionStatus = false;
         setTranslatedProperty(m_status, "text", "otg.error.bridge_not_found");
         updateTray();
         return;
     }
-    m_pendingProfile = deviceProfile();
+    storeDevice();
+    m_pendingProfiles[m_selectedId] = deviceProfile();
     if (options.transport == "usb") m_autoConnect.suppressSerial(options.serial);
-    m_session.start(options);
+    m_connections.start(m_selectedId, options, layoutConfiguration());
 }
 
 QVariantMap MainWindow::deviceProfile() const
 {
     return {{"serial", m_serial->text().trimmed()},
+            {"alias", m_alias->text().trimmed()},
+            {"transport", m_transport->currentData()}, {"bleAdapter", m_adapter->text()},
+            {"blePeer", m_blePeer->text().trimmed().toUpper()}, {"bleIsolate", m_bleIsolate->isChecked()},
+            {"autoConnect", m_autoConnectEnabled->isChecked()}, {"neighbor", m_neighbor->currentData()},
             {"originalWidth", m_width->value()}, {"originalHeight", m_height->value()},
             {"sensitivityMultiplier", m_sensitivity->value()},
             {"deskflow", m_deskflow->text()}, {"computer", m_computer->text()},
@@ -716,22 +1097,30 @@ QVariantMap MainWindow::deviceProfile() const
 
 void MainWindow::applyDeviceProfile(const QVariantMap &profile)
 {
+    m_loadingDevice = true;
     ++m_request;
+    m_scanning = false;
     const QSignalBlocker blocker(m_devices);
     m_devices->setCurrentIndex(0);
     m_serial->setText(profile.value("serial").toString());
     m_width->setValue(profile.value("originalWidth", 1080).toInt());
     m_height->setValue(profile.value("originalHeight", 1920).toInt());
     m_sensitivity->setValue(profile.value("sensitivityMultiplier", 1.0).toDouble());
-    m_deskflow->setText(profile.value("deskflow").toString());
-    m_computer->setText(profile.value("computer", "computer").toString());
     m_phone->setText(profile.value("phone", "android").toString());
-    m_host->setText(profile.value("host", "127.0.0.1").toString());
-    m_port->setValue(profile.value("port", 24800).toInt());
-    m_manage->setChecked(profile.value("manageServer", true).toBool());
+    m_alias->setText(profile.value("alias", m_phone->text()).toString());
+    m_transport->setCurrentIndex(qMax(0, m_transport->findData(profile.value("transport", "usb"))));
+    m_adapter->setText(profile.value("bleAdapter", "hci0").toString());
+    m_blePeer->setText(profile.value("blePeer").toString());
+    m_bleIsolate->setChecked(profile.value("bleIsolate", false).toBool());
+    m_autoConnectEnabled->setChecked(profile.value("autoConnect", false).toBool());
     m_direction->setCurrentIndex(qMax(0, m_direction->findData(profile.value("direction", "right"))));
     m_mouseMode->setCurrentIndex(qMax(0, m_mouseMode->findData(profile.value("mouseMode", "absolute"))));
+    if (m_transport->currentData() == "ble") m_mouseMode->setCurrentIndex(0);
+    const auto neighbor = profile.value("neighbor", m_computer->text()).toString();
+    if (m_neighbor->findData(neighbor) < 0) m_neighbor->addItem(neighbor, neighbor);
+    m_neighbor->setCurrentIndex(m_neighbor->findData(neighbor));
     setTranslatedProperty(m_deviceStatus, "text", "otg.auto_connect.restored");
+    m_loadingDevice = false;
 }
 
 void MainWindow::rememberDevice()
@@ -749,11 +1138,13 @@ void MainWindow::rememberDevice()
         settings.setValue("profile", profile);
     }
     settings.endArray();
-    m_autoConnect.setKnownSerials(m_profiles.keys());
+    updateAutoConnect();
 }
 
 void MainWindow::saveSettings()
 {
+    storeDevice();
+    persistDevices();
     QSettings settings;
     settings.setValue("adb", m_adb->text());
     settings.setValue("deskflow", m_deskflow->text());
@@ -786,7 +1177,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
         hide();
         return;
     }
-    if (m_session.state() == Session::State::Idle && !m_session.hasBleProvider()) {
+    if (m_connections.settled()) {
         m_closing = true;
         m_autoConnect.setEnabled(false);
         m_tray->hide();
@@ -796,6 +1187,6 @@ void MainWindow::closeEvent(QCloseEvent *event)
     }
     m_closing = true;
     event->ignore();
-    m_session.shutdown();
+    m_connections.shutdown();
     updateEnabled();
 }
