@@ -5,6 +5,8 @@ add_library(otg_gui_support STATIC
   device_info.cpp device_info.h
   process_utils.cpp process_utils.h
   session.cpp session.h
+  deskflow_server.cpp deskflow_server.h
+  connection_manager.cpp connection_manager.h
   usb_auto_connect.cpp usb_auto_connect.h
   i18n.cpp i18n.h
 )
@@ -116,7 +118,7 @@ if(BUILD_TESTING)
   # Copy reference inputs as text: adding .cpp directly to a resource would mark
   # those shared sources HEADER_FILE_ONLY and remove them from other targets.
   set(i18n_test_sources)
-  foreach(name main_window.cpp session.cpp process_utils.cpp)
+  foreach(name main_window.cpp session.cpp process_utils.cpp deskflow_server.cpp connection_manager.cpp)
     set(input "${CMAKE_CURRENT_BINARY_DIR}/i18n-test/${name}.txt")
     configure_file("${name}" "${input}" COPYONLY)
     list(APPEND i18n_test_sources "${input}")

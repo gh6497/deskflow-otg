@@ -3,6 +3,7 @@
 
 #include "device_info.h"
 #include "session.h"
+#include "connection_manager.h"
 #include "usb_auto_connect.h"
 #include <QMainWindow>
 #include <QPointer>
@@ -19,6 +20,9 @@ class QLineEdit;
 class QPlainTextEdit;
 class QPushButton;
 class QSpinBox;
+class QListWidget;
+class QTabWidget;
+class ScreenLayoutPreview;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -54,7 +58,19 @@ private:
     void updateEnabled();
     QSize virtualScreenSize() const;
     void updateVirtualSize();
-    void appendLog(const QString &text);
+    void addDevice();
+    void removeDevice();
+    void selectDevice(const QString &id);
+    void storeDevice();
+    void updateDeviceList();
+    void updateLayoutPreview();
+    void connectAll();
+    ConnectionOptions connectionOptions(const QVariantMap &profile) const;
+    QString layoutConfiguration() const;
+    void persistDevices();
+    void updateAutoConnect();
+    void appendLog(const QString &text, const QString &id = {});
+    void refreshLog();
     QWidget *pathField(QLineEdit *&field, const char *placeholderId);
     struct TextBinding {
         QPointer<QObject> object;
@@ -63,7 +79,20 @@ private:
     };
     QList<TextBinding> m_textBindings;
     QComboBox *m_language;
-    Session m_session;
+    ConnectionManager m_connections;
+    Session *m_session = nullptr;
+    QString m_selectedId = "initial";
+    QMap<QString, QVariantMap> m_records;
+    QMap<QString, QVariantMap> m_pendingProfiles;
+    bool m_loadingDevice = false;
+    QListWidget *m_deviceSidebar;
+    QTabWidget *m_tabs;
+    QWidget *m_deviceBox, *m_sharedBox, *m_layoutBox;
+    QLineEdit *m_alias;
+    QComboBox *m_neighbor;
+    QLabel *m_layoutPreview, *m_summary;
+    ScreenLayoutPreview *m_layoutCanvas;
+    QPushButton *m_connectAll, *m_disconnectAll, *m_addDevice, *m_removeDevice;
     UsbAutoConnect m_autoConnect;
     QMap<QString, QVariantMap> m_profiles;
     QVariantMap m_pendingProfile;
@@ -85,6 +114,8 @@ private:
     QLabel *m_status, *m_deviceStatus;
     QLabel *m_virtualSize;
     QPlainTextEdit *m_log;
+    QComboBox *m_logFilter;
+    QList<QPair<QString, QString>> m_logHistory;
     QFormLayout *m_deviceForm, *m_programForm;
     QList<AndroidDevice> m_deviceList;
     bool m_scanning = false;

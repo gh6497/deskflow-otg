@@ -17,6 +17,9 @@
 #include <QSpinBox>
 #include <QTemporaryDir>
 #include <QSystemTrayIcon>
+#include <QListWidget>
+#include <QTabWidget>
+#include <QTcpServer>
 #include <QtTest>
 
 class TrayTestWindow : public MainWindow {
@@ -41,6 +44,132 @@ protected:
 class WindowTest : public QObject {
     Q_OBJECT
 private slots:
+    void multipleDevices()
+    {
+        QTemporaryDir settingsDir;
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDir.path());
+        QSettings settings;
+        settings.setValue("adb", "");
+        settings.setValue("deskflow", QCoreApplication::applicationDirPath() + "/test_peer");
+        settings.setValue("manageServer", true);
+        settings.setValue("language", "zh_CN");
+        QTcpServer allocator;
+        QVERIFY(allocator.listen(QHostAddress::LocalHost));
+        const auto port = allocator.serverPort(); allocator.close();
+        settings.setValue("port", port);
+        {
+            AutoConnectTestWindow window;
+            window.show();
+            QCoreApplication::processEvents();
+            auto *manager = window.findChild<ConnectionManager *>();
+            auto *list = window.findChild<QListWidget *>("deviceSidebar");
+            auto *tabs = window.findChild<QTabWidget *>("deviceTabs");
+            auto *serial = window.findChild<QLineEdit *>("usbSerial");
+            auto *alias = window.findChild<QLineEdit *>("deviceAlias");
+            auto *width = window.findChild<QSpinBox *>("screenWidth");
+            auto *connectButton = window.findChild<QPushButton *>("connectButton");
+            QVERIFY(manager && list && tabs && serial && alias && width);
+            QCOMPARE(list->count(), 1);
+            serial->setText("A"); alias->setText("Redmi K20 Pro"); width->setValue(1234);
+            window.findChild<QPushButton *>("addDeviceButton")->click();
+            QCOMPARE(list->count(), 2);
+            const auto secondId = list->currentItem()->data(Qt::UserRole).toString();
+            QVERIFY(secondId != "initial");
+            serial->setText("B"); alias->setText("Pixel 8"); width->setValue(1080);
+            connectButton->click();
+            QTRY_COMPARE(manager->state(secondId), Session::State::Connected);
+            QVERIFY(list->isEnabled());
+            QVERIFY(!tabs->widget(2)->isEnabled());
+            QVERIFY(!window.findChild<QPushButton *>("addDeviceButton")->isEnabled());
+            for (int i = 0; i < list->count(); ++i)
+                if (list->item(i)->data(Qt::UserRole) == "initial") list->setCurrentRow(i);
+            QCOMPARE(serial->text(), "A");
+            QCOMPARE(width->value(), 1234);
+            QVERIFY(serial->isEnabled());
+            connectButton->click();
+            QTRY_COMPARE(manager->state("initial"), Session::State::Connected);
+            QCOMPARE(manager->state(secondId), Session::State::Connected);
+            QVERIFY(window.findChild<QLabel *>("connectionSummary")->text().contains("2 / 2"));
+            auto *logFilter = window.findChild<QComboBox *>("logFilter");
+            auto *log = window.findChild<QPlainTextEdit *>("runtimeLog");
+            manager->session("initial")->log("ONLY_A");
+            manager->session(secondId)->log("ONLY_B");
+            logFilter->setCurrentIndex(logFilter->findData(secondId));
+            QVERIFY(log->toPlainText().contains("ONLY_B"));
+            QVERIFY(!log->toPlainText().contains("ONLY_A"));
+            logFilter->setCurrentIndex(logFilter->findData("*"));
+            QVERIFY(log->toPlainText().contains("ONLY_A"));
+            const auto screenshot = qEnvironmentVariable("OTG_TEST_MULTI_SCREENSHOT");
+            if (!screenshot.isEmpty()) {
+                QVERIFY(window.grab().save(screenshot));
+                tabs->setCurrentIndex(1);
+                QCoreApplication::processEvents();
+                QVERIFY(window.grab().save(screenshot + ".layout.png"));
+                tabs->setCurrentIndex(0);
+            }
+            window.findChild<QPushButton *>("disconnectAllButton")->click();
+            QTRY_VERIFY(!manager->busy());
+            QTRY_COMPARE(manager->serverState(), DeskflowServer::State::Idle);
+            // Save with the second record selected: restoring must not merge or lose IDs.
+            for (int i = 0; i < list->count(); ++i)
+                if (list->item(i)->data(Qt::UserRole) == secondId) list->setCurrentRow(i);
+            window.findChild<QPushButton *>("connectAllButton")->click();
+            QTRY_COMPARE(manager->state("initial"), Session::State::Connected);
+            QTRY_COMPARE(manager->state(secondId), Session::State::Connected);
+            window.findChild<QAction *>("trayQuit")->trigger();
+            QTRY_VERIFY(manager->settled());
+        }
+        AutoConnectTestWindow restored;
+        QCOMPARE(restored.findChild<QListWidget *>("deviceSidebar")->count(), 2);
+        QCOMPARE(restored.findChild<QLineEdit *>("usbSerial")->text(), "A");
+        QCOMPARE(restored.findChild<QSpinBox *>("screenWidth")->value(), 1234);
+        auto *list = restored.findChild<QListWidget *>("deviceSidebar");
+        list->setCurrentRow(1);
+        restored.findChild<QPushButton *>("removeDeviceButton")->click();
+        QCOMPARE(list->count(), 1);
+        restored.findChild<QAction *>("trayQuit")->trigger();
+    }
+    void multipleAutoConnectWithoutAdb()
+    {
+        QTemporaryDir dir;
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dir.path());
+        QSettings settings;
+        settings.setValue("adb", "");
+        settings.setValue("manageServer", false);
+        QVariantMap a{{"serial", "A"}, {"phone", "a"}, {"neighbor", "computer"}, {"direction", "right"},
+                      {"autoConnect", true}, {"originalWidth", 1234}, {"originalHeight", 2340}};
+        auto b = a; b["serial"] = "B"; b["phone"] = "b"; b["neighbor"] = "a"; b["originalWidth"] = 1080;
+        settings.beginWriteArray("devices", 2);
+        settings.setArrayIndex(0); settings.setValue("id", "phone-a"); settings.setValue("profile", a);
+        settings.setArrayIndex(1); settings.setValue("id", "phone-b"); settings.setValue("profile", b);
+        settings.endArray();
+        settings.beginWriteArray("rememberedDevices", 2);
+        settings.setArrayIndex(0); settings.setValue("profile", a);
+        settings.setArrayIndex(1); settings.setValue("profile", b);
+        settings.endArray();
+        const auto path = dir.filePath("usb.json");
+        QFile snapshot(path);
+        QVERIFY(snapshot.open(QIODevice::WriteOnly));
+        const QByteArray devices = "{\"version\":1,\"devices\":[{\"id\":\"1:2\",\"serial\":\"A\"},{\"id\":\"1:3\",\"serial\":\"B\"}]}";
+        snapshot.write(devices); snapshot.close();
+        qputenv("OTG_TEST_USB_SNAPSHOT", path.toUtf8());
+        const auto restore = qScopeGuard([] { qunsetenv("OTG_TEST_USB_SNAPSHOT"); });
+        AutoConnectTestWindow window;
+        auto *manager = window.findChild<ConnectionManager *>();
+        auto *monitor = window.findChild<UsbAutoConnect *>();
+        QTRY_COMPARE(manager->state("phone-a"), Session::State::Connected);
+        QTRY_COMPARE(manager->state("phone-b"), Session::State::Connected);
+        QCOMPARE(window.findChild<QLineEdit *>("usbSerial")->text(), "A");
+        manager->stop("phone-a");
+        QTRY_COMPARE(manager->state("phone-a"), Session::State::Idle);
+        QCOMPARE(manager->state("phone-b"), Session::State::Connected);
+        QVERIFY(monitor->acceptSnapshot(devices));
+        QCOMPARE(manager->state("phone-a"), Session::State::Idle);
+        window.findChild<QAction *>("trayQuit")->trigger();
+        QTRY_VERIFY(manager->settled());
+    }
     void transportAvailability()
     {
         QTemporaryDir settingsDir;

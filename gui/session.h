@@ -6,6 +6,7 @@
 #include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QTimer>
+#include "deskflow_server.h"
 class QJsonObject;
 
 struct ConnectionOptions {
@@ -40,8 +41,10 @@ class Session : public QObject {
 public:
     enum class State { Idle, Starting, Connected, Stopping };
     explicit Session(QObject *parent = nullptr);
+    ~Session() override;
     State state() const { return m_state; }
     QString statusMessage() const;
+    bool hasFailure() const { return !m_failureId.isEmpty(); }
     void start(const ConnectionOptions &options);
     void stop();
     void shutdown();
@@ -57,7 +60,6 @@ signals:
 private:
     void setState(State state, const char *id, const QString &detail = {});
     void fail(const char *id, const QString &detail = {});
-    void launchServer(const QString &help);
     void launchBridge();
     void prepareBle(bool started = false, int attempts = 0);
     void startConnection();
@@ -70,10 +72,9 @@ private:
     void endBleProvider();
     ConnectionOptions m_options;
     State m_state = State::Idle;
-    QProcess m_server, m_bridge, m_bleProvider;
-    QTcpSocket m_probe;
-    QTimer m_retry, m_deadline, m_killBridge, m_killServer, m_killBle;
-    QTemporaryDir m_configDir;
+    DeskflowServer m_server;
+    QProcess m_bridge, m_bleProvider;
+    QTimer m_deadline, m_killBridge, m_killBle;
     QByteArray m_events;
     QByteArray m_bleEvents;
     QString m_bleProgram, m_blePeer;

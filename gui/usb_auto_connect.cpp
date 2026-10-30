@@ -221,7 +221,19 @@ bool UsbAutoConnect::acceptSnapshot(const QByteArray &json)
             attachment = it.key();
         }
     }
-    if (eligible == 1 && !candidate.isEmpty()) {
+    if (m_multiple) {
+        QStringList candidates;
+        for (auto it = present.cbegin(); it != present.cend(); ++it) {
+            if (m_known.contains(it.value()) && counts.value(it.value()) == 1 && !m_attempted.contains(it.key())) {
+                m_attempted.insert(it.key());
+                candidates.append(it.value());
+            }
+        }
+        for (const auto &serial : candidates) {
+            if (!m_enabled || !m_ready) break;
+            emit connectRequested(serial);
+        }
+    } else if (eligible == 1 && !candidate.isEmpty()) {
         m_attempted.insert(attachment); // One attempt per USB attachment, even on failure.
         emit connectRequested(candidate);
     }
