@@ -12,6 +12,10 @@ ADB 与 USB HID 可以使用不同的传输。`--serial` 始终是 USB AOA HID �
 `192.168.1.20:5555`。这样 Windows 不需要同时为同一条 USB 连接提供 ADB 和 WinUSB 驱动。
 先在系统设置中完成 Android 无线调试配对，再执行 `adb connect`。
 
+主机端由共享的 `scrcpy_session` 管理 ADB、scrcpy-server、forward 以及音频/控制
+socket 生命周期；`audio_player` 只负责将 RAW PCM 播放到 ALSA/WASAPI。这样只启用
+剪贴板时不依赖音频后端，音频和剪贴板组合启用时仍只启动一个 Android Server。
+
 当前实现使用 scrcpy 的：
 
 - `audio_source=output`

@@ -687,12 +687,17 @@ src/
   bridge.c            键鼠状态机 + HID 报告生成 (对应 scrcpy 的 hid_*)
   keymap.c            deskflow KeyID → USB HID usage 映射
 platform/
+  posix/
+    scrcpy_session.c  ADB/scrcpy-server/forward 与音频、控制 socket 生命周期
   linux/
+    audio_player.c    scrcpy RAW PCM 音频帧与 ALSA 播放
     ble_hid.c         Linux GATT/HID、稳定句柄与已配对设备重连
     ble_supervisor.c  原生隔离、降权子进程、模式快照与异常恢复
     ble_link.c        root 父进程的 HCI 参数监控与低延迟请求
     ble_session.c     常驻 GATT 服务与本地桥接会话
   windows/
+    scrcpy_session.c  Windows ADB/scrcpy-server/forward 与 socket 生命周期
+    audio_player.c    scrcpy RAW PCM 音频帧与 WASAPI 播放
     ble_win.cpp       实验性 Windows 原生 BLE HID 后端
     ble_win.h         Windows BLE 后端的 C 接口
     ble_win_control.c/.h Windows GUI 的 BLE 会话控制解析器

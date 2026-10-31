@@ -46,7 +46,7 @@ int main(void)
     c.cbs.on_clipboard_enabled = cb_clipboard_enabled; c.ud = &s; s.client = &c;
     df_client_enable_clipboard(&c, true);
     int fds[2]; CHECK(!socketpair(AF_UNIX, SOCK_STREAM, 0, fds));
-    CHECK(!otg_clipboard_channel_open(&s.audio.clipboard, fds[0]));
+    CHECK(!otg_clipboard_channel_open(&s.scrcpy.clipboard, fds[0]));
     cb_enter(&s, 100, 200, 42, 0);
     cb_key_down(&s, 0xefe3, 0); /* Ctrl already held as the desktop clip arrives. */
     cb_clipboard(&s, "hello", 5);
@@ -55,7 +55,7 @@ int main(void)
     CHECK(s.held_key_count == 3 && keyboard_count == before);
     clipboard_poll(&s); sent(fds[1], 5);
     CHECK(keyboard_count == before); /* Sending SET is not enough: must await ACK. */
-    ack(fds[1], &s.audio.clipboard); clipboard_poll(&s);
+    ack(fds[1], &s.scrcpy.clipboard); clipboard_poll(&s);
     CHECK(!s.held_key_count && keyboard_count == before + 3);
     CHECK(keyboards[before][0] == 1 && keyboards[before][2] == 0x19);
     CHECK(keyboards[before + 1][0] == 1 && keyboards[before + 1][2] == 0);
@@ -66,7 +66,7 @@ int main(void)
     cb_leave(&s); sent(fds[1], 4);
     CHECK(!s.held_key_count && !s.bridge.active);
     before = keyboard_count;
-    ack(fds[1], &s.audio.clipboard); clipboard_poll(&s);
+    ack(fds[1], &s.scrcpy.clipboard); clipboard_poll(&s);
     CHECK(keyboard_count == before);
     cb_enter(&s, 50, 60, 43, 0);
 
@@ -74,7 +74,7 @@ int main(void)
     cb_key_down(&s, 0xefe3, 0);
     cb_clipboard(&s, "disabled", 8); cb_key_down(&s, 'v', 0);
     df_client_enable_clipboard(&c, false);
-    CHECK(!s.held_key_count && !s.bridge.hid_mods && !s.audio.clipboard.queued);
+    CHECK(!s.held_key_count && !s.bridge.hid_mods && !s.scrcpy.clipboard.queued);
     cb_key_down(&s, 'a', 0); cb_key_up(&s, 'a', 0);
     df_client_enable_clipboard(&c, true);
 
@@ -83,7 +83,7 @@ int main(void)
     cb_key_down(&s, 0xefe3, 0);
     cb_clipboard(&s, "timeout", 7); cb_key_down(&s, 'v', 0);
     clipboard_poll(&s); sent(fds[1], 7);
-    s.audio.clipboard.deadline_ms = 0;
+    s.scrcpy.clipboard.deadline_ms = 0;
     clipboard_poll(&s);
     CHECK(s.clipboard_error && !s.held_key_count && !s.bridge.hid_mods);
     CHECK(s.bridge.active && s.bridge.mouse_buttons == 1);
@@ -92,7 +92,7 @@ int main(void)
     cb_key_down(&s, 'b', 0); cb_key_up(&s, 'b', 0);
     CHECK(keyboard_count == before + 2);
     s.clipboard_error = false;
-    CHECK(!otg_clipboard_channel_open(&s.audio.clipboard, fds[0]));
+    CHECK(!otg_clipboard_channel_open(&s.scrcpy.clipboard, fds[0]));
     df_client_enable_clipboard(&c, true);
     cb_key_down(&s, 0xefe3, 0);
     cb_clipboard(&s, "overflow", 8);
