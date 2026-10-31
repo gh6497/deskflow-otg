@@ -96,6 +96,7 @@ Qt 运行库和 ADB 36.0.2；**不包含 Deskflow**，请自行安装。GUI 启�
 GUI 支持中文和英文，可在窗口右上角切换，立即生效并自动保存。首次启动跟随系统语言
 （中文系统使用中文，其他系统使用英文）。切换语言不会改变设备、连接参数或中断连接；
 已有日志和 ADB / Deskflow / 桥接子进程的原始输出不重新翻译。
+GUI 会跟随当前桌面环境的亮色/暗色方案，并在系统主题运行时变化时自动更新，不保存独立的主题覆盖设置。
 使用 Qt 官方 ID 式国际化，代码通过 `qtTrId("otg.action.connect")` 等稳定 ID 引用文案。
 中英文分别维护在 `gui/translations/deskflow_otg_zh_CN.xml` 和 `deskflow_otg_en.xml`，
 构建时使用 `lrelease -idbased -nounfinished` 编译并嵌入程序，无需额外复制翻译文件。
