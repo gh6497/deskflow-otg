@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "main_window.h"
+#include "system_theme.h"
 #include "build_version.h"
 #include <QApplication>
-#include <QStyleHints>
 #include <cstdio>
 #include <cstring>
 
@@ -16,11 +16,7 @@ int main(int argc, char **argv)
         }
     }
     QApplication app(argc, argv);
-    // Keep the GUI tied to the desktop appearance. Qt updates the default
-    // palette and emits colorSchemeChanged when the system theme changes;
-    // do not install an application palette here, otherwise that mechanism
-    // cannot update widgets that use the platform style.
-    app.styleHints()->setColorScheme(Qt::ColorScheme::Unknown);
+    setupSystemTheme(app);
     app.setQuitOnLastWindowClosed(false);
     QCoreApplication::setOrganizationName("deskflow-otg");
     QCoreApplication::setApplicationName("deskflow-otg-gui");

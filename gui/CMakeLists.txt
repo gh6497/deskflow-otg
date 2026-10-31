@@ -9,10 +9,11 @@ add_library(otg_gui_support STATIC
   connection_manager.cpp connection_manager.h
   usb_auto_connect.cpp usb_auto_connect.h
   i18n.cpp i18n.h
+  system_theme.cpp system_theme.h
 )
 target_include_directories(otg_gui_support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_include_directories(otg_gui_support PUBLIC "${PROJECT_BINARY_DIR}/generated")
-target_link_libraries(otg_gui_support PUBLIC Qt6::Network)
+target_link_libraries(otg_gui_support PUBLIC Qt6::Network Qt6::Widgets)
 if(BUILD_BLE)
   target_compile_definitions(otg_gui_support PUBLIC OTG_GUI_HAVE_BLE=1)
 endif()

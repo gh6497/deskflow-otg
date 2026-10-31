@@ -2,7 +2,9 @@
 #include "main_window.h"
 #include "i18n.h"
 #include "build_version.h"
+#include "system_theme.h"
 #include <QAction>
+#include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -17,6 +19,8 @@
 #include <QSpinBox>
 #include <QTemporaryDir>
 #include <QSystemTrayIcon>
+#include <QPalette>
+#include <QStyleHints>
 #include <QListWidget>
 #include <QTabWidget>
 #include <QTcpServer>
@@ -129,6 +133,26 @@ private slots:
         restored.findChild<QPushButton *>("removeDeviceButton")->click();
         QCOMPARE(list->count(), 1);
         restored.findChild<QAction *>("trayQuit")->trigger();
+    }
+    void systemThemePalette()
+    {
+        auto *hints = QGuiApplication::styleHints();
+        const auto originalScheme = hints->colorScheme();
+        const auto originalPalette = QGuiApplication::palette();
+        const auto restore = qScopeGuard([&] {
+            QGuiApplication::setPalette(originalPalette);
+            hints->setColorScheme(originalScheme);
+        });
+
+        hints->setColorScheme(Qt::ColorScheme::Dark);
+        if (hints->colorScheme() != Qt::ColorScheme::Dark)
+            QSKIP("the offscreen platform does not support overriding the color scheme");
+        syncSystemThemePalette(*qobject_cast<QApplication *>(QCoreApplication::instance()));
+        QVERIFY(QGuiApplication::palette().color(QPalette::Window).lightness() < 128);
+
+        hints->setColorScheme(Qt::ColorScheme::Light);
+        syncSystemThemePalette(*qobject_cast<QApplication *>(QCoreApplication::instance()));
+        QVERIFY(QGuiApplication::palette().color(QPalette::Window).lightness() >= 128);
     }
     void multipleAutoConnectWithoutAdb()
     {
