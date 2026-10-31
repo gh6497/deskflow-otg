@@ -235,8 +235,9 @@ static void usage(const char *prog)
             "      --height H        Virtual screen height, 1..32767 (default %d)\n"
              "      --mouse-mode MODE absolute (default) or relative (compatibility)\n"
               "      --audio             Forward Android output audio through ADB (Linux/Windows)\n"
-             "      --adb PATH          ADB executable for audio (default adb)\n"
-             "      --scrcpy-server PATH  Matching scrcpy-server jar/apk for audio\n"
+              "      --adb PATH          ADB executable for audio (default adb)\n"
+              "      --adb-serial SERIAL ADB device serial for audio (default USB serial)\n"
+              "      --scrcpy-server PATH  Matching scrcpy-server jar/apk for audio\n"
              "      --scrcpy-version VER  Matching scrcpy server version for audio\n"
              "      --gui             JSON status on stdout; stdin byte/EOF stops\n"
             "      --gui-ble-control Windows GUI: pause/resume sessions without recreating GATT\n"
@@ -476,6 +477,7 @@ int main(int argc, char **argv)
     const char *serial = NULL;
     const char *transport = "usb";
     const char *adb_path = "adb";
+    const char *adb_serial = NULL;
     const char *scrcpy_server = NULL;
     const char *scrcpy_version = NULL;
     const char *adapter = "hci0";
@@ -577,6 +579,8 @@ int main(int argc, char **argv)
             audio = 1;
         } else if (strcmp(a, "--adb") == 0 && i + 1 < argc) {
             adb_path = argv[++i];
+        } else if (strcmp(a, "--adb-serial") == 0 && i + 1 < argc) {
+            adb_serial = argv[++i];
         } else if (strcmp(a, "--scrcpy-server") == 0 && i + 1 < argc) {
             scrcpy_server = argv[++i];
         } else if (strcmp(a, "--scrcpy-version") == 0 && i + 1 < argc) {
@@ -594,6 +598,10 @@ int main(int argc, char **argv)
     }
     if (audio && (!serial || !scrcpy_server || !scrcpy_version)) {
         fprintf(stderr, "ERROR: --audio requires -s/--serial, --scrcpy-server and --scrcpy-version\n");
+        return 2;
+    }
+    if (adb_serial && !audio) {
+        fprintf(stderr, "ERROR: --adb-serial requires --audio\n");
         return 2;
     }
     if (audio && strcmp(transport, "usb") != 0) {
@@ -663,8 +671,8 @@ int main(int argc, char **argv)
         g_control.port = port; g_control.width = (unsigned)width; g_control.height = (unsigned)height;
     }
     if (!strcmp(transport, "ble") && !ble_service && !ble_status && !ble_stop_service && !ble_restore &&
-        (ble_session || ble_isolate || serial || adapter_explicit || mouse_mode != OTG_MOUSE_ABSOLUTE)) {
-        fprintf(stderr, "ERROR: Windows BLE supports default adapter and absolute pointer only; Linux service/isolation options and --serial are unsupported\n");
+        (ble_session || ble_isolate || serial || adb_serial || adapter_explicit || mouse_mode != OTG_MOUSE_ABSOLUTE)) {
+        fprintf(stderr, "ERROR: Windows BLE supports default adapter and absolute pointer only; Linux service/isolation options, serial and audio ADB are unsupported\n");
         return 2;
     }
 #ifdef _WIN32
@@ -685,7 +693,7 @@ int main(int argc, char **argv)
 #endif
 #endif
     if(ble_status || ble_stop_service) {
-        if((ble_status && ble_stop_service) || ble_service || ble_session || ble_isolate || ble_restore || g_gui || serial)return 2;
+        if((ble_status && ble_stop_service) || ble_service || ble_session || ble_isolate || ble_restore || g_gui || serial || adb_serial)return 2;
 #ifdef OTG_HAVE_BLE
         return ble_status ? otg_ble_service_status(adapter) : otg_ble_service_stop(adapter);
 #else
@@ -693,7 +701,7 @@ int main(int argc, char **argv)
 #endif
     }
     if(ble_service || ble_session) {
-        if((ble_service && (g_gui || ble_session || ble_isolate || ble_restore || serial)) ||
+        if((ble_service && (g_gui || ble_session || ble_isolate || ble_restore || serial || adb_serial)) ||
            (ble_session && (!ble_peer || ble_restore || strcmp(transport,"ble") || mouse_mode!=OTG_MOUSE_ABSOLUTE))) {
             fprintf(stderr,"ERROR: --ble-service is standalone; --ble-session requires --transport ble, --ble-peer and absolute mouse mode\n");return 2;
         }
@@ -735,7 +743,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "INFO:  AOA HID keyboard + %s pointer ready (screen %dx%d)\n",
                 mouse_mode == OTG_MOUSE_ABSOLUTE ? "absolute" : "relative", width, height);
         if (audio) {
-            if (audio_session_start(&state.audio, adb_path, serial, scrcpy_server,
+            if (audio_session_start(&state.audio, adb_path, adb_serial ? adb_serial : serial, scrcpy_server,
                                     scrcpy_version) != 0) {
                 otg_bridge_close(&state.bridge);
                 return 1;

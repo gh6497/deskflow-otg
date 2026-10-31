@@ -16,6 +16,7 @@ struct ConnectionOptions {
     QString scrcpyServer;
     QString scrcpyVersion;
     QString serial;
+    QString adbSerial;
     QString host = "127.0.0.1";
     QString computer = "computer";
     QString phone = "android";

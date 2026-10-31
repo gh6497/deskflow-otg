@@ -360,14 +360,16 @@ private slots:
             auto *session = window.findChild<Session *>();
             auto *monitor = window.findChild<UsbAutoConnect *>();
             auto *serial = window.findChild<QLineEdit *>("usbSerial");
+            auto *adbSerial = window.findChild<QLineEdit *>("adbSerial");
             auto *width = window.findChild<QSpinBox *>("screenWidth");
             auto *multiplier = window.findChild<QDoubleSpinBox *>("sensitivityMultiplier");
             auto *button = window.findChild<QPushButton *>("connectButton");
-            QVERIFY(enabled && session && monitor && serial && width && multiplier && button);
+            QVERIFY(enabled && session && monitor && serial && adbSerial && width && multiplier && button);
             QVERIFY(!enabled->isChecked());
             // First connect manually with no ADB, then remember only on success.
             QCoreApplication::processEvents();
             serial->setText("TEST123");
+            adbSerial->setText("192.168.1.20:5555");
             width->setValue(1234);
             multiplier->setValue(2.0);
             enabled->setChecked(true);
@@ -376,6 +378,8 @@ private slots:
             QCOMPARE(settings.beginReadArray("rememberedDevices"), 1);
             settings.setArrayIndex(0);
             QCOMPARE(settings.value("profile").toMap().value("originalWidth").toInt(), 1234);
+            QCOMPARE(settings.value("profile").toMap().value("adbSerial").toString(),
+                     QStringLiteral("192.168.1.20:5555"));
             settings.endArray();
             QVERIFY(monitor->acceptSnapshot(phone));
             window.findChild<QAction *>("trayDisconnect")->trigger();

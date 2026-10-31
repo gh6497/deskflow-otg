@@ -209,7 +209,7 @@ static int start_server_process(struct audio_session *session, unsigned scid,
             (void)dup2(null_fd, STDERR_FILENO);
             if (null_fd > STDERR_FILENO) close(null_fd);
         }
-        execl(session->adb_path, session->adb_path, "-s", session->serial,
+        execl(session->adb_path, session->adb_path, "-s", session->adb_serial,
               "shell", "CLASSPATH=" AUDIO_REMOTE_PATH, "app_process", "/",
               "com.genymobile.scrcpy.Server", server_version, "audio=true", "video=false",
               "control=false", "cleanup=true", "tunnel_forward=true",
@@ -326,13 +326,13 @@ static void cleanup_process(struct audio_session *session)
     }
     if (session->forward_port > 0) {
         snprintf(port_arg, sizeof(port_arg), "tcp:%d", session->forward_port);
-        (void)adb_remove_forward(session->adb_path, session->serial, port_arg);
+        (void)adb_remove_forward(session->adb_path, session->adb_serial, port_arg);
         session->forward_port = 0;
     }
 }
 
 int audio_session_start(struct audio_session *session, const char *adb_path,
-                        const char *serial, const char *server_path,
+                        const char *adb_serial, const char *server_path,
                         const char *server_version)
 {
     struct audio_thread_args *args;
@@ -343,16 +343,16 @@ int audio_session_start(struct audio_session *session, const char *adb_path,
     int port;
     memset(session, 0, sizeof(*session));
     session->socket_fd = -1;
-    if (!adb_path || !serial || !server_path || !server_version || !*serial ||
+    if (!adb_path || !adb_serial || !server_path || !server_version || !*adb_serial ||
         !*server_path || !*server_version) {
-        LOG_ERR("audio requires --adb, --serial, --scrcpy-server and --scrcpy-version\n");
+        LOG_ERR("audio requires ADB path, ADB serial, scrcpy-server and scrcpy version\n");
         return -1;
     }
     session->adb_path = copy_string(adb_path);
-    session->serial = copy_string(serial);
+    session->adb_serial = copy_string(adb_serial);
     session->server_path = copy_string(server_path);
-    if (!session->adb_path || !session->serial || !session->server_path) goto fail;
-    if (adb_push(session->adb_path, session->serial, session->server_path) != 0) {
+    if (!session->adb_path || !session->adb_serial || !session->server_path) goto fail;
+    if (adb_push(session->adb_path, session->adb_serial, session->server_path) != 0) {
         LOG_ERR("adb push of scrcpy-server failed\n");
         goto fail;
     }
@@ -363,7 +363,7 @@ int audio_session_start(struct audio_session *session, const char *adb_path,
     snprintf(local, sizeof(local), "tcp:%d", port);
     if (start_server_process(session, scid, server_version) != 0) goto fail;
     session->forward_port = port;
-    if (adb_forward(session->adb_path, session->serial, local, remote) != 0) {
+    if (adb_forward(session->adb_path, session->adb_serial, local, remote) != 0) {
         LOG_ERR("adb forward to %s failed\n", remote);
         goto fail;
     }
@@ -416,7 +416,7 @@ void audio_session_stop(struct audio_session *session)
     }
     cleanup_process(session);
     free(session->adb_path);
-    free(session->serial);
+    free(session->adb_serial);
     free(session->server_path);
     memset(session, 0, sizeof(*session));
     session->socket_fd = -1;

@@ -22,7 +22,7 @@ struct audio_session {
     intptr_t server_pid;
     int forward_port;
     char *adb_path;
-    char *serial;
+    char *adb_serial;
     char *server_path;
     void *thread;
     void *pcm;
@@ -36,7 +36,7 @@ struct audio_session {
  */
 int audio_session_start(struct audio_session *session,
                         const char *adb_path,
-                        const char *serial,
+                        const char *adb_serial,
                         const char *server_path,
                         const char *server_version);
 

@@ -8,12 +8,12 @@
 #include <string.h>
 
 int audio_session_start(struct audio_session *session, const char *adb_path,
-                        const char *serial, const char *server_path,
+                         const char *adb_serial, const char *server_path,
                         const char *server_version)
 {
     (void)session;
     (void)adb_path;
-    (void)serial;
+    (void)adb_serial;
     (void)server_path;
     (void)server_version;
     fprintf(stderr, "ERROR: audio forwarding is not enabled in this build\n");

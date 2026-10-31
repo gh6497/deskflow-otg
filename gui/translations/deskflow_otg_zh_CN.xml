@@ -56,6 +56,9 @@
   <message id="otg.action.refresh"><source>Refresh devices</source><translation>刷新设备</translation></message>
   <message id="otg.label.device"><source>Device</source><translation>设备</translation></message>
   <message id="otg.label.usb_serial"><source>USB serial number</source><translation>USB 序列号</translation></message>
+  <message id="otg.label.adb_serial"><source>ADB serial for audio (optional)</source><translation>音频使用的 ADB 序列号（可选）</translation></message>
+  <message id="otg.adb_serial.placeholder"><source>Leave empty to use the USB serial; e.g. 192.168.1.20:5555</source><translation>留空则使用 USB 序列号；例如 192.168.1.20:5555</translation></message>
+  <message id="otg.adb_serial.tooltip"><source>For wireless ADB audio, pair/connect the phone first, then enter its network ADB serial. USB AOA HID still uses the USB serial above.</source><translation>无线 ADB 音频：先完成手机配对/连接，再填写网络 ADB 序列号。USB AOA HID 仍使用上面的 USB 序列号。</translation></message>
   <message id="otg.device.debugging_required"><source>ADB screen-size detection requires USB debugging and authorization. USB auto-connect does not.</source><translation>ADB 识别尺寸需要 USB 调试及授权；USB 自动连接不需要。</translation></message>
   <message id="otg.action.swap_dimensions"><source>Swap dimensions</source><translation>交换宽高</translation></message>
   <message id="otg.label.original_size"><source>Original screen size</source><translation>原始屏幕尺寸</translation></message>

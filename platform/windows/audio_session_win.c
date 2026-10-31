@@ -154,26 +154,26 @@ done:
     return 0;
 }
 
-int audio_session_start(struct audio_session *s, const char *adb, const char *serial,
+int audio_session_start(struct audio_session *s, const char *adb, const char *adb_serial,
                         const char *server, const char *version) {
     WSADATA wsa; char push[512], forward[128], remote[128];
     STARTUPINFOA si = { sizeof(si) }; PROCESS_INFORMATION pi = {0};
     SOCKET sock; unsigned port = 27183U + (GetCurrentProcessId() % 10000U);
-    if (!s || !adb || !serial || !server || !version) return -1;
+    if (!s || !adb || !adb_serial || !server || !version) return -1;
     memset(s, 0, sizeof(*s)); s->socket_fd = (intptr_t)INVALID_SOCKET;
-    s->adb_path = copy_text(adb); s->serial = copy_text(serial);
+    s->adb_path = copy_text(adb); s->adb_serial = copy_text(adb_serial);
     s->server_path = copy_text(server);
-    if (!s->adb_path || !s->serial || !s->server_path) goto fail;
+    if (!s->adb_path || !s->adb_serial || !s->server_path) goto fail;
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return -1;
     snprintf(push, sizeof(push), "push \"%s\" \"%s\"", server, REMOTE_PATH);
-    if (run_adb(adb, serial, push) != 0) goto fail;
+    if (run_adb(adb, adb_serial, push) != 0) goto fail;
     snprintf(remote, sizeof(remote), "localabstract:scrcpy_%08x", GetCurrentProcessId() & 0x7fffffffU);
     snprintf(forward, sizeof(forward), "tcp:%u tcp:%s", port, remote);
     { char forward_cmd[160]; snprintf(forward_cmd, sizeof(forward_cmd), "forward %s", forward);
-      if (run_adb(adb, serial, forward_cmd) != 0) goto fail; }
+      if (run_adb(adb, adb_serial, forward_cmd) != 0) goto fail; }
     s->forward_port = (intptr_t)port;
     char cmd[2048];
-    snprintf(cmd, sizeof(cmd), "\"%s\" -s \"%s\" shell CLASSPATH=%s app_process / com.genymobile.scrcpy.Server %s audio=true video=false control=false cleanup=true tunnel_forward=true send_device_meta=true send_dummy_byte=false send_stream_meta=true send_frame_meta=true audio_codec=raw audio_source=output scid=%08x", adb, serial, REMOTE_PATH, version, GetCurrentProcessId() & 0x7fffffffU);
+    snprintf(cmd, sizeof(cmd), "\"%s\" -s \"%s\" shell CLASSPATH=%s app_process / com.genymobile.scrcpy.Server %s audio=true video=false control=false cleanup=true tunnel_forward=true send_device_meta=true send_dummy_byte=false send_stream_meta=true send_frame_meta=true audio_codec=raw audio_source=output scid=%08x", adb, adb_serial, REMOTE_PATH, version, GetCurrentProcessId() & 0x7fffffffU);
     if (!CreateProcessA(NULL, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) goto fail;
     s->server_pid = (intptr_t)pi.hProcess; CloseHandle(pi.hThread);
     sock = INVALID_SOCKET;
@@ -195,12 +195,12 @@ void audio_session_stop(struct audio_session *s) {
     if (s->socket_fd != (intptr_t)INVALID_SOCKET) { shutdown((SOCKET)s->socket_fd, SD_BOTH); closesocket((SOCKET)s->socket_fd); s->socket_fd = (intptr_t)INVALID_SOCKET; }
     if (s->thread) { WaitForSingleObject((HANDLE)s->thread, 5000); CloseHandle((HANDLE)s->thread); s->thread = NULL; }
     if (s->server_pid) { TerminateProcess((HANDLE)s->server_pid, 1); WaitForSingleObject((HANDLE)s->server_pid, 1000); CloseHandle((HANDLE)s->server_pid); s->server_pid = 0; }
-    if (s->forward_port && s->adb_path && s->serial) {
+    if (s->forward_port && s->adb_path && s->adb_serial) {
         char command[64]; snprintf(command, sizeof(command), "forward --remove tcp:%ld", (long)s->forward_port);
-        (void)run_adb(s->adb_path, s->serial, command);
+        (void)run_adb(s->adb_path, s->adb_serial, command);
     }
-    free(s->adb_path); free(s->serial); free(s->server_path);
-    s->adb_path = NULL; s->serial = NULL; s->server_path = NULL;
+    free(s->adb_path); free(s->adb_serial); free(s->server_path);
+    s->adb_path = NULL; s->adb_serial = NULL; s->server_path = NULL;
     s->started = false; WSACleanup();
 }
 bool audio_session_started(const struct audio_session *s) { return s && s->started; }
