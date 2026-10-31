@@ -81,8 +81,10 @@ add_executable(deskflow-otg
   src/deskflow_client.c
   src/keymap.c
 )
-if(NOT WIN32 OR NOT BUILD_AUDIO)
-  target_sources(deskflow-otg PRIVATE src/audio_session.c)
+if(LINUX AND BUILD_AUDIO)
+  target_sources(deskflow-otg PRIVATE platform/linux/audio_session.c)
+elseif(NOT WIN32 OR NOT BUILD_AUDIO)
+  target_sources(deskflow-otg PRIVATE src/audio_session_stub.c)
 endif()
 
 if(BUILD_AUDIO)
