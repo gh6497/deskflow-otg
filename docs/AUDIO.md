@@ -19,20 +19,24 @@ Android AudioRecord → scrcpy-server(raw PCM) → ADB forward → ALSA
 ## 构建
 
 Linux 需要 ALSA 开发包和一个与 Android Server 实现匹配的 `scrcpy-server`。
+发布包会直接携带这个 server；运行时不需要安装或检测完整的 `scrcpy` 客户端。
 当前实现按 scrcpy `v5.0.1` 的协议和参数实现：
 
 ```bash
 sudo apt install libasound2-dev
+python3 scripts/fetch_scrcpy_server.py \
+  --output .cache/scrcpy-server-v5.0.1
 cmake -S . -B build-audio \
   -DBUILD_AUDIO=ON \
-  -DSCRCPY_SERVER=$HOME/.local/share/scrcpy/scrcpy-server \
+  -DSCRCPY_SERVER="$PWD/.cache/scrcpy-server-v5.0.1" \
   -DSCRCPY_VERSION=5.0.1 \
   -DBUILD_GUI=ON
 cmake --build build-audio
 ```
 
-`SCRCPY_SERVER` 只负责在安装时复制 server；开发运行时也可以直接通过命令行
-传入路径。
+`fetch_scrcpy_server.py` 第一次运行时从官方 Release 下载并校验 server，之后优先使用
+`.cache/scrcpy/scrcpy-server-v5.0.1` 缓存，不会重复下载。`SCRCPY_SERVER` 只负责在安装时复制 server；
+开发运行时也可以直接通过命令行传入路径。
 
 ## CLI
 
@@ -56,7 +60,8 @@ HID 行为不变。
 
 ## 版本同步
 
-`scrcpy-server` 必须来自与本实现相同的 scrcpy 版本，且通过 `--scrcpy-version`
-传入该版本；Server 会主动拒绝版本不匹配。主机端只依赖 scrcpy
-公开的音频 demux 格式，不复制 scrcpy 的私有客户端代码。升级 scrcpy 时应同时运行
+`scrcpy-server` 必须来自与本实现相同的 scrcpy 版本。打包时通过
+`SCRCPY_SERVER` 和 `SCRCPY_VERSION` 固定 server 及其版本，GUI 只读取包内的
+server 和版本文件，不查找或执行系统 `scrcpy`。Server 会主动拒绝版本不匹配。
+主机端只依赖 scrcpy 公开的音频 demux 格式，不复制 scrcpy 的私有客户端代码。升级 scrcpy 时应同时运行
 音频头、RAW 帧、Android 11/13 设备和拔线清理测试。

@@ -12,9 +12,9 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 option(BUILD_AUDIO "Build scrcpy-compatible ADB audio forwarding" OFF)
 set(SCRCPY_SERVER "" CACHE FILEPATH
-  "Matching scrcpy-server jar/apk to install for BUILD_AUDIO")
+  "Matching scrcpy-server jar/apk to bundle for BUILD_AUDIO")
 set(SCRCPY_VERSION "" CACHE STRING
-  "Version of SCRCPY_SERVER (required by the GUI audio integration)")
+  "Version of the bundled SCRCPY_SERVER")
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
@@ -84,22 +84,27 @@ if(BUILD_AUDIO)
   if(NOT LINUX)
     message(FATAL_ERROR "BUILD_AUDIO currently requires Linux and ALSA")
   endif()
+  if(NOT SCRCPY_SERVER)
+    message(FATAL_ERROR
+      "BUILD_AUDIO requires SCRCPY_SERVER; provide the matching scrcpy-server "
+      "file to bundle with the application")
+  endif()
+  if(NOT SCRCPY_VERSION)
+    message(FATAL_ERROR
+      "BUILD_AUDIO requires SCRCPY_VERSION for the bundled scrcpy-server")
+  endif()
   find_package(ALSA REQUIRED)
   find_package(Threads REQUIRED)
   target_compile_definitions(deskflow-otg PRIVATE OTG_HAVE_AUDIO=1)
   target_link_libraries(deskflow-otg PRIVATE ALSA::ALSA Threads::Threads)
-  if(SCRCPY_SERVER)
-    if(NOT EXISTS "${SCRCPY_SERVER}")
-      message(FATAL_ERROR "SCRCPY_SERVER does not exist: ${SCRCPY_SERVER}")
-    endif()
-    install(FILES "${SCRCPY_SERVER}" DESTINATION share/deskflow-otg
-            RENAME scrcpy-server)
-    if(SCRCPY_VERSION)
-      file(WRITE "${PROJECT_BINARY_DIR}/SCRCPY_VERSION.txt" "${SCRCPY_VERSION}\n")
-      install(FILES "${PROJECT_BINARY_DIR}/SCRCPY_VERSION.txt"
-              DESTINATION share/deskflow-otg)
-    endif()
+  if(NOT EXISTS "${SCRCPY_SERVER}")
+    message(FATAL_ERROR "SCRCPY_SERVER does not exist: ${SCRCPY_SERVER}")
   endif()
+  install(FILES "${SCRCPY_SERVER}" DESTINATION share/deskflow-otg
+          RENAME scrcpy-server)
+  file(WRITE "${PROJECT_BINARY_DIR}/SCRCPY_VERSION.txt" "${SCRCPY_VERSION}\n")
+  install(FILES "${PROJECT_BINARY_DIR}/SCRCPY_VERSION.txt"
+          DESTINATION share/deskflow-otg)
 endif()
 
 option(BUILD_BLE "Build the Linux BLE HID backend" ${LINUX})

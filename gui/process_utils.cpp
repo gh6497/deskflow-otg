@@ -81,13 +81,10 @@ QString findScrcpyServer()
 {
     QStringList paths{
         QCoreApplication::applicationDirPath() + "/scrcpy-server",
-        QCoreApplication::applicationDirPath() + "/share/scrcpy/scrcpy-server",
         QCoreApplication::applicationDirPath() + "/../share/deskflow-otg/scrcpy-server",
-        QDir::homePath() + "/.local/share/scrcpy/scrcpy-server",
-        "/usr/local/share/scrcpy/scrcpy-server",
-        "/usr/share/scrcpy/scrcpy-server",
-        "/usr/local/share/deskflow-otg/scrcpy-server",
-        "/usr/share/deskflow-otg/scrcpy-server",
+        QCoreApplication::applicationDirPath() + "/share/deskflow-otg/scrcpy-server",
+        QCoreApplication::applicationDirPath() + "/../Resources/scrcpy-server",
+        QCoreApplication::applicationDirPath() + "/../Resources/deskflow-otg/scrcpy-server",
     };
     for (const auto &path : paths) {
         if (QFileInfo(path).isFile() && QFileInfo(path).isReadable())
@@ -101,8 +98,8 @@ QString findScrcpyVersion()
     const QStringList versionFiles{
         QCoreApplication::applicationDirPath() + "/../share/deskflow-otg/SCRCPY_VERSION.txt",
         QCoreApplication::applicationDirPath() + "/share/deskflow-otg/SCRCPY_VERSION.txt",
-        "/usr/local/share/deskflow-otg/SCRCPY_VERSION.txt",
-        "/usr/share/deskflow-otg/SCRCPY_VERSION.txt",
+        QCoreApplication::applicationDirPath() + "/../Resources/SCRCPY_VERSION.txt",
+        QCoreApplication::applicationDirPath() + "/../Resources/deskflow-otg/SCRCPY_VERSION.txt",
     };
     for (const auto &path : versionFiles) {
         QFile file(path);
@@ -112,16 +109,7 @@ QString findScrcpyVersion()
                 return version;
         }
     }
-    QString program = QStandardPaths::findExecutable("scrcpy");
-    if (program.isEmpty() && QFileInfo(QDir::homePath() + "/.local/bin/scrcpy").isExecutable())
-        program = QDir::homePath() + "/.local/bin/scrcpy";
-    if (program.isEmpty()) return {};
-    QProcess process;
-    process.start(program, {"--version"});
-    if (!process.waitForFinished(3000)) return {};
-    const auto text = QString::fromUtf8(process.readAllStandardOutput() + process.readAllStandardError());
-    const auto match = QRegularExpression("scrcpy\\s+([0-9]+\\.[0-9]+\\.[0-9]+)").match(text);
-    return match.hasMatch() ? match.captured(1) : QString();
+    return {};
 }
 
 QString findDeskflow()

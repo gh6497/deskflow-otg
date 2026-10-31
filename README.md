@@ -696,6 +696,7 @@ gui/
   usb_auto_connect.cpp USB 热插拔通知、轮询回退与已记住手机的自动连接策略
 scripts/
   fetch_adb.py        固定版本 ADB 下载和 SHA-256 校验
+  fetch_scrcpy_server.py 固定版本 scrcpy-server 下载、缓存和 SHA-256 校验
   fetch_licenses.py   发布包依赖许可证收集
 ```
 
