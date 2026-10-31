@@ -6,6 +6,7 @@ stage/
 dist/
 squashfs-root/
 adb-bundle/
+.cache/
 *.o
 *.a
 compile_commands.json
