@@ -43,6 +43,14 @@ sudo ./build/deskflow-otg --host 127.0.0.1 --port 24800 --name android \
 CMakeLists.txt 用 `find_path`/`find_library` 直接找 libusb，**不依赖 pkg-config**。
 支持 Linux 和 macOS；macOS 默认查找 `/opt/homebrew`、`/usr/local` 及 libusb opt 前缀，
 自定义路径可用 `-DCMAKE_PREFIX_PATH=...`。macOS 通常不需要 sudo，也不使用 udev。
+
+## 跨平台开发规则
+
+- 开发新功能时必须同时评估并兼顾 **Linux、Windows、macOS** 三个平台，不能只实现当前开发环境的平台。
+- 各平台应保持统一的公共接口和生命周期语义；平台差异通过 `platform/linux/`、`platform/windows/`、`platform/posix/` 或对应的条件编译隔离。
+- 如果某个平台暂时无法实现，应先提供可编译的空实现、stub 或明确的占位接口，并保留后续实现所需的调用边界；不得因此破坏该平台的构建。
+- 修改完成后至少验证当前平台构建，并检查另外两个平台的条件编译、源文件纳入和接口声明；能运行跨平台 CI 或对应构建时应一并验证。
+
 共享程序源码在 `src/*.c`，POSIX 会话源码在 `platform/posix/`，Linux 专用源码与头文件在 `platform/linux/`，
 Windows 后端在 `platform/windows/`，回归测试在 `tests/`，没有第三方 vendored 代码。
 
