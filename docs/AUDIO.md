@@ -24,19 +24,16 @@ Linux 需要 ALSA 开发包和一个与 Android Server 实现匹配的 `scrcpy-s
 
 ```bash
 sudo apt install libasound2-dev
-python3 scripts/fetch_scrcpy_server.py \
-  --output .cache/scrcpy-server-v5.0.1
 cmake -S . -B build-audio \
   -DBUILD_AUDIO=ON \
-  -DSCRCPY_SERVER="$PWD/.cache/scrcpy-server-v5.0.1" \
-  -DSCRCPY_VERSION=5.0.1 \
   -DBUILD_GUI=ON
 cmake --build build-audio
 ```
 
-`fetch_scrcpy_server.py` 第一次运行时从官方 Release 下载并校验 server，之后优先使用
-`.cache/scrcpy/scrcpy-server-v5.0.1` 缓存，不会重复下载。`SCRCPY_SERVER` 只负责在安装时复制 server；
-开发运行时也可以直接通过命令行传入路径。
+仓库已经内置并打包 `third_party/scrcpy/scrcpy-server-v5.0.1`，不需要联网下载。
+`fetch_scrcpy_server.py` 仍然保留，用于以后升级 server；它会从官方 Release 下载、校验 SHA-256，
+并使用 `.cache/scrcpy/` 缓存。升级后需要同步修改 CMake 中的版本和文件名，然后提交新的 server 文件。
+也可以通过 `SCRCPY_SERVER` 和 `SCRCPY_VERSION` 覆盖默认值。
 
 ## CLI
 

@@ -698,6 +698,8 @@ scripts/
   fetch_adb.py        固定版本 ADB 下载和 SHA-256 校验
   fetch_scrcpy_server.py 固定版本 scrcpy-server 下载、缓存和 SHA-256 校验
   fetch_licenses.py   发布包依赖许可证收集
+third_party/
+  scrcpy/scrcpy-server-v5.0.1  音频用 Android Server（Apache-2.0）
 ```
 
 ## 与 scrcpy / deskflow 的关系（出处说明）
