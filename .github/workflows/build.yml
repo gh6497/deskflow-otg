@@ -38,7 +38,7 @@ jobs:
           cache: true
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0-dev libglib2.0-dev bluez dbus
+        run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0-dev libasound2-dev libglib2.0-dev bluez dbus
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: brew install cmake libusb
@@ -50,6 +50,9 @@ jobs:
       - name: Configure
         if: runner.os != 'Windows'
         run: cmake -S . -B build -DBUILD_GUI=ON -DOTG_RELEASE_TAG="${{ github.ref_type == 'tag' && github.ref_name || '' }}" -DADB_BUNDLE_DIR="$PWD/adb-bundle/platform-tools" -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-Wall -Wextra -Werror" -DCMAKE_CXX_FLAGS="-Wall -Wextra -Werror"
+      - name: Enable Linux audio
+        if: runner.os == 'Linux'
+        run: cmake -S . -B build -DBUILD_AUDIO=ON -DSCRCPY_VERSION=5.0.1
       - name: Configure Windows with vcpkg
         if: runner.os == 'Windows'
         run: cmake -S . -B build -DBUILD_GUI=ON -DBUILD_BLE_WIN=ON -DOTG_RELEASE_TAG="${{ github.ref_type == 'tag' && github.ref_name || '' }}" -DADB_BUNDLE_DIR="$pwd/adb-bundle/platform-tools" -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static
@@ -161,7 +164,14 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          tar -czf "dist/deskflow-otg-${{ matrix.asset }}.tar.gz" -C build deskflow-otg
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            mkdir -p build/cli-package
+            cp build/deskflow-otg build/cli-package/deskflow-otg
+            cp third_party/scrcpy/scrcpy-server-v5.0.1 build/cli-package/scrcpy-server
+            tar -czf "dist/deskflow-otg-${{ matrix.asset }}.tar.gz" -C build/cli-package .
+          else
+            tar -czf "dist/deskflow-otg-${{ matrix.asset }}.tar.gz" -C build deskflow-otg
+          fi
           tar -czf "dist/deskflow-otg-gui-${{ matrix.asset }}.tar.gz" -C stage .
       - name: Package (Windows)
         if: startsWith(github.ref, 'refs/tags/v') && runner.os == 'Windows'
