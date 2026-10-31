@@ -13,12 +13,13 @@
 #define DESKFLOW_OTG_AUDIO_SESSION_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 struct audio_session {
     bool started;
     bool stop_requested;
-    int socket_fd;
-    int server_pid;
+    intptr_t socket_fd;
+    intptr_t server_pid;
     int forward_port;
     char *adb_path;
     char *serial;

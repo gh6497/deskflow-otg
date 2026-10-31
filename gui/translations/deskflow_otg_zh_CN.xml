@@ -75,7 +75,7 @@
   <message id="otg.label.server_port"><source>Server port</source><translation>服务端口</translation></message>
   <message id="otg.section.programs"><source>Programs and mode</source><translation>程序与模式</translation></message>
   <message id="otg.path.adb_hint"><source>Use bundled ADB by default, or select an external executable</source><translation>优先使用随包提供的 ADB，也可指定外部程序</translation></message>
-  <message id="otg.audio.enabled"><source>Forward Android audio (Linux)</source><translation>转发安卓音频（Linux）</translation></message>
+  <message id="otg.audio.enabled"><source>Forward Android audio (Linux/Windows)</source><translation>转发安卓音频（Linux/Windows）</translation></message>
   <message id="otg.audio.tooltip"><source>Uses the matching scrcpy-server and ADB; requires BUILD_AUDIO and an installed scrcpy-server</source><translation>使用匹配版本的 scrcpy-server 和 ADB；需要启用 BUILD_AUDIO 并安装 scrcpy-server</translation></message>
   <message id="otg.path.deskflow_hint"><source>Select an installed deskflow-core or deskflow-server</source><translation>选择已安装的 deskflow-core 或 deskflow-server</translation></message>
   <message id="otg.mouse.absolute"><source>Absolute (recommended)</source><translation>绝对坐标（推荐）</translation></message>
