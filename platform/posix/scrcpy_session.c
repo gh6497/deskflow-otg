@@ -1,10 +1,6 @@
 /*
- * audio_session.c - scrcpy-compatible Android audio forwarding.
- *
- * The wire format is intentionally the current scrcpy stream format:
- *   optional device metadata (disabled here), 4-byte codec id, then 12-byte
- *   big-endian PTS/flags + payload-size frame headers.  The Android side is
- * started with audio_codec=raw, so the payload is signed little-endian PCM.
+ * scrcpy_session.c - POSIX ADB/server lifetime and scrcpy stream setup.
+ * Protocol reference: scrcpy server DesktopConnection (audio/control order).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -13,11 +9,10 @@
 #ifdef __APPLE__
 #define _DARWIN_C_SOURCE 1
 #endif
-#include "audio_session.h"
+#include "scrcpy_session.h"
 #if defined(OTG_HAVE_AUDIO) || defined(OTG_HAVE_CLIPBOARD)
 #ifdef OTG_HAVE_AUDIO
-#include <alsa/asoundlib.h>
-#include <pthread.h>
+#include "audio_player.h"
 #endif
 #include <errno.h>
 #include <fcntl.h>
@@ -35,36 +30,11 @@
 #include <time.h>
 #include <unistd.h>
 
-#define AUDIO_SAMPLE_RATE 48000U
-#define AUDIO_CHANNELS 2U
-#define AUDIO_BYTES_PER_SAMPLE 2U
-#define AUDIO_DEVICE_META_SIZE 64U
-#define AUDIO_FRAME_HEADER_SIZE 12U
-#define AUDIO_MAX_FRAME_SIZE (1024U * AUDIO_CHANNELS * AUDIO_BYTES_PER_SAMPLE)
-#define AUDIO_REMOTE_PATH "/data/local/tmp/deskflow-otg-scrcpy-server.jar"
-#define SCRCPY_CODEC_RAW UINT32_C(0x00726177)
-#define SCRCPY_CODEC_DISABLED 0U
+#define SCRCPY_REMOTE_PATH "/data/local/tmp/deskflow-otg-scrcpy-server.jar"
 
 #define LOG_ERR(...)  fprintf(stderr, "ERROR: " __VA_ARGS__)
 #define LOG_WARN(...) fprintf(stderr, "WARN:  " __VA_ARGS__)
 #define LOG_INFO(...) fprintf(stderr, "INFO:  " __VA_ARGS__)
-
-#ifdef OTG_HAVE_AUDIO
-struct audio_thread_args {
-    struct audio_session *session;
-};
-
-static uint32_t read_be32(const unsigned char *p)
-{
-    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
-           ((uint32_t)p[2] << 8) | (uint32_t)p[3];
-}
-
-static uint64_t read_be64(const unsigned char *p)
-{
-    return ((uint64_t)read_be32(p) << 32) | read_be32(p + 4);
-}
-#endif
 
 static int read_full(int fd, void *buffer, size_t size)
 {
@@ -124,7 +94,7 @@ static int adb_push(const char *adb, const char *serial, const char *source)
     if (pid < 0) return -1;
     if (pid == 0) {
         execlp(adb, adb, "-s", serial, "push", source,
-              AUDIO_REMOTE_PATH, (char *)NULL);
+              SCRCPY_REMOTE_PATH, (char *)NULL);
         _exit(127);
     }
     return wait_child(pid);
@@ -214,7 +184,7 @@ static int wait_for_stream(int fd)
     return -1;
 }
 
-static int start_server_process(struct audio_session *session, unsigned scid,
+static int start_server_process(struct scrcpy_session *session, unsigned scid,
                                 const char *server_version, bool audio, bool clipboard)
 {
     char scid_arg[32];
@@ -230,7 +200,7 @@ static int start_server_process(struct audio_session *session, unsigned scid,
             if (null_fd > STDERR_FILENO) close(null_fd);
         }
         execlp(session->adb_path, session->adb_path, "-s", session->adb_serial,
-              "shell", "CLASSPATH=" AUDIO_REMOTE_PATH, "app_process", "/",
+              "shell", "CLASSPATH=" SCRCPY_REMOTE_PATH, "app_process", "/",
               "com.genymobile.scrcpy.Server", server_version, audio ? "audio=true" : "audio=false", "video=false",
               clipboard ? "control=true" : "control=false", "clipboard_autosync=true",
               "cleanup=true", "tunnel_forward=true",
@@ -244,100 +214,7 @@ static int start_server_process(struct audio_session *session, unsigned scid,
     return 0;
 }
 
-#ifdef OTG_HAVE_AUDIO
-static int open_output(snd_pcm_t **pcm)
-{
-    int error = snd_pcm_open(pcm, "default", SND_PCM_STREAM_PLAYBACK, 0);
-    if (error < 0) return error;
-    error = snd_pcm_set_params(*pcm, SND_PCM_FORMAT_S16_LE,
-                               SND_PCM_ACCESS_RW_INTERLEAVED,
-                               AUDIO_CHANNELS, AUDIO_SAMPLE_RATE, 1, 100000);
-    if (error < 0) {
-        snd_pcm_close(*pcm);
-        *pcm = NULL;
-    }
-    return error;
-}
-
-static int play_pcm(snd_pcm_t *pcm, const unsigned char *data, size_t size)
-{
-    size_t frames = size / (AUDIO_CHANNELS * AUDIO_BYTES_PER_SAMPLE);
-    const int16_t *samples = (const int16_t *)data;
-    while (frames) {
-        snd_pcm_sframes_t written = snd_pcm_writei(pcm, samples, frames);
-        if (written == -EPIPE) {
-            if (snd_pcm_prepare(pcm) < 0) return -1;
-            continue;
-        }
-        if (written < 0) {
-            written = snd_pcm_recover(pcm, (int)written, 1);
-            if (written < 0) return -1;
-            continue;
-        }
-        samples += (size_t)written * AUDIO_CHANNELS;
-        frames -= (size_t)written;
-    }
-    return 0;
-}
-
-static void *audio_thread_main(void *userdata)
-{
-    struct audio_thread_args *args = userdata;
-    struct audio_session *session = args->session;
-    unsigned char codec_buffer[4];
-    unsigned char header[AUDIO_FRAME_HEADER_SIZE];
-    unsigned char *payload = NULL;
-    snd_pcm_t *pcm = NULL;
-    int result;
-    free(args);
-
-    if (read_full(session->socket_fd, codec_buffer, 4) != 1) {
-        LOG_WARN("scrcpy audio stream closed before its header\n");
-        goto done;
-    }
-    if (read_be32(codec_buffer) == SCRCPY_CODEC_DISABLED) {
-        LOG_WARN("Android could not capture audio; continuing without audio\n");
-        goto done;
-    }
-    if (read_be32(codec_buffer) != SCRCPY_CODEC_RAW) {
-        LOG_ERR("scrcpy audio codec is not raw PCM; use audio_codec=raw\n");
-        goto done;
-    }
-    if (open_output(&pcm) < 0) {
-        LOG_ERR("could not open ALSA playback device\n");
-        goto done;
-    }
-    session->pcm = pcm;
-    while (!session->stop_requested) {
-        uint32_t size;
-        result = read_full(session->socket_fd, header, sizeof(header));
-        if (result != 1) break;
-        (void)read_be64(header); /* PTS and flags are consumed by the sink. */
-        size = read_be32(header + 8);
-        if (!size || size > AUDIO_MAX_FRAME_SIZE) {
-            LOG_ERR("invalid scrcpy audio frame size: %u\n", size);
-            break;
-        }
-        {
-            unsigned char *new_payload = realloc(payload, size);
-            if (!new_payload) break;
-            payload = new_payload;
-        }
-        if (read_full(session->socket_fd, payload, size) != 1) break;
-        if (play_pcm(pcm, payload, size) < 0) break;
-    }
-    free(payload);
-done:
-    if (pcm) {
-        snd_pcm_drop(pcm);
-        snd_pcm_close(pcm);
-    }
-    session->pcm = NULL;
-    return NULL;
-}
-#endif
-
-static void cleanup_process(struct audio_session *session)
+static void cleanup_process(struct scrcpy_session *session)
 {
     char port_arg[32];
     if (session->server_pid > 0) {
@@ -352,34 +229,25 @@ static void cleanup_process(struct audio_session *session)
     }
 }
 
-int audio_session_start(struct audio_session *session, const char *adb_path,
-                         const char *adb_serial, const char *server_path,
-                         const char *server_version)
-{
-    return audio_session_start_features(session, adb_path, adb_serial, server_path, server_version, true, false);
-}
-
-int audio_session_start_features(struct audio_session *session, const char *adb_path,
+int scrcpy_session_start(struct scrcpy_session *session, const char *adb_path,
                          const char *adb_serial, const char *server_path,
                          const char *server_version, bool audio, bool clipboard)
 {
-#ifdef OTG_HAVE_AUDIO
-    struct audio_thread_args *args;
-    pthread_t *thread;
-#else
+#ifndef OTG_HAVE_AUDIO
     if (audio) return -1;
 #endif
     unsigned scid;
     char remote[128];
     char local[32];
     int port;
+    if (!session) return -1;
     memset(session, 0, sizeof(*session));
     session->initialized = true;
-    session->socket_fd = -1;
+    session->audio_fd = -1;
     session->control_fd = -1;
     if (!adb_path || !adb_serial || !server_path || !server_version || !*adb_serial ||
-        !*server_path || !*server_version) {
-        LOG_ERR("audio requires ADB path, ADB serial, scrcpy-server and scrcpy version\n");
+        !*server_path || !*server_version || (!audio && !clipboard)) {
+        LOG_ERR("scrcpy session requires ADB path, ADB serial, server/version and an enabled feature\n");
         return -1;
     }
     session->adb_path = copy_string(adb_path);
@@ -403,41 +271,32 @@ int audio_session_start_features(struct audio_session *session, const char *adb_
     }
     uint64_t deadline = auxiliary_now_ms() + 5000;
     while (auxiliary_now_ms() < deadline) {
-        session->socket_fd = connect_local(port);
-        if (session->socket_fd >= 0) {
-            if (wait_for_stream(session->socket_fd) == 0) break;
-            close(session->socket_fd);
-            session->socket_fd = -1;
+        session->audio_fd = connect_local(port);
+        if (session->audio_fd >= 0) {
+            if (wait_for_stream((int)session->audio_fd) == 0) break;
+            close((int)session->audio_fd);
+            session->audio_fd = -1;
         }
         (void)poll(NULL, 0, 100);
     }
-    if (session->socket_fd < 0) {
+    if (session->audio_fd < 0) {
         LOG_ERR("scrcpy-server did not open its auxiliary stream\n");
         goto fail;
     }
     /* The first socket's dummy byte is sent BEFORE the server accepts the
      * control socket. Waiting for audio metadata here would deadlock. */
     unsigned char dummy;
-    if (read_full((int)session->socket_fd, &dummy, 1) != 1 || dummy != 0) goto fail;
+    if (read_full((int)session->audio_fd, &dummy, 1) != 1 || dummy != 0) goto fail;
     if (clipboard) {
         if (audio) session->control_fd = connect_local(port);
-        else { session->control_fd = session->socket_fd; session->socket_fd = -1; }
+        else { session->control_fd = session->audio_fd; session->audio_fd = -1; }
         if (session->control_fd < 0 ||
             otg_clipboard_channel_open(&session->clipboard, session->control_fd)) goto fail;
     }
 #ifdef OTG_HAVE_AUDIO
     if (audio) {
-    args = malloc(sizeof(*args));
-    if (!args) goto fail;
-    args->session = session;
-    thread = malloc(sizeof(*thread));
-    if (!thread || pthread_create(thread, NULL, audio_thread_main, args) != 0) {
-        free(thread);
-        free(args);
-        goto fail;
-    }
-    session->thread = thread;
-    session->audio_enabled = true;
+        session->player = audio_player_start(session->audio_fd);
+        if (!session->player) goto fail;
     }
 #endif
     session->started = true;
@@ -445,44 +304,32 @@ int audio_session_start_features(struct audio_session *session, const char *adb_
              audio ? "on" : "off", clipboard ? "on" : "off");
     return 0;
 fail:
-    audio_session_stop(session);
+    scrcpy_session_stop(session);
     return -1;
 }
 
-void audio_session_stop(struct audio_session *session)
+void scrcpy_session_stop(struct scrcpy_session *session)
 {
-#ifdef OTG_HAVE_AUDIO
-    pthread_t *thread;
-#endif
     if (!session || !session->initialized) return;
-    session->stop_requested = true;
     otg_clipboard_channel_close(&session->clipboard);
     if (session->control_fd >= 0) {
         shutdown((int)session->control_fd, SHUT_RDWR);
         close((int)session->control_fd);
         session->control_fd = -1;
     }
-    if (session->socket_fd >= 0) {
-        shutdown(session->socket_fd, SHUT_RDWR);
-    }
 #ifdef OTG_HAVE_AUDIO
-    thread = session->thread;
-    if (thread) {
-        (void)pthread_join(*thread, NULL);
-        free(thread);
-        session->started = false;
-    }
+    audio_player_stop(session->player);
 #endif
-    if (session->socket_fd >= 0) close((int)session->socket_fd);
+    if (session->audio_fd >= 0) close((int)session->audio_fd);
     cleanup_process(session);
     free(session->adb_path);
     free(session->adb_serial);
     free(session->server_path);
     memset(session, 0, sizeof(*session));
-    session->socket_fd = -1;
+    session->audio_fd = session->control_fd = -1;
 }
 
-bool audio_session_started(const struct audio_session *session)
+bool scrcpy_session_started(const struct scrcpy_session *session)
 {
     return session && session->started;
 }

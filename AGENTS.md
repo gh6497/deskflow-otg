@@ -43,7 +43,7 @@ sudo ./build/deskflow-otg --host 127.0.0.1 --port 24800 --name android \
 CMakeLists.txt 用 `find_path`/`find_library` 直接找 libusb，**不依赖 pkg-config**。
 支持 Linux 和 macOS；macOS 默认查找 `/opt/homebrew`、`/usr/local` 及 libusb opt 前缀，
 自定义路径可用 `-DCMAKE_PREFIX_PATH=...`。macOS 通常不需要 sudo，也不使用 udev。
-共享程序源码在 `src/*.c`，Linux 专用源码与头文件在 `platform/linux/`，
+共享程序源码在 `src/*.c`，POSIX 会话源码在 `platform/posix/`，Linux 专用源码与头文件在 `platform/linux/`，
 Windows 后端在 `platform/windows/`，回归测试在 `tests/`，没有第三方 vendored 代码。
 
 ## 源码结构（每个文件干什么）
@@ -255,7 +255,8 @@ for f in platform/linux/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only
   `src/deskflow_client.c` 实现主剪贴板 CCLP/DCLP 分块、所有权、活动时离开上传/后台立即上传，
   服从 CLPS/CLSZ；不直接读 GUI 本机剪贴板，外部 Deskflow server/CLI 沿用同一协议。
   `src/clipboard.c` 是独立协议实现，负责 UTF-8/大小校验和非阻塞 scrcpy 控制通道。
-  音频与剪贴板通过 `audio_session_start_features` 复用一个 ADB/server/forward，按音频、控制顺序
+  `platform/posix/scrcpy_session.c` / Windows 对应实现负责 ADB/server/forward 和音频、控制 socket 的
+  共享生命周期；`audio_player.c` 仅负责平台音频播放。音频与剪贴板复用一个 ADB/server/forward，按音频、控制顺序
   连接独立 socket，先读首 socket dummy，再接控制；不等待音频头来接控制。
   纯剪贴板无 ALSA/WASAPI 依赖，POSIX 会话还用于 macOS 剪贴板（音频仍仅 Linux/Windows）。
   HID 前以 SET_CLIPBOARD ACK 做键盘屏障，最多64条/2秒；失败松开键盘但保留指针与键鼠连接，

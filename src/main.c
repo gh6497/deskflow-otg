@@ -24,7 +24,7 @@
 #include "build_version.h"
 #include "deskflow_client.h"
 #include "usb_scan.h"
-#include "audio_session.h"
+#include "scrcpy_session.h"
 #ifdef OTG_HAVE_BLE
 #include "ble_hid.h"
 #include "ble_supervisor.h"
@@ -269,7 +269,7 @@ static int parse_screen_size(const char *arg)
 
 struct app_state {
     struct otg_bridge bridge;
-    struct audio_session audio;
+    struct scrcpy_session scrcpy;
     const char *serial;
     void *transport_owner;
     bool resident_session;
@@ -287,7 +287,7 @@ static void clipboard_failed(app_state *s)
     fprintf(stderr, "WARN: clipboard unavailable; keyboard/mouse connection retained (reconnect to retry)\n");
     gui_event("clipboard-unavailable");
     s->clipboard_error = true;
-    otg_clipboard_channel_close(&s->audio.clipboard);
+    otg_clipboard_channel_close(&s->scrcpy.clipboard);
     otg_bridge_release_keyboard(&s->bridge);
     s->held_key_count = 0;
     if (s->client) df_client_enable_clipboard(s->client, false);
@@ -297,8 +297,8 @@ static void cb_clipboard_enabled(void *ud, bool enabled)
 {
     app_state *s = ud;
     if (!enabled) {
-        free(s->audio.clipboard.queued); s->audio.clipboard.queued = NULL;
-        s->audio.clipboard.queued_size = 0;
+        free(s->scrcpy.clipboard.queued); s->scrcpy.clipboard.queued = NULL;
+        s->scrcpy.clipboard.queued_size = 0;
         if (s->held_key_count) otg_bridge_release_keyboard(&s->bridge);
         s->held_key_count = 0;
     }
@@ -308,7 +308,7 @@ static void cb_clipboard_enabled(void *ud, bool enabled)
 static void cb_clipboard(void *ud, const char *text, size_t size)
 {
     app_state *s = ud;
-    if (otg_clipboard_channel_set(&s->audio.clipboard, text, size)) clipboard_failed(s);
+    if (otg_clipboard_channel_set(&s->scrcpy.clipboard, text, size)) clipboard_failed(s);
 }
 
 static void cb_phone_clipboard(void *ud, const char *text, size_t size)
@@ -319,12 +319,12 @@ static void cb_phone_clipboard(void *ud, const char *text, size_t size)
 
 static void clipboard_poll(app_state *s)
 {
-    if (!s->audio.clipboard.ready || s->clipboard_error) return;
-    if (otg_clipboard_channel_poll(&s->audio.clipboard, cb_phone_clipboard, s)) {
+    if (!s->scrcpy.clipboard.ready || s->clipboard_error) return;
+    if (otg_clipboard_channel_poll(&s->scrcpy.clipboard, cb_phone_clipboard, s)) {
         clipboard_failed(s);
         return;
     }
-    if (!otg_clipboard_channel_busy(&s->audio.clipboard)) {
+    if (!otg_clipboard_channel_busy(&s->scrcpy.clipboard)) {
         for (unsigned i = 0; i < s->held_key_count; ++i)
             otg_bridge_key(&s->bridge, s->held_keys[i].id, s->held_keys[i].down);
         s->held_key_count = 0;
@@ -334,7 +334,7 @@ static void clipboard_poll(app_state *s)
 static void clipboard_key(app_state *s, uint32_t keyid, bool down)
 {
     if (!s->clipboard_error && df_client_clipboard_enabled(s->client) && (s->held_key_count ||
-        otg_clipboard_channel_busy(&s->audio.clipboard))) {
+        otg_clipboard_channel_busy(&s->scrcpy.clipboard))) {
         if (s->held_key_count == 64) { clipboard_failed(s); return; }
         s->held_keys[s->held_key_count].id = keyid;
         s->held_keys[s->held_key_count++].down = down;
@@ -871,7 +871,7 @@ int main(int argc, char **argv)
         fflush(stdout);
     }
     if (g_gui && gui_stop_check() && g_stop) {
-         audio_session_stop(&state.audio);
+          scrcpy_session_stop(&state.scrcpy);
          otg_bridge_close(&state.bridge);
         destroy_transport_owner(&state);
         return 0;
@@ -921,7 +921,7 @@ int main(int argc, char **argv)
         }
 #endif
         state.clipboard_error = false;
-        if ((audio || clipboard) && audio_session_start_features(&state.audio, adb_path,
+        if ((audio || clipboard) && scrcpy_session_start(&state.scrcpy, adb_path,
                 adb_serial ? adb_serial : serial, scrcpy_server, scrcpy_version,
                 audio != 0, clipboard != 0)) {
             if (!clipboard) { ret = 1; break; } /* Preserve audio-only startup semantics. */
@@ -937,7 +937,7 @@ int main(int argc, char **argv)
             state.held_key_count = 0;
             df_client_disconnect(client);
         } else ret=1;
-        audio_session_stop(&state.audio);
+        scrcpy_session_stop(&state.scrcpy);
         if(!state.transport_owner || g_stop) break;
 #ifdef OTG_HAVE_BLE_WIN
         if (g_ble_control && g_control.phase != OTG_BLE_ACTIVE) {
@@ -962,7 +962,7 @@ int main(int argc, char **argv)
         }
 #endif
     } while(!g_stop);
-    audio_session_stop(&state.audio);
+    scrcpy_session_stop(&state.scrcpy);
     otg_bridge_close(&state.bridge);
     destroy_transport_owner(&state);
     gui_event("disconnected");
