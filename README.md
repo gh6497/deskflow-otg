@@ -45,6 +45,11 @@ USB HID 数据通道**不需要 adb、不需要开启 USB 调试**（和 `scrcpy
 Linux/Windows 实验性音频模式沿用 scrcpy 的 Android Server：AOA HID 仍传键鼠，ADB 独立
 转发 Android 音频到主机（Linux 使用 ALSA，Windows 使用 WASAPI）。构建和使用见[音频转发](docs/AUDIO.md)；不启用
 `--audio` 时原有无需 USB 调试的 HID 模式不变。
+
+可选[文本剪贴板共享](docs/CLIPBOARD.md)遵循 Deskflow 的所有权和切屏同步规则，
+通过 ADB/scrcpy 控制通道读写手机剪贴板，不依赖 GUI 所在电脑的系统剪贴板。
+`-DBUILD_CLIPBOARD=ON` 编译后，在 GUI 按设备开启或使用 `--clipboard`；默认关闭，
+与音频独立启用，但共用同一设备的 ADB/server 会话。开启后后台手机复制也可能更新共享剪贴板。
 音频 ADB 可通过 `--adb-serial` 独立指定无线调试 transport（例如 `192.168.1.20:5555`），
 而 `--serial` 继续只用于 USB AOA HID，适用于 Windows 上 ADB USB 驱动与 WinUSB 无法同时使用的情况。
 
@@ -727,7 +732,7 @@ deskflow 1.26+ 默认开启 TLS（`security/tlsEnabled`）。本桥接程序目�
 
 - 只支持**明文协议**，不支持 deskflow 的 TLS（见上文）。
 - 键盘映射按 **US 布局**（其它布局下部分符号键可能错位）。
-- 不支持剪贴板同步、文件拖放、屏幕截图（这些与"操控手机"无关）。
+- 剪贴板仅支持可选的 ADB 文本共享，不支持图片/文件剪贴板；不支持文件拖放和屏幕截图。
 - 只支持键盘 + 鼠标，不支持游戏手柄（AOA gamepad 未实现）。
 - 默认绝对指针依赖 Android 的 HID 数位板支持，具体设备兼容性需真机验证。
 - `--mouse-mode relative` 为兼容模式，Android 鼠标加速可能造成漂移、提前碰边。

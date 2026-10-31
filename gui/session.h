@@ -35,6 +35,7 @@ struct ConnectionOptions {
     int height = 1920;
     bool manageServer = true;
     bool audio = false;
+    bool clipboard = false;
 };
 
 // Only owned bridge/server processes are stopped. A resident BLE service is
@@ -49,6 +50,7 @@ public:
     ~Session() override;
     State state() const { return m_state; }
     QString statusMessage() const;
+    QString clipboardStatusMessage() const;
     bool hasFailure() const { return !m_failureId.isEmpty(); }
     void start(const ConnectionOptions &options);
     void stop();
@@ -61,6 +63,7 @@ signals:
     void log(const QString &message);
     void usbAttached(const QString &id, const QString &serial);
     void bleProviderChanged();
+    void clipboardChanged();
 
 private:
     void setState(State state, const char *id, const QString &detail = {});
@@ -83,8 +86,10 @@ private:
     QByteArray m_events;
     QByteArray m_bleEvents;
     QString m_bleProgram, m_blePeer;
+    QStringList m_bleAuxiliary;
     bool m_bleActive = false, m_shutdown = false, m_stoppingBleProvider = false;
     QByteArray m_failureId, m_statusId;
+    QByteArray m_clipboardStatusId = "otg.clipboard.off";
     QString m_failureDetail, m_statusDetail;
     quint64 m_generation = 0;
 };

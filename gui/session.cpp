@@ -130,12 +130,20 @@ void Session::setState(State state, const char *id, const QString &detail)
     emit changed(state, statusMessage());
 }
 
+static QStringList auxiliarySignature(const ConnectionOptions &options)
+{
+    if (!options.clipboard) return {};
+    return {options.adb, options.adbSerial, options.scrcpyServer, options.scrcpyVersion};
+}
+
 void Session::start(const ConnectionOptions &options)
 {
     if (m_state != State::Idle)
         return;
     m_shutdown = false;
     m_options = options;
+    m_clipboardStatusId = options.clipboard ? "otg.clipboard.waiting" : "otg.clipboard.off";
+    emit clipboardChanged();
     m_failureId.clear();
     m_failureDetail.clear();
     m_events.clear();
@@ -146,6 +154,8 @@ void Session::start(const ConnectionOptions &options)
     if ((!ble && options.serial.isEmpty()) ||
         (options.audio && (ble || options.adb.isEmpty() || options.scrcpyServer.isEmpty() ||
                            options.scrcpyVersion.isEmpty())) ||
+        (options.clipboard && (options.adb.isEmpty() || options.scrcpyServer.isEmpty() ||
+                              options.scrcpyVersion.isEmpty() || (ble && options.adbSerial.isEmpty()))) ||
         (options.transport != "usb" && !ble) ||
         (ble && (!peerPattern.match(options.blePeer).hasMatch() || options.mouseMode != "absolute")) ||
         !validScreenName(options.phone) ||
@@ -175,7 +185,8 @@ void Session::start(const ConnectionOptions &options)
     }
 #endif
     if (windowsBle() && hasBleProvider() &&
-        (m_blePeer.compare(options.blePeer, Qt::CaseInsensitive) != 0 || m_bleProgram != options.bridge)) {
+        (m_blePeer.compare(options.blePeer, Qt::CaseInsensitive) != 0 || m_bleProgram != options.bridge ||
+         m_bleAuxiliary != auxiliarySignature(options))) {
         fail("otg.ble.provider_target");
         return;
     }
@@ -262,6 +273,13 @@ void Session::launchBridge()
                     "--port", QString::number(m_options.port), "--name", m_options.phone,
                     "--width", QString::number(m_options.width),
                     "--height", QString::number(m_options.height), "--mouse-mode", m_options.mouseMode};
+    if (m_options.audio || m_options.clipboard) {
+        if (m_options.audio) args << "--audio";
+        if (m_options.clipboard) args << "--clipboard";
+        args << "--adb" << m_options.adb << "--scrcpy-server" << m_options.scrcpyServer
+             << "--scrcpy-version" << m_options.scrcpyVersion;
+        if (!m_options.adbSerial.isEmpty()) args << "--adb-serial" << m_options.adbSerial;
+    }
     if (ble) {
         m_deadline.stop(); // Pairing and desktop authentication are user paced.
         args << "--transport" << "ble" << "--ble-peer" << m_options.blePeer;
@@ -277,13 +295,6 @@ void Session::launchBridge()
 #endif
     } else {
         args << "--serial" << m_options.serial;
-        if (m_options.audio) {
-            args << "--audio" << "--adb" << m_options.adb
-                 << "--scrcpy-server" << m_options.scrcpyServer
-                 << "--scrcpy-version" << m_options.scrcpyVersion;
-            if (!m_options.adbSerial.isEmpty())
-                args << "--adb-serial" << m_options.adbSerial;
-        }
     }
     if (windowsBle()) {
         m_bleActive = true;
@@ -297,6 +308,7 @@ void Session::launchBridge()
             m_bleEvents.clear();
             m_blePeer = m_options.blePeer;
             m_bleProgram = m_options.bridge;
+            m_bleAuxiliary = auxiliarySignature(m_options);
             args << "--gui-ble-control";
             m_bleProvider.start(m_options.bridge, args);
         }
@@ -350,6 +362,13 @@ void Session::readBleEvents()
 void Session::handleBridgeEvent(const QJsonObject &object)
 {
     const auto event = object.value("event").toString();
+    if (m_options.clipboard && (event == "clipboard-ready" || event == "clipboard-unavailable" ||
+                               event == "clipboard-disabled")) {
+        m_clipboardStatusId = event == "clipboard-ready" ? "otg.clipboard.ready" :
+            event == "clipboard-disabled" ? "otg.clipboard.disabled" : "otg.clipboard.unavailable";
+        emit clipboardChanged();
+        return;
+    }
     if (event == "connected" && m_state == State::Starting) {
         m_deadline.stop();
         setState(State::Connected, "otg.status.connected");
@@ -446,5 +465,12 @@ void Session::finishStop()
         return;
     m_killBridge.stop();
     m_stoppingBleProvider = false;
+    m_clipboardStatusId = m_options.clipboard ? "otg.clipboard.disconnected" : "otg.clipboard.off";
+    emit clipboardChanged();
     setState(State::Idle, m_failureId.isEmpty() ? "otg.status.disconnected" : m_failureId.constData(), m_failureDetail);
+}
+
+QString Session::clipboardStatusMessage() const
+{
+    return qtTrId(m_clipboardStatusId.constData());
 }

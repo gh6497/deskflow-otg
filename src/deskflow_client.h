@@ -14,6 +14,8 @@
 
 #include <signal.h>
 #include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
 
 /* Event callbacks invoked from the client loop (must be non-blocking). */
 typedef struct df_client_callbacks {
@@ -43,6 +45,9 @@ typedef struct df_client_callbacks {
      * default. Also bounds partial-read waits between cancellation checks. */
     int (*on_tick)(void *ud);
     int tick_interval_ms;
+    /* UTF-8 primary clipboard only. Called on the Deskflow loop thread. */
+    void (*on_clipboard)(void *ud, const char *text, size_t size);
+    void (*on_clipboard_enabled)(void *ud, bool enabled);
 } df_client_callbacks;
 
 typedef struct df_client df_client;
@@ -73,5 +78,12 @@ int df_client_run(df_client *c, volatile sig_atomic_t *stop);
 
 /* Disconnect and free the client. */
 void df_client_disconnect(df_client *c);
+
+/* Opt-in; the server's CLPS/CLSZ settings remain authoritative. */
+void df_client_enable_clipboard(df_client *c, bool enabled);
+bool df_client_clipboard_enabled(const df_client *c);
+/* Announce Android ownership immediately. Upload on leave if active, otherwise
+ * immediately, matching the Deskflow secondary-client lifecycle. */
+int df_client_set_clipboard(df_client *c, const char *text, size_t size);
 
 #endif /* DESKFLOW_OTG_DESKFLOW_CLIENT_H */

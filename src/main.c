@@ -234,11 +234,12 @@ static void usage(const char *prog)
             "      --width W         Virtual screen width, 1..32767 (default %d)\n"
             "      --height H        Virtual screen height, 1..32767 (default %d)\n"
              "      --mouse-mode MODE absolute (default) or relative (compatibility)\n"
-              "      --audio             Forward Android output audio through ADB (Linux/Windows)\n"
-              "      --adb PATH          ADB executable for audio (default adb)\n"
-              "      --adb-serial SERIAL ADB device serial for audio (default USB serial)\n"
-              "      --scrcpy-server PATH  Matching scrcpy-server jar/apk for audio\n"
-             "      --scrcpy-version VER  Matching scrcpy server version for audio\n"
+             "      --audio             Forward Android output audio through ADB (Linux/Windows)\n"
+             "      --clipboard         Share Deskflow text clipboard through ADB/scrcpy\n"
+              "      --adb PATH          ADB executable for audio/clipboard (default adb)\n"
+              "      --adb-serial SERIAL ADB transport (default USB serial; may be host:port)\n"
+              "      --scrcpy-server PATH  Matching scrcpy-server jar/apk for ADB features\n"
+             "      --scrcpy-version VER  Matching scrcpy server version\n"
              "      --gui             JSON status on stdout; stdin byte/EOF stops\n"
             "      --gui-ble-control Windows GUI: pause/resume sessions without recreating GATT\n"
             "      --usb-scan        List USB attachments as JSON (no ADB or HID)\n"
@@ -274,7 +275,73 @@ struct app_state {
     bool resident_session;
     bool deskflow_connected;
     bool input_ready_reported;
+    df_client *client;
+    bool clipboard_error;
+    unsigned held_key_count;
+    struct { uint32_t id; bool down; } held_keys[64];
 };
+
+static void clipboard_failed(app_state *s)
+{
+    if (s->clipboard_error) return;
+    fprintf(stderr, "WARN: clipboard unavailable; keyboard/mouse connection retained (reconnect to retry)\n");
+    gui_event("clipboard-unavailable");
+    s->clipboard_error = true;
+    otg_clipboard_channel_close(&s->audio.clipboard);
+    otg_bridge_release_keyboard(&s->bridge);
+    s->held_key_count = 0;
+    if (s->client) df_client_enable_clipboard(s->client, false);
+}
+
+static void cb_clipboard_enabled(void *ud, bool enabled)
+{
+    app_state *s = ud;
+    if (!enabled) {
+        free(s->audio.clipboard.queued); s->audio.clipboard.queued = NULL;
+        s->audio.clipboard.queued_size = 0;
+        if (s->held_key_count) otg_bridge_release_keyboard(&s->bridge);
+        s->held_key_count = 0;
+    }
+    if (!s->clipboard_error) gui_event(enabled ? "clipboard-ready" : "clipboard-disabled");
+}
+
+static void cb_clipboard(void *ud, const char *text, size_t size)
+{
+    app_state *s = ud;
+    if (otg_clipboard_channel_set(&s->audio.clipboard, text, size)) clipboard_failed(s);
+}
+
+static void cb_phone_clipboard(void *ud, const char *text, size_t size)
+{
+    app_state *s = ud;
+    if (s->client && df_client_set_clipboard(s->client, text, size)) clipboard_failed(s);
+}
+
+static void clipboard_poll(app_state *s)
+{
+    if (!s->audio.clipboard.ready || s->clipboard_error) return;
+    if (otg_clipboard_channel_poll(&s->audio.clipboard, cb_phone_clipboard, s)) {
+        clipboard_failed(s);
+        return;
+    }
+    if (!otg_clipboard_channel_busy(&s->audio.clipboard)) {
+        for (unsigned i = 0; i < s->held_key_count; ++i)
+            otg_bridge_key(&s->bridge, s->held_keys[i].id, s->held_keys[i].down);
+        s->held_key_count = 0;
+    }
+}
+
+static void clipboard_key(app_state *s, uint32_t keyid, bool down)
+{
+    if (!s->clipboard_error && df_client_clipboard_enabled(s->client) && (s->held_key_count ||
+        otg_clipboard_channel_busy(&s->audio.clipboard))) {
+        if (s->held_key_count == 64) { clipboard_failed(s); return; }
+        s->held_keys[s->held_key_count].id = keyid;
+        s->held_keys[s->held_key_count++].down = down;
+        return;
+    }
+    otg_bridge_key(&s->bridge, keyid, down);
+}
 
 static void cb_connected(void *ud)
 {
@@ -296,6 +363,9 @@ static void cb_enter(void *ud, int16_t x, int16_t y, uint32_t seq, uint16_t mask
 static void cb_leave(void *ud)
 {
     app_state *s = ud;
+    clipboard_poll(s);
+    if (s->held_key_count) otg_bridge_release_keyboard(&s->bridge);
+    s->held_key_count = 0;
     otg_bridge_leave(&s->bridge);
 }
 
@@ -303,14 +373,14 @@ static void cb_key_down(void *ud, uint32_t keyid, uint16_t mask)
 {
     (void)mask;
     app_state *s = ud;
-    otg_bridge_key(&s->bridge, keyid, true);
+    clipboard_key(s, keyid, true);
 }
 
 static void cb_key_up(void *ud, uint32_t keyid, uint16_t mask)
 {
     (void)mask;
     app_state *s = ud;
-    otg_bridge_key(&s->bridge, keyid, false);
+    clipboard_key(s, keyid, false);
 }
 
 static void cb_key_repeat(void *ud, uint32_t keyid, uint16_t mask, int32_t count)
@@ -366,6 +436,7 @@ static int cb_idle(void *ud)
      * server notices the client is gone and returns the cursor to the primary
      * screen. */
     app_state *s = ud;
+    clipboard_poll(s);
     if (!otg_bridge_check(&s->bridge)) {
         return 1;
     }
@@ -495,6 +566,7 @@ int main(int argc, char **argv)
     int height = DEFAULT_HEIGHT;
     enum otg_mouse_mode mouse_mode = OTG_MOUSE_ABSOLUTE;
     int audio = 0;
+    int clipboard = 0;
 
     if (argc == 2 && strcmp(argv[1], "--usb-scan") == 0) {
         return otg_usb_scan();
@@ -577,6 +649,8 @@ int main(int argc, char **argv)
             }
         } else if (strcmp(a, "--audio") == 0) {
             audio = 1;
+        } else if (strcmp(a, "--clipboard") == 0) {
+            clipboard = 1;
         } else if (strcmp(a, "--adb") == 0 && i + 1 < argc) {
             adb_path = argv[++i];
         } else if (strcmp(a, "--adb-serial") == 0 && i + 1 < argc) {
@@ -596,12 +670,20 @@ int main(int argc, char **argv)
         fprintf(stderr, "screen width and height must be integers in 1..32767\n");
         return 2;
     }
-    if (audio && (!serial || !scrcpy_server || !scrcpy_version)) {
-        fprintf(stderr, "ERROR: --audio requires -s/--serial, --scrcpy-server and --scrcpy-version\n");
+    if ((audio || clipboard) && (ble_service || ble_status || ble_stop_service || ble_restore)) {
+        fprintf(stderr, "ERROR: audio/clipboard require a bridge session, not standalone BLE service operations\n");
         return 2;
     }
-    if (adb_serial && !audio) {
-        fprintf(stderr, "ERROR: --adb-serial requires --audio\n");
+    if ((audio || clipboard) && (!(adb_serial && *adb_serial) && !(serial && *serial))) {
+        fprintf(stderr, "ERROR: ADB features require --adb-serial or --serial\n");
+        return 2;
+    }
+    if ((audio || clipboard) && (!scrcpy_server || !*scrcpy_server || !scrcpy_version || !*scrcpy_version)) {
+        fprintf(stderr, "ERROR: ADB features require --scrcpy-server and --scrcpy-version\n");
+        return 2;
+    }
+    if (adb_serial && !audio && !clipboard) {
+        fprintf(stderr, "ERROR: --adb-serial requires --audio or --clipboard\n");
         return 2;
     }
     if (audio && strcmp(transport, "usb") != 0) {
@@ -611,6 +693,12 @@ int main(int argc, char **argv)
 #ifndef OTG_HAVE_AUDIO
     if (audio) {
         fprintf(stderr, "ERROR: audio support was not built; configure with -DBUILD_AUDIO=ON\n");
+        return 2;
+    }
+#endif
+#ifndef OTG_HAVE_CLIPBOARD
+    if (clipboard) {
+        fprintf(stderr, "ERROR: clipboard support was not built; configure with -DBUILD_CLIPBOARD=ON\n");
         return 2;
     }
 #endif
@@ -671,8 +759,8 @@ int main(int argc, char **argv)
         g_control.port = port; g_control.width = (unsigned)width; g_control.height = (unsigned)height;
     }
     if (!strcmp(transport, "ble") && !ble_service && !ble_status && !ble_stop_service && !ble_restore &&
-        (ble_session || ble_isolate || serial || adb_serial || adapter_explicit || mouse_mode != OTG_MOUSE_ABSOLUTE)) {
-        fprintf(stderr, "ERROR: Windows BLE supports default adapter and absolute pointer only; Linux service/isolation options, serial and audio ADB are unsupported\n");
+        (ble_session || ble_isolate || serial || (adb_serial && !clipboard) || adapter_explicit || mouse_mode != OTG_MOUSE_ABSOLUTE)) {
+        fprintf(stderr, "ERROR: Windows BLE supports default adapter and absolute pointer only; Linux service/isolation options and USB serial are unsupported\n");
         return 2;
     }
 #ifdef _WIN32
@@ -742,13 +830,6 @@ int main(int argc, char **argv)
         }
         fprintf(stderr, "INFO:  AOA HID keyboard + %s pointer ready (screen %dx%d)\n",
                 mouse_mode == OTG_MOUSE_ABSOLUTE ? "absolute" : "relative", width, height);
-        if (audio) {
-            if (audio_session_start(&state.audio, adb_path, adb_serial ? adb_serial : serial, scrcpy_server,
-                                    scrcpy_version) != 0) {
-                otg_bridge_close(&state.bridge);
-                return 1;
-            }
-        }
     } else if (strcmp(transport, "ble") == 0) {
 #ifdef OTG_HAVE_BLE
         state.resident_session=ble_session;
@@ -811,8 +892,10 @@ int main(int argc, char **argv)
         .on_mouse_wheel = cb_mouse_wheel,
         .on_disconnected = cb_disconnected,
         .on_idle = cb_idle,
-        .on_tick = state.transport_owner ? cb_idle : NULL,
-        .tick_interval_ms = state.transport_owner ? 1 : 0,
+        .on_tick = state.transport_owner || clipboard ? cb_idle : NULL,
+        .tick_interval_ms = state.transport_owner ? 1 : clipboard ? 5 : 0,
+        .on_clipboard = cb_clipboard,
+        .on_clipboard_enabled = clipboard ? cb_clipboard_enabled : NULL,
     };
 
     int ret = 0;
@@ -837,12 +920,24 @@ int main(int argc, char **argv)
             break;
         }
 #endif
+        state.clipboard_error = false;
+        if ((audio || clipboard) && audio_session_start_features(&state.audio, adb_path,
+                adb_serial ? adb_serial : serial, scrcpy_server, scrcpy_version,
+                audio != 0, clipboard != 0)) {
+            if (!clipboard) { ret = 1; break; } /* Preserve audio-only startup semantics. */
+            clipboard_failed(&state);
+        }
         df_client *client=df_client_connect(host,(uint16_t)port,name,width,height,&cbs,&state);
         if(client) {
+            state.client = client;
+            df_client_enable_clipboard(client, clipboard && !state.clipboard_error);
             fprintf(stderr,"INFO: connected to deskflow server %s:%u as \"%s\"\n",host,port,name);
             ret=df_client_run(client,&g_stop);
+            state.client = NULL;
+            state.held_key_count = 0;
             df_client_disconnect(client);
         } else ret=1;
+        audio_session_stop(&state.audio);
         if(!state.transport_owner || g_stop) break;
 #ifdef OTG_HAVE_BLE_WIN
         if (g_ble_control && g_control.phase != OTG_BLE_ACTIVE) {

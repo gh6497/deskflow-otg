@@ -90,6 +90,8 @@ void otg_bridge_close(struct otg_bridge *b);
 void otg_bridge_enter(struct otg_bridge *b, int16_t x, int16_t y, uint16_t mask);
 void otg_bridge_leave(struct otg_bridge *b);
 void otg_bridge_key(struct otg_bridge *b, uint32_t keyid, bool down);
+/* Release a cancelled clipboard input barrier without disturbing pointer state. */
+void otg_bridge_release_keyboard(struct otg_bridge *b);
 void otg_bridge_mouse_button(struct otg_bridge *b, uint8_t button, bool press);
 void otg_bridge_mouse_move(struct otg_bridge *b, int16_t x, int16_t y);
 void otg_bridge_mouse_rel_move(struct otg_bridge *b, int16_t dx, int16_t dy);
