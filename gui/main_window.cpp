@@ -92,6 +92,7 @@ void MainWindow::retranslateUi()
         updateLayoutPreview();
     }
     updateVirtualSize();
+    if (m_session) m_clipboardStatus->setText(m_session->clipboardStatusMessage());
     updateTray();
 }
 
@@ -419,6 +420,14 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this)
     m_audio->setObjectName("audioEnabled");
     setTranslatedProperty(m_audio, "toolTip", "otg.audio.tooltip");
     advancedForm->addRow(m_audio);
+    m_clipboard = translated(new QCheckBox, "text", "otg.clipboard.enabled");
+    m_clipboard->setObjectName("clipboardEnabled");
+    setTranslatedProperty(m_clipboard, "toolTip", "otg.clipboard.tooltip");
+    deviceForm->addRow(m_clipboard);
+    m_clipboardStatus = new QLabel;
+    m_clipboardStatus->setObjectName("clipboardStatus");
+    m_clipboardStatus->setWordWrap(true);
+    deviceForm->addRow(m_clipboardStatus);
     advancedForm->addRow("Deskflow", pathField(m_deskflow, "otg.path.deskflow_hint"));
     m_mouseMode = new QComboBox;
     m_mouseMode->setObjectName("mouseMode");
@@ -473,6 +482,8 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this)
     m_adb->setText(configuredAdb);
     m_adbSerial->setText(settings.value("adbSerial").toString());
     m_audio->setChecked(settings.value("audio", false).toBool());
+    m_clipboard->setChecked(settings.value("clipboard", false).toBool());
+    connect(m_clipboard, &QCheckBox::toggled, this, [this] { updateEnabled(); });
     m_deskflow->setText(settings.value("deskflow", findDeskflow()).toString());
     m_serial->setText(settings.value("serial").toString());
     m_transport->setCurrentIndex(qMax(0, m_transport->findData(settings.value("transport", "usb"))));
@@ -721,6 +732,8 @@ void MainWindow::addDevice()
     profile["phone"] = name;
     profile["alias"] = name;
     profile["serial"] = "";
+    profile["adbSerial"] = "";
+    profile["clipboard"] = false;
     profile["transport"] = "usb";
     profile["blePeer"] = "";
     profile["bleIsolate"] = false;
@@ -857,9 +870,12 @@ ConnectionOptions MainWindow::connectionOptions(const QVariantMap &profile) cons
     options.adbSerial = profile.value("adbSerial").toString().trimmed();
     options.transport = profile.value("transport", "usb").toString();
 #ifdef OTG_GUI_HAVE_AUDIO
-    options.audio = profile.value("audio", m_audio->isChecked()).toBool();
+    options.audio = options.transport == "usb" && profile.value("audio", m_audio->isChecked()).toBool();
 #else
     options.audio = false;
+#endif
+#ifdef OTG_GUI_HAVE_CLIPBOARD
+    options.clipboard = profile.value("clipboard", false).toBool();
 #endif
     options.mouseMode = options.transport == "ble" ? "absolute" : profile.value("mouseMode", "absolute").toString();
     options.blePeer = profile.value("blePeer").toString();
@@ -905,9 +921,19 @@ void MainWindow::updateEnabled()
     m_deviceForm->setRowVisible(m_stopBleService, linuxBle || (ble && m_session->hasBleProvider()));
     m_deviceForm->setRowVisible(m_devices->parentWidget(), !ble);
     m_deviceForm->setRowVisible(m_serial, !ble);
-    m_deviceForm->setRowVisible(m_adbSerial, !ble);
+    const bool adbFeatures = !ble || m_clipboard->isChecked();
+    m_deviceForm->setRowVisible(m_adbSerial, adbFeatures);
     m_deviceForm->setRowVisible(m_autoConnectEnabled, !ble);
-    m_programForm->setRowVisible(m_adb->parentWidget(), !ble);
+    m_programForm->setRowVisible(m_adb->parentWidget(), adbFeatures);
+#ifdef OTG_GUI_HAVE_CLIPBOARD
+    m_deviceForm->setRowVisible(m_clipboard, true);
+    m_deviceForm->setRowVisible(m_clipboardStatus, true);
+#else
+    m_deviceForm->setRowVisible(m_clipboard, false);
+    m_deviceForm->setRowVisible(m_clipboardStatus, false);
+#endif
+    m_clipboardStatus->setText(idle ? qtTrId(m_clipboard->isChecked() ?
+        "otg.clipboard.disconnected" : "otg.clipboard.off") : m_session->clipboardStatusMessage());
 #ifdef OTG_GUI_HAVE_AUDIO
     m_programForm->setRowVisible(m_audio, !ble);
 #else
@@ -941,10 +967,10 @@ void MainWindow::updateEnabled()
     m_computer->setEnabled(m_manage->isChecked());
     m_phone->setEnabled(sharedIdle || !m_manage->isChecked());
     m_serial->setEnabled(!ble);
-    m_adbSerial->setEnabled(!ble);
+    m_adbSerial->setEnabled(adbFeatures);
     m_devices->setEnabled(!ble);
     m_refresh->setEnabled(!ble);
-    m_adb->setEnabled(!ble);
+    m_adb->setEnabled(adbFeatures);
     m_audio->setEnabled(!ble);
     m_autoConnectEnabled->setEnabled(!ble);
     m_adapter->setEnabled(linuxBle);
@@ -1125,7 +1151,8 @@ QVariantMap MainWindow::deviceProfile() const
             {"deskflow", m_deskflow->text()}, {"computer", m_computer->text()},
              {"phone", m_phone->text()}, {"host", m_host->text()}, {"port", m_port->value()},
              {"manageServer", m_manage->isChecked()}, {"direction", m_direction->currentData()},
-             {"mouseMode", m_mouseMode->currentData()}, {"audio", m_audio->isChecked()}};
+              {"mouseMode", m_mouseMode->currentData()}, {"audio", m_audio->isChecked()},
+              {"clipboard", m_clipboard->isChecked()}};
 }
 
 void MainWindow::applyDeviceProfile(const QVariantMap &profile)
@@ -1147,6 +1174,8 @@ void MainWindow::applyDeviceProfile(const QVariantMap &profile)
     m_blePeer->setText(profile.value("blePeer").toString());
     m_bleIsolate->setChecked(profile.value("bleIsolate", false).toBool());
     m_audio->setChecked(profile.value("audio", false).toBool());
+    const QSignalBlocker clipboardBlocker(m_clipboard);
+    m_clipboard->setChecked(profile.value("clipboard", false).toBool());
     m_autoConnectEnabled->setChecked(profile.value("autoConnect", false).toBool());
     m_direction->setCurrentIndex(qMax(0, m_direction->findData(profile.value("direction", "right"))));
     m_mouseMode->setCurrentIndex(qMax(0, m_mouseMode->findData(profile.value("mouseMode", "absolute"))));
@@ -1183,6 +1212,7 @@ void MainWindow::saveSettings()
     QSettings settings;
     settings.setValue("adb", m_adb->text());
     settings.setValue("audio", m_audio->isChecked());
+    settings.setValue("clipboard", m_clipboard->isChecked());
     settings.setValue("deskflow", m_deskflow->text());
     settings.setValue("serial", m_serial->text());
     settings.setValue("adbSerial", m_adbSerial->text());

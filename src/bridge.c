@@ -561,6 +561,13 @@ void otg_bridge_leave(struct otg_bridge *b)
     b->residual_vscroll = 0;
 }
 
+void otg_bridge_release_keyboard(struct otg_bridge *b)
+{
+    b->hid_mods = 0;
+    memset(b->keys, 0, sizeof(b->keys));
+    send_keyboard_report(b);
+}
+
 void otg_bridge_key(struct otg_bridge *b, uint32_t keyid, bool down)
 {
     int usage = keyid_to_hid(keyid);

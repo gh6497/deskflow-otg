@@ -34,7 +34,7 @@ licenses, including Apache-2.0 and BSD-style licenses.
 
 ## scrcpy Android server 5.0.1
 
-Audio-enabled builds bundle the official `scrcpy-server` from the scrcpy 5.0.1
+Audio- or clipboard-enabled builds bundle the official `scrcpy-server` from the scrcpy 5.0.1
 release. It is used on Android through ADB and is licensed under Apache-2.0.
 
 - Release file: <https://github.com/Genymobile/scrcpy/releases/download/v5.0.1/scrcpy-server-v5.0.1>

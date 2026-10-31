@@ -48,6 +48,35 @@ protected:
 class WindowTest : public QObject {
     Q_OBJECT
 private slots:
+    void clipboardProfiles()
+    {
+        QTemporaryDir dir;
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dir.path());
+        QSettings().setValue("adb", "");
+        {
+            AutoConnectTestWindow window;
+            auto *clipboard = window.findChild<QCheckBox *>("clipboardEnabled");
+            auto *list = window.findChild<QListWidget *>("deviceSidebar");
+            QVERIFY(clipboard && list);
+            QVERIFY(!clipboard->isChecked());
+            clipboard->setChecked(true);
+            window.findChild<QLineEdit *>("usbSerial")->setText("A");
+            window.findChild<QPushButton *>("addDeviceButton")->click();
+            QVERIFY(!clipboard->isChecked());
+            window.findChild<QLineEdit *>("usbSerial")->setText("B");
+            list->setCurrentRow(0);
+            QVERIFY(clipboard->isChecked());
+            list->setCurrentRow(1);
+            QVERIFY(!clipboard->isChecked());
+        }
+        AutoConnectTestWindow restored;
+        auto *list = restored.findChild<QListWidget *>("deviceSidebar");
+        list->setCurrentRow(0);
+        QVERIFY(restored.findChild<QCheckBox *>("clipboardEnabled")->isChecked());
+        list->setCurrentRow(1);
+        QVERIFY(!restored.findChild<QCheckBox *>("clipboardEnabled")->isChecked());
+    }
     void multipleDevices()
     {
         QTemporaryDir settingsDir;

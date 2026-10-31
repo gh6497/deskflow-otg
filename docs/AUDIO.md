@@ -17,9 +17,11 @@ ADB 与 USB HID 可以使用不同的传输。`--serial` 始终是 USB AOA HID �
 - `audio_source=output`
 - `audio_codec=raw`
 - 48 kHz、双声道、16-bit PCM
-- 64 字节设备元数据、4 字节 codec id、12 字节 PTS/flags + payload 帧格式
+- 关闭设备元数据；首 socket 先读 1 字节 dummy，再读 4 字节 codec id、12 字节 PTS/flags + payload 帧
 
 这样后续切换到 scrcpy 的 Opus 流时，不需要改变 ADB tunnel 和 Session 生命周期。
+可与[文本剪贴板共享](CLIPBOARD.md)独立或组合启用；两者复用一个 Android Server 和
+ADB forward，音频和控制使用独立 socket。控制 socket 必须在等待读取音频头之前连接。
 
 ## 构建
 
@@ -39,7 +41,7 @@ cmake --build build-audio
 Windows 使用 Visual Studio 生成器时同样启用 `-DBUILD_AUDIO=ON`，不需要额外音频库：
 WASAPI 由 Windows SDK 提供。ADB 可以是 PATH 中的 `adb.exe`，或 GUI 随包携带的版本。
 
-GUI 中勾选音频后，可在设备页的“ADB serial for audio”字段填写无线 ADB 序列号；
+GUI 中勾选音频后，可在设备页的“音频/剪贴板 ADB 序列号”字段填写无线 ADB 序列号；
 USB serial 仍填写 `--usb-scan` 得到的物理 USB 序列号。该字段留空时，音频回退使用 USB serial。
 
 仓库已经内置并打包 `third_party/scrcpy/scrcpy-server-v5.0.1`，不需要联网下载。

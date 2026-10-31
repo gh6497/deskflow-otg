@@ -231,7 +231,7 @@ for f in platform/linux/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only
 
 - **只支持明文协议**，不支持 deskflow 的 TLS（deskflow 1.26 默认开 TLS，需在 server 侧关闭）。
 - 键盘 **US 布局**（其它布局符号键可能错位）。
-- 只支持键盘 + 鼠标，不支持游戏手柄、剪贴板、文件拖放、视频。
+- 支持键盘 + 鼠标；可选 `BUILD_CLIPBOARD` 通过 ADB/scrcpy 共享纯文本，不支持游戏手柄、文件拖放、视频。
 - Linux 需要 root 或 udev 规则才能访问 USB；macOS 需允许配件连接，Deskflow 需辅助功能权限。
 
 ## 当前状态 / 待办
@@ -250,6 +250,19 @@ for f in platform/linux/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only
 - License：Apache-2.0（HID/AOA 逻辑移植自 scrcpy，同为 Apache-2.0）。
 
 ## 可选桌面 GUI
+
+- 剪贴板用 `--clipboard` / `-DBUILD_CLIPBOARD=ON` 独立开启，默认关闭、按设备保存。
+  `src/deskflow_client.c` 实现主剪贴板 CCLP/DCLP 分块、所有权、活动时离开上传/后台立即上传，
+  服从 CLPS/CLSZ；不直接读 GUI 本机剪贴板，外部 Deskflow server/CLI 沿用同一协议。
+  `src/clipboard.c` 是独立协议实现，负责 UTF-8/大小校验和非阻塞 scrcpy 控制通道。
+  音频与剪贴板通过 `audio_session_start_features` 复用一个 ADB/server/forward，按音频、控制顺序
+  连接独立 socket，先读首 socket dummy，再接控制；不等待音频头来接控制。
+  纯剪贴板无 ALSA/WASAPI 依赖，POSIX 会话还用于 macOS 剪贴板（音频仍仅 Linux/Windows）。
+  HID 前以 SET_CLIPBOARD ACK 做键盘屏障，最多64条/2秒；失败松开键盘但保留指针与键鼠连接，
+  切出不向下次切屏重放。后台手机复制可能覆盖当前共享剪贴板；不记录正文。
+  Windows 空闲 provider 的附加功能参数固定，修改前显式停止服务，不能擅自注销 GATT。
+  `clipboard_protocol/clipboard_bridge/clipboard_auxiliary` 与 Qt 用 fake socket/ADB/AOA 验证，
+  不访问硬件，不代表 Android ROM、Windows/macOS 真机兼容性已验收。详见 `docs/CLIPBOARD.md`。
 
 - Linux BLE 正式接入在同一 `deskflow-otg` 中分为 `--ble-service` 常驻进程与
   `--transport ble --ble-session --ble-peer MAC` 桥接会话；BLE 桥接必须指定 BlueZ 身份地址。

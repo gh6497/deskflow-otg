@@ -4,20 +4,23 @@
  */
 #include "audio_session.h"
 
-#ifdef OTG_HAVE_AUDIO
+#if defined(OTG_HAVE_AUDIO) || defined(OTG_HAVE_CLIPBOARD)
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#ifdef OTG_HAVE_AUDIO
 #include <initguid.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
 #include <objbase.h>
+#endif
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef OTG_HAVE_AUDIO
 static const GUID OTG_CLSID_MMDeviceEnumerator =
     {0xbcde0395, 0xe52f, 0x467c, {0x8e, 0x3d, 0xc4, 0x57, 0x92, 0x91, 0x69, 0x2e}};
 static const GUID OTG_IID_IMMDeviceEnumerator =
@@ -26,6 +29,7 @@ static const GUID OTG_IID_IAudioClient =
     {0x1cb9ad4c, 0xdbfa, 0x4c32, {0xb1, 0x78, 0xc2, 0xf5, 0x68, 0xa7, 0x03, 0xb2}};
 static const GUID OTG_IID_IAudioRenderClient =
     {0xf294acfc, 0x3146, 0x4483, {0xa7, 0xbf, 0xad, 0xdc, 0xa7, 0xc2, 0x60, 0xe2}};
+#endif
 
 #define REMOTE_PATH "/data/local/tmp/deskflow-otg-scrcpy-server.jar"
 #define META_SIZE 64U
@@ -37,10 +41,12 @@ static const GUID OTG_IID_IAudioRenderClient =
 #define LOG_WARN(...) fprintf(stderr, "WARN:  " __VA_ARGS__)
 #define LOG_INFO(...) fprintf(stderr, "INFO:  " __VA_ARGS__)
 
+#ifdef OTG_HAVE_AUDIO
 static uint32_t be32(const unsigned char *p) {
     return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
            ((uint32_t)p[2] << 8) | p[3];
 }
+#endif
 
 static int read_full(SOCKET s, void *out, size_t n) {
     unsigned char *p = out;
@@ -61,7 +67,12 @@ static int run_adb(const char *adb, const char *serial, const char *command_line
     memset(&pi, 0, sizeof(pi));
     if (!CreateProcessA(NULL, command, NULL, NULL, FALSE, CREATE_NO_WINDOW,
                         NULL, NULL, &si, &pi)) return -1;
-    WaitForSingleObject(pi.hProcess, INFINITE);
+    if (WaitForSingleObject(pi.hProcess, 5000) != WAIT_OBJECT_0) {
+        TerminateProcess(pi.hProcess, 1);
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+        return -1;
+    }
     DWORD code = 1;
     GetExitCodeProcess(pi.hProcess, &code);
     CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
@@ -87,6 +98,7 @@ static char *copy_text(const char *value) {
     return copy;
 }
 
+#ifdef OTG_HAVE_AUDIO
 static int open_wasapi(IAudioClient **client, IAudioRenderClient **render) {
     IMMDeviceEnumerator *enumerator = NULL; IMMDevice *device = NULL;
     WAVEFORMATEX format = { WAVE_FORMAT_PCM, 2, 48000, 192000, 4, 16, 0 };
@@ -134,11 +146,10 @@ static int play_pcm(IAudioClient *client, IAudioRenderClient *render,
 }
 
 static DWORD WINAPI audio_thread(void *arg) {
-    struct audio_session *s = arg; unsigned char meta[META_SIZE], codec[4], h[HEADER_SIZE];
+    struct audio_session *s = arg; unsigned char codec[4], h[HEADER_SIZE];
     unsigned char *payload = NULL; IAudioClient *client = NULL; IAudioRenderClient *render = NULL;
     CoInitializeEx(NULL, COINIT_MULTITHREADED);
-    if (read_full((SOCKET)s->socket_fd, meta, sizeof(meta)) != 1 ||
-        read_full((SOCKET)s->socket_fd, codec, 4) != 1 || be32(codec) != CODEC_RAW) goto done;
+    if (read_full((SOCKET)s->socket_fd, codec, 4) != 1 || be32(codec) != CODEC_RAW) goto done;
     if (open_wasapi(&client, &render) != 0) { LOG_ERR("could not open WASAPI playback device\n"); goto done; }
     while (!s->stop_requested && read_full((SOCKET)s->socket_fd, h, sizeof(h)) == 1) {
         uint32_t n = be32(h + 8);
@@ -153,47 +164,88 @@ done:
     CoUninitialize();
     return 0;
 }
+#endif
 
 int audio_session_start(struct audio_session *s, const char *adb, const char *adb_serial,
                         const char *server, const char *version) {
+    return audio_session_start_features(s, adb, adb_serial, server, version, true, false);
+}
+
+int audio_session_start_features(struct audio_session *s, const char *adb, const char *adb_serial,
+                        const char *server, const char *version, bool audio, bool clipboard) {
     WSADATA wsa; char push[512], forward[128], remote[128];
     STARTUPINFOA si = { sizeof(si) }; PROCESS_INFORMATION pi = {0};
     SOCKET sock; unsigned port = 27183U + (GetCurrentProcessId() % 10000U);
     if (!s || !adb || !adb_serial || !server || !version) return -1;
-    memset(s, 0, sizeof(*s)); s->socket_fd = (intptr_t)INVALID_SOCKET;
+    memset(s, 0, sizeof(*s)); s->socket_fd = s->control_fd = (intptr_t)INVALID_SOCKET;
+    s->initialized = true;
     s->adb_path = copy_text(adb); s->adb_serial = copy_text(adb_serial);
     s->server_path = copy_text(server);
     if (!s->adb_path || !s->adb_serial || !s->server_path) goto fail;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return -1;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) goto fail;
+    s->winsock_ready = true;
     snprintf(push, sizeof(push), "push \"%s\" \"%s\"", server, REMOTE_PATH);
     if (run_adb(adb, adb_serial, push) != 0) goto fail;
     snprintf(remote, sizeof(remote), "localabstract:scrcpy_%08x", GetCurrentProcessId() & 0x7fffffffU);
-    snprintf(forward, sizeof(forward), "tcp:%u tcp:%s", port, remote);
+    snprintf(forward, sizeof(forward), "tcp:%u %s", port, remote);
     { char forward_cmd[160]; snprintf(forward_cmd, sizeof(forward_cmd), "forward %s", forward);
       if (run_adb(adb, adb_serial, forward_cmd) != 0) goto fail; }
     s->forward_port = (intptr_t)port;
     char cmd[2048];
-    snprintf(cmd, sizeof(cmd), "\"%s\" -s \"%s\" shell CLASSPATH=%s app_process / com.genymobile.scrcpy.Server %s audio=true video=false control=false cleanup=true tunnel_forward=true send_device_meta=true send_dummy_byte=false send_stream_meta=true send_frame_meta=true audio_codec=raw audio_source=output scid=%08x", adb, adb_serial, REMOTE_PATH, version, GetCurrentProcessId() & 0x7fffffffU);
+    snprintf(cmd, sizeof(cmd), "\"%s\" -s \"%s\" shell CLASSPATH=%s app_process / com.genymobile.scrcpy.Server %s audio=%s video=false control=%s clipboard_autosync=true cleanup=true tunnel_forward=true send_device_meta=false send_dummy_byte=true send_stream_meta=true send_frame_meta=true audio_codec=raw audio_source=output scid=%08x", adb, adb_serial, REMOTE_PATH, version, audio ? "true" : "false", clipboard ? "true" : "false", GetCurrentProcessId() & 0x7fffffffU);
     if (!CreateProcessA(NULL, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) goto fail;
     s->server_pid = (intptr_t)pi.hProcess; CloseHandle(pi.hThread);
     sock = INVALID_SOCKET;
-    for (unsigned attempt = 0; attempt < 100 && sock == INVALID_SOCKET; ++attempt) {
+    ULONGLONG deadline = GetTickCount64() + 10000;
+    while (GetTickCount64() < deadline) {
         sock = connect_local(port);
-        if (sock == INVALID_SOCKET) Sleep(100);
+        if (sock != INVALID_SOCKET) {
+            DWORD timeout = 1000;
+            setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof(timeout));
+            unsigned char dummy;
+            if (read_full(sock, &dummy, 1) == 1 && dummy == 0) {
+                timeout = 0;
+                setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof(timeout));
+                break;
+            }
+            closesocket(sock); sock = INVALID_SOCKET;
+        }
+        Sleep(100);
     }
     if (sock == INVALID_SOCKET) goto fail;
     s->socket_fd = (intptr_t)sock; s->stop_requested = false;
+    if (clipboard) {
+        if (audio) s->control_fd = (intptr_t)connect_local(port);
+        else { s->control_fd = s->socket_fd; s->socket_fd = (intptr_t)INVALID_SOCKET; }
+        if (s->control_fd == (intptr_t)INVALID_SOCKET ||
+            otg_clipboard_channel_open(&s->clipboard, s->control_fd)) goto fail;
+    }
+#ifdef OTG_HAVE_AUDIO
+    if (audio) {
     HANDLE thread = CreateThread(NULL, 0, audio_thread, s, 0, NULL);
     if (!thread) goto fail;
-    s->thread = thread; s->started = true; LOG_INFO("scrcpy audio forwarding started (WASAPI, raw PCM)\n");
+    s->thread = thread; s->audio_enabled = true;
+    }
+#else
+    if (audio) goto fail;
+#endif
+    s->started = true;
+    LOG_INFO("scrcpy auxiliary session started (audio=%s, clipboard=%s)\n",
+             audio ? "on" : "off", clipboard ? "on" : "off");
     return 0;
-fail: audio_session_stop(s); WSACleanup(); return -1;
+fail: audio_session_stop(s); return -1;
 }
 
 void audio_session_stop(struct audio_session *s) {
-    if (!s) return; s->stop_requested = true;
-    if (s->socket_fd != (intptr_t)INVALID_SOCKET) { shutdown((SOCKET)s->socket_fd, SD_BOTH); closesocket((SOCKET)s->socket_fd); s->socket_fd = (intptr_t)INVALID_SOCKET; }
-    if (s->thread) { WaitForSingleObject((HANDLE)s->thread, 5000); CloseHandle((HANDLE)s->thread); s->thread = NULL; }
+    if (!s || !s->initialized) return;
+    s->stop_requested = true;
+    otg_clipboard_channel_close(&s->clipboard);
+    if (s->control_fd != (intptr_t)INVALID_SOCKET) {
+        shutdown((SOCKET)s->control_fd, SD_BOTH); closesocket((SOCKET)s->control_fd);
+    }
+    if (s->socket_fd != (intptr_t)INVALID_SOCKET) shutdown((SOCKET)s->socket_fd, SD_BOTH);
+    if (s->thread) { WaitForSingleObject((HANDLE)s->thread, INFINITE); CloseHandle((HANDLE)s->thread); s->thread = NULL; }
+    if (s->socket_fd != (intptr_t)INVALID_SOCKET) closesocket((SOCKET)s->socket_fd);
     if (s->server_pid) { TerminateProcess((HANDLE)s->server_pid, 1); WaitForSingleObject((HANDLE)s->server_pid, 1000); CloseHandle((HANDLE)s->server_pid); s->server_pid = 0; }
     if (s->forward_port && s->adb_path && s->adb_serial) {
         char command[64]; snprintf(command, sizeof(command), "forward --remove tcp:%ld", (long)s->forward_port);
@@ -201,7 +253,8 @@ void audio_session_stop(struct audio_session *s) {
     }
     free(s->adb_path); free(s->adb_serial); free(s->server_path);
     s->adb_path = NULL; s->adb_serial = NULL; s->server_path = NULL;
-    s->started = false; WSACleanup();
+    if (s->winsock_ready) WSACleanup();
+    memset(s, 0, sizeof(*s));
 }
 bool audio_session_started(const struct audio_session *s) { return s && s->started; }
 #endif

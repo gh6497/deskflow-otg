@@ -151,6 +151,14 @@ int main(int argc, char **argv)
                 server.nextPendingConnection()->deleteLater();
         });
     } else if (args.contains("--gui")) {
+        if (args.contains("--clipboard")) {
+            if (!args.contains("--adb") || !args.contains("--scrcpy-server") ||
+                !args.contains("--scrcpy-version")) return 11;
+            QTimer::singleShot(150, &app, [] {
+                output(qEnvironmentVariableIsSet("OTG_TEST_CLIPBOARD_FAIL") ?
+                    "{\"event\":\"clipboard-unavailable\"}\n" : "{\"event\":\"clipboard-ready\"}\n");
+            });
+        }
         const bool ble = args.value(args.indexOf("--transport") + 1) == "ble";
         if (ble && (!args.contains("--ble-peer") || args.contains("--serial") ||
                     args.value(args.indexOf("--mouse-mode") + 1) != "absolute")) return 9;

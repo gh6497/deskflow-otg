@@ -21,6 +21,7 @@
 #endif
 
 #include "deskflow_client.h"
+#include "clipboard.h"
 
 #include <errno.h>
 #ifdef _WIN32
@@ -113,9 +114,21 @@ struct df_client {
     df_client_callbacks cbs;
     void *ud;
     int accepted;
+    bool clipboard_requested, clipboard_server, clipboard_active, clipboard_owned;
+    uint32_t clipboard_seq;
+    size_t clipboard_limit;
+    uint8_t *clipboard_local;
+    size_t clipboard_local_size;
+    struct {
+        uint8_t *data;
+        size_t size, expected;
+        uint32_t sequence;
+        bool active, drop;
+    } clipboard_rx[2];
 };
 
 static int (*stop_check)(void);
+static df_client *io_client;
 
 void df_client_set_stop_check(int (*check)(void))
 {
@@ -151,11 +164,13 @@ static int io_read_full(df_socket fd, void *buf, size_t n)
     uint8_t *p = buf;
     size_t got = 0;
     while (got < n) {
-        if (stop_check) {
-            if (stop_check()) {
+        if (stop_check || (io_client && io_client->cbs.on_tick)) {
+            if (stop_check && stop_check()) {
                 return -1;
             }
             int ready = df_socket_wait(fd);
+            if (ready == 0 && io_client && io_client->cbs.on_tick &&
+                io_client->cbs.on_tick(io_client->ud)) return -1;
             if (ready == 0 || (ready < 0 && df_socket_interrupted())) {
                 continue;
             }
@@ -357,6 +372,149 @@ static int send_keepalive(df_socket fd)
     return send_packet(fd, "CALV", 4);
 }
 
+bool df_client_clipboard_enabled(const df_client *c)
+{
+    return c && c->proto_minor >= 6 && c->clipboard_requested && c->clipboard_server && c->clipboard_limit;
+}
+
+static void clipboard_clear(df_client *c)
+{
+    free(c->clipboard_local); c->clipboard_local = NULL;
+    c->clipboard_local_size = 0; c->clipboard_owned = false;
+    for (unsigned i = 0; i < 2; ++i) {
+        free(c->clipboard_rx[i].data);
+        memset(&c->clipboard_rx[i], 0, sizeof(c->clipboard_rx[i]));
+    }
+}
+
+void df_client_enable_clipboard(df_client *c, bool enabled)
+{
+    if (!c) return;
+    if (enabled && c->proto_minor < 6)
+        fprintf(stderr, "WARN: clipboard requires Deskflow protocol 1.6 or newer\n");
+    c->clipboard_requested = enabled;
+    if (!enabled) clipboard_clear(c);
+    if (c->cbs.on_clipboard_enabled)
+        c->cbs.on_clipboard_enabled(c->ud, df_client_clipboard_enabled(c));
+}
+
+static int clipboard_send_chunk(df_client *c, uint8_t mark, const void *data, size_t size)
+{
+    uint8_t *packet = malloc(14 + size);
+    if (!packet) return -1;
+    memcpy(packet, "DCLP", 4); packet[4] = 0;
+    otg_clipboard_put32(packet + 5, c->clipboard_seq);
+    packet[9] = mark; otg_clipboard_put32(packet + 10, (uint32_t)size);
+    if (size) memcpy(packet + 14, data, size);
+    int result = send_packet(c->fd, packet, (uint32_t)(14 + size));
+    free(packet);
+    return result;
+}
+
+static int clipboard_send(df_client *c)
+{
+    if (!df_client_clipboard_enabled(c) || !c->clipboard_owned || !c->clipboard_local) return 0;
+    if (c->clipboard_local_size > c->clipboard_limit) {
+        free(c->clipboard_local); c->clipboard_local = NULL; c->clipboard_local_size = 0;
+        return 0;
+    }
+    char size[32];
+    int n = snprintf(size, sizeof(size), "%zu", c->clipboard_local_size);
+    if (clipboard_send_chunk(c, 1, size, (size_t)n)) return -1;
+    for (size_t pos = 0; pos < c->clipboard_local_size;) {
+        size_t chunk = c->clipboard_local_size - pos;
+        if (chunk > 32768) chunk = 32768;
+        if (clipboard_send_chunk(c, 2, c->clipboard_local + pos, chunk)) return -1;
+        pos += chunk;
+    }
+    if (clipboard_send_chunk(c, 3, NULL, 0)) return -1;
+    /* Keep ownership, but do not resend unchanged data on the next leave. */
+    free(c->clipboard_local); c->clipboard_local = NULL; c->clipboard_local_size = 0;
+    return 0;
+}
+
+int df_client_set_clipboard(df_client *c, const char *text, size_t size)
+{
+    if (!df_client_clipboard_enabled(c)) return 0;
+    if (size > OTG_CLIPBOARD_TEXT_MAX || size + 12 > c->clipboard_limit ||
+        !otg_clipboard_valid_text(text, size)) {
+        fprintf(stderr, "WARN: clipboard text not shared (invalid or exceeds size limit)\n");
+        return 0;
+    }
+    size_t length;
+    uint8_t *data = otg_clipboard_encode(text, size, &length);
+    if (!data) return -1;
+    free(c->clipboard_local); c->clipboard_local = data; c->clipboard_local_size = length;
+    c->clipboard_owned = true;
+    uint8_t grab[9] = {'C', 'C', 'L', 'P', 0};
+    otg_clipboard_put32(grab + 5, c->clipboard_seq);
+    if (send_packet(c->fd, grab, sizeof(grab))) return -1;
+    return c->clipboard_active ? 0 : clipboard_send(c);
+}
+
+/* DCLP 1.6+: START contains decimal marshalled size, CHUNK raw bytes, END empty.
+ * Bound allocation, validate identity/sequence, and drain oversize transfers. */
+static int clipboard_receive(df_client *c, uint8_t id, uint32_t seq, uint8_t mark,
+                             const uint8_t *data, size_t size)
+{
+    if (id >= 2 || !df_client_clipboard_enabled(c)) return 0;
+    if (mark == 1) {
+        free(c->clipboard_rx[id].data);
+        memset(&c->clipboard_rx[id], 0, sizeof(c->clipboard_rx[id]));
+        size_t expected = 0;
+        if (!size || size > 20) goto invalid;
+        for (size_t i = 0; i < size; ++i) {
+            if (data[i] < '0' || data[i] > '9' || expected > (SIZE_MAX - 9) / 10) goto invalid;
+            expected = expected * 10 + (data[i] - '0');
+        }
+        c->clipboard_rx[id].expected = expected;
+        if (!id) {
+            free(c->clipboard_local); c->clipboard_local = NULL;
+            c->clipboard_local_size = 0; c->clipboard_owned = false;
+        }
+        c->clipboard_rx[id].sequence = seq;
+        c->clipboard_rx[id].active = true;
+        c->clipboard_rx[id].drop = id != 0 || expected > c->clipboard_limit ||
+                                  expected > OTG_CLIPBOARD_WIRE_MAX;
+        if (c->clipboard_rx[id].drop) {
+            if (!id) fprintf(stderr, "WARN: incoming clipboard exceeds size limit; not shared\n");
+        } else {
+            c->clipboard_rx[id].data = malloc(expected ? expected : 1);
+            if (!c->clipboard_rx[id].data) goto invalid;
+        }
+        return 0;
+    }
+    if (!c->clipboard_rx[id].active || c->clipboard_rx[id].sequence != seq) goto invalid;
+    if (mark == 2) {
+        if (size > c->clipboard_rx[id].expected - c->clipboard_rx[id].size) goto invalid;
+        if (!c->clipboard_rx[id].drop && size)
+            memcpy(c->clipboard_rx[id].data + c->clipboard_rx[id].size, data, size);
+        c->clipboard_rx[id].size += size;
+        return 0;
+    }
+    if (mark != 3 || size || c->clipboard_rx[id].size != c->clipboard_rx[id].expected) goto invalid;
+    if (!c->clipboard_rx[id].drop) {
+        const char *text = NULL;
+        size_t length = 0;
+        int decoded = otg_clipboard_decode(c->clipboard_rx[id].data,
+                                          c->clipboard_rx[id].size, &text, &length);
+        if (decoded < 0) fprintf(stderr, "WARN: unsupported or invalid clipboard text; not shared\n");
+        if (!id && decoded == 1) {
+            free(c->clipboard_local); c->clipboard_local = NULL;
+            c->clipboard_local_size = 0; c->clipboard_owned = false;
+            if (c->cbs.on_clipboard) c->cbs.on_clipboard(c->ud, text, length);
+        }
+    }
+    free(c->clipboard_rx[id].data);
+    memset(&c->clipboard_rx[id], 0, sizeof(c->clipboard_rx[id]));
+    return 0;
+invalid:
+    free(c->clipboard_rx[id].data);
+    memset(&c->clipboard_rx[id], 0, sizeof(c->clipboard_rx[id]));
+    fprintf(stderr, "WARN: invalid clipboard transfer ignored\n");
+    return 0; /* Clipboard errors must not disconnect keyboard/mouse. */
+}
+
 /* ---- connect + handshake ------------------------------------------------ */
 
 /* GUI cancellation must also work while a TCP connection is pending. DNS is
@@ -500,6 +658,8 @@ df_client *df_client_connect(const char *host, uint16_t port, const char *name,
     c->screen_h = screen_h;
     c->cbs = *cbs;
     c->ud = ud;
+    c->clipboard_server = true;
+    c->clipboard_limit = OTG_CLIPBOARD_WIRE_MAX;
 
     /* 1. server -> hello packet: "%7s%2i%2i" (protocol name + major + minor). */
     uint8_t *hello = NULL;
@@ -566,11 +726,22 @@ static int handle_message(df_client *c, const char code[4], struct msg *m)
         if (msg_read_u32(m, &n) != 0) {
             return -1;
         }
-        for (uint32_t i = 0; i < n; ++i) {
-            uint32_t opt;
-            if (msg_read_u32(m, &opt) != 0) {
+        if (n % 2 || n > (m->len - m->pos) / 4) return -1;
+        bool was_enabled = df_client_clipboard_enabled(c);
+        for (uint32_t i = 0; i < n; i += 2) {
+            uint32_t opt, value;
+            if (msg_read_u32(m, &opt) != 0 || msg_read_u32(m, &value) != 0) {
                 return -1;
             }
+            if (opt == UINT32_C(0x434c5053)) c->clipboard_server = value != 0; /* CLPS */
+            if (opt == UINT32_C(0x434c535a)) /* CLSZ, KiB, negative means disabled */
+                c->clipboard_limit = (int32_t)value <= 0 ? 0 :
+                    value > OTG_CLIPBOARD_WIRE_MAX / 1024 ? OTG_CLIPBOARD_WIRE_MAX : (size_t)value * 1024;
+        }
+        if (was_enabled != df_client_clipboard_enabled(c)) {
+            if (!df_client_clipboard_enabled(c)) clipboard_clear(c);
+            if (c->cbs.on_clipboard_enabled)
+                c->cbs.on_clipboard_enabled(c->ud, df_client_clipboard_enabled(c));
         }
         if (!c->accepted) {
             c->accepted = 1;
@@ -581,6 +752,10 @@ static int handle_message(df_client *c, const char code[4], struct msg *m)
         return 0;
     }
     if (memcmp(code, "CROP", 4) == 0) {
+        c->clipboard_server = true; c->clipboard_limit = OTG_CLIPBOARD_WIRE_MAX;
+        clipboard_clear(c);
+        if (c->cbs.on_clipboard_enabled)
+            c->cbs.on_clipboard_enabled(c->ud, df_client_clipboard_enabled(c));
         return 0; /* reset options */
     }
     if (memcmp(code, "CALV", 4) == 0) {
@@ -599,16 +774,18 @@ static int handle_message(df_client *c, const char code[4], struct msg *m)
             msg_read_u32(m, &seq) != 0 || msg_read_u16(m, &mask) != 0) {
             return -1;
         }
+        c->clipboard_active = true; c->clipboard_seq = seq;
         if (c->cbs.on_enter) {
             c->cbs.on_enter(c->ud, (int16_t)x, (int16_t)y, seq, mask);
         }
         return 0;
     }
     if (memcmp(code, "COUT", 4) == 0) {
+        c->clipboard_active = false;
         if (c->cbs.on_leave) {
             c->cbs.on_leave(c->ud);
         }
-        return 0;
+        return clipboard_send(c);
     }
     if (memcmp(code, "DKDN", 4) == 0) {
         /* key down 1.1-1.7: "%2i%2i%2i" */
@@ -711,17 +888,20 @@ static int handle_message(df_client *c, const char code[4], struct msg *m)
         if (msg_read_u8(m, &id) != 0 || msg_read_u32(m, &seq) != 0) {
             return -1;
         }
+        if (!id && df_client_clipboard_enabled(c)) {
+            clipboard_clear(c);
+        }
         return 0;
     }
     if (memcmp(code, "DCLP", 4) == 0) {
         /* set clipboard: "%1i%4i%1i%s" */
         uint8_t id, marker;
-        uint32_t seq;
+        uint32_t seq, size;
         if (msg_read_u8(m, &id) != 0 || msg_read_u32(m, &seq) != 0 ||
-            msg_read_u8(m, &marker) != 0 || msg_skip_string(m) != 0) {
+            msg_read_u8(m, &marker) != 0 || msg_read_u32(m, &size) != 0 || size > m->len - m->pos) {
             return -1;
         }
-        return 0;
+        return clipboard_receive(c, id, seq, marker, m->data + m->pos, size);
     }
     if (memcmp(code, "CSEC", 4) == 0) {
         uint8_t on;
@@ -767,6 +947,7 @@ int df_client_run(df_client *c, volatile sig_atomic_t *stop)
      * replies/reports for the legacy 500ms cancellation interval. */
     io_wait_interval_ms = c->cbs.tick_interval_ms > 0
                              ? c->cbs.tick_interval_ms : 500;
+    io_client = c;
 
     for (;;) {
         if ((stop && *stop) || (stop_check && stop_check())) {
@@ -844,6 +1025,7 @@ int df_client_run(df_client *c, volatile sig_atomic_t *stop)
     }
 
     io_wait_interval_ms = 500;
+    io_client = NULL;
     if (c->cbs.on_disconnected) {
         c->cbs.on_disconnected(c->ud);
     }
@@ -860,5 +1042,6 @@ void df_client_disconnect(df_client *c)
         c->fd = DF_INVALID_SOCKET;
     }
     df_socket_cleanup();
+    clipboard_clear(c);
     free(c);
 }

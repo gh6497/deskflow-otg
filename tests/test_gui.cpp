@@ -90,6 +90,38 @@ static QStringList placeholders(const QString &text)
 class GuiTest : public QObject {
     Q_OBJECT
 private slots:
+    void clipboardSession_data()
+    {
+        QTest::addColumn<bool>("audio");
+        QTest::addColumn<bool>("unavailable");
+        QTest::newRow("clipboard-only") << false << false;
+        QTest::newRow("audio-and-clipboard") << true << false;
+        QTest::newRow("clipboard-failure-keeps-hid") << false << true;
+    }
+    void clipboardSession()
+    {
+        QFETCH(bool, audio); QFETCH(bool, unavailable);
+        if (unavailable) qputenv("OTG_TEST_CLIPBOARD_FAIL", "1");
+        const auto restore = qScopeGuard([] { qunsetenv("OTG_TEST_CLIPBOARD_FAIL"); });
+        ConnectionOptions options;
+        options.manageServer = false; options.bridge = options.adb = peerPath();
+        options.serial = "clipboard-phone"; options.adbSerial = "192.0.2.1:5555";
+        options.scrcpyServer = "fake-server"; options.scrcpyVersion = "5.0.1";
+        options.audio = audio; options.clipboard = true;
+        Session session;
+        session.start(options);
+        QTRY_COMPARE(session.state(), Session::State::Connected);
+        QTRY_COMPARE(session.clipboardStatusMessage(), qtTrId(unavailable ?
+            "otg.clipboard.unavailable" : "otg.clipboard.ready"));
+        QVERIFY(!session.hasFailure());
+        session.stop();
+        QTRY_COMPARE(session.state(), Session::State::Idle);
+        QCOMPARE(session.clipboardStatusMessage(), qtTrId("otg.clipboard.disconnected"));
+        options.adb.clear();
+        session.start(options);
+        QCOMPARE(session.state(), Session::State::Idle);
+        QVERIFY(session.hasFailure());
+    }
     void multiScreenLayout()
     {
         const QList<ScreenLink> screens{{"a", "computer", "right"}, {"b", "a", "right"}, {"c", "computer", "left"}};

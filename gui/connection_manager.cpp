@@ -26,6 +26,7 @@ Session *ConnectionManager::addDevice(const QString &id)
     m_devices.insert(id, {child, {}, false, {}, {}});
     connect(child, &Session::changed, this, [this, id] { update(id); });
     connect(child, &Session::bleProviderChanged, this, [this, id] { update(id); });
+    connect(child, &Session::clipboardChanged, this, [this, id] { emit changed(id); });
     connect(child, &Session::log, this, [this, id](const QString &message) { emit log(id, message); });
     connect(child, &Session::usbAttached, this, &ConnectionManager::usbAttached);
     return child;
