@@ -324,6 +324,11 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this)
     m_serial = new QLineEdit;
     m_serial->setObjectName("usbSerial");
     addTranslatedRow(deviceForm, "otg.label.usb_serial", m_serial);
+    m_adbSerial = new QLineEdit;
+    m_adbSerial->setObjectName("adbSerial");
+    setTranslatedProperty(m_adbSerial, "placeholderText", "otg.adb_serial.placeholder");
+    setTranslatedProperty(m_adbSerial, "toolTip", "otg.adb_serial.tooltip");
+    addTranslatedRow(deviceForm, "otg.label.adb_serial", m_adbSerial);
     m_deviceStatus = translated(new QLabel, "text", "otg.device.debugging_required");
     m_deviceStatus->setWordWrap(true);
     deviceForm->addRow(m_deviceStatus);
@@ -466,6 +471,7 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this)
     if (!configuredAdb.isEmpty() && !QFileInfo(configuredAdb).isExecutable())
         configuredAdb = findAdb();
     m_adb->setText(configuredAdb);
+    m_adbSerial->setText(settings.value("adbSerial").toString());
     m_audio->setChecked(settings.value("audio", false).toBool());
     m_deskflow->setText(settings.value("deskflow", findDeskflow()).toString());
     m_serial->setText(settings.value("serial").toString());
@@ -848,6 +854,7 @@ ConnectionOptions MainWindow::connectionOptions(const QVariantMap &profile) cons
     options.manageServer = m_manage->isChecked();
     options.phone = profile.value("phone", "android").toString();
     options.serial = profile.value("serial").toString();
+    options.adbSerial = profile.value("adbSerial").toString().trimmed();
     options.transport = profile.value("transport", "usb").toString();
 #ifdef OTG_GUI_HAVE_AUDIO
     options.audio = profile.value("audio", m_audio->isChecked()).toBool();
@@ -898,6 +905,7 @@ void MainWindow::updateEnabled()
     m_deviceForm->setRowVisible(m_stopBleService, linuxBle || (ble && m_session->hasBleProvider()));
     m_deviceForm->setRowVisible(m_devices->parentWidget(), !ble);
     m_deviceForm->setRowVisible(m_serial, !ble);
+    m_deviceForm->setRowVisible(m_adbSerial, !ble);
     m_deviceForm->setRowVisible(m_autoConnectEnabled, !ble);
     m_programForm->setRowVisible(m_adb->parentWidget(), !ble);
 #ifdef OTG_GUI_HAVE_AUDIO
@@ -933,6 +941,7 @@ void MainWindow::updateEnabled()
     m_computer->setEnabled(m_manage->isChecked());
     m_phone->setEnabled(sharedIdle || !m_manage->isChecked());
     m_serial->setEnabled(!ble);
+    m_adbSerial->setEnabled(!ble);
     m_devices->setEnabled(!ble);
     m_refresh->setEnabled(!ble);
     m_adb->setEnabled(!ble);
@@ -1106,6 +1115,7 @@ void MainWindow::connectDevice()
 QVariantMap MainWindow::deviceProfile() const
 {
     return {{"serial", m_serial->text().trimmed()},
+            {"adbSerial", m_adbSerial->text().trimmed()},
             {"alias", m_alias->text().trimmed()},
             {"transport", m_transport->currentData()}, {"bleAdapter", m_adapter->text()},
             {"blePeer", m_blePeer->text().trimmed().toUpper()}, {"bleIsolate", m_bleIsolate->isChecked()},
@@ -1126,6 +1136,7 @@ void MainWindow::applyDeviceProfile(const QVariantMap &profile)
     const QSignalBlocker blocker(m_devices);
     m_devices->setCurrentIndex(0);
     m_serial->setText(profile.value("serial").toString());
+    m_adbSerial->setText(profile.value("adbSerial").toString());
     m_width->setValue(profile.value("originalWidth", 1080).toInt());
     m_height->setValue(profile.value("originalHeight", 1920).toInt());
     m_sensitivity->setValue(profile.value("sensitivityMultiplier", 1.0).toDouble());
@@ -1174,6 +1185,7 @@ void MainWindow::saveSettings()
     settings.setValue("audio", m_audio->isChecked());
     settings.setValue("deskflow", m_deskflow->text());
     settings.setValue("serial", m_serial->text());
+    settings.setValue("adbSerial", m_adbSerial->text());
     settings.setValue("transport", m_transport->currentData());
     settings.setValue("bleAdapter", m_adapter->text());
     settings.setValue("blePeer", m_blePeer->text());

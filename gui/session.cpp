@@ -281,6 +281,8 @@ void Session::launchBridge()
             args << "--audio" << "--adb" << m_options.adb
                  << "--scrcpy-server" << m_options.scrcpyServer
                  << "--scrcpy-version" << m_options.scrcpyVersion;
+            if (!m_options.adbSerial.isEmpty())
+                args << "--adb-serial" << m_options.adbSerial;
         }
     }
     if (windowsBle()) {
