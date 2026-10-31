@@ -80,13 +80,12 @@ add_executable(deskflow-otg
   src/bridge.c
   src/deskflow_client.c
   src/keymap.c
-  src/audio_session.c
 )
+if(NOT WIN32 OR NOT BUILD_AUDIO)
+  target_sources(deskflow-otg PRIVATE src/audio_session.c)
+endif()
 
 if(BUILD_AUDIO)
-  if(NOT LINUX)
-    message(FATAL_ERROR "BUILD_AUDIO currently requires Linux and ALSA")
-  endif()
   if(NOT SCRCPY_SERVER)
     message(FATAL_ERROR
       "BUILD_AUDIO requires SCRCPY_SERVER; provide the matching scrcpy-server "
@@ -96,10 +95,17 @@ if(BUILD_AUDIO)
     message(FATAL_ERROR
       "BUILD_AUDIO requires SCRCPY_VERSION for the bundled scrcpy-server")
   endif()
-  find_package(ALSA REQUIRED)
-  find_package(Threads REQUIRED)
   target_compile_definitions(deskflow-otg PRIVATE OTG_HAVE_AUDIO=1)
-  target_link_libraries(deskflow-otg PRIVATE ALSA::ALSA Threads::Threads)
+  if(LINUX)
+    find_package(ALSA REQUIRED)
+    find_package(Threads REQUIRED)
+    target_link_libraries(deskflow-otg PRIVATE ALSA::ALSA Threads::Threads)
+  elseif(WIN32)
+    target_sources(deskflow-otg PRIVATE platform/windows/audio_session_win.c)
+    target_link_libraries(deskflow-otg PRIVATE ole32 uuid)
+  else()
+    message(FATAL_ERROR "BUILD_AUDIO currently supports Linux and Windows")
+  endif()
   if(NOT EXISTS "${SCRCPY_SERVER}")
     message(FATAL_ERROR "SCRCPY_SERVER does not exist: ${SCRCPY_SERVER}")
   endif()

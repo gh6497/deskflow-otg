@@ -234,7 +234,7 @@ static void usage(const char *prog)
             "      --width W         Virtual screen width, 1..32767 (default %d)\n"
             "      --height H        Virtual screen height, 1..32767 (default %d)\n"
              "      --mouse-mode MODE absolute (default) or relative (compatibility)\n"
-             "      --audio             Forward Android output audio through ADB (Linux)\n"
+              "      --audio             Forward Android output audio through ADB (Linux/Windows)\n"
              "      --adb PATH          ADB executable for audio (default adb)\n"
              "      --scrcpy-server PATH  Matching scrcpy-server jar/apk for audio\n"
              "      --scrcpy-version VER  Matching scrcpy server version for audio\n"

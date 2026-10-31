@@ -11,7 +11,7 @@
 
 #include "audio_session.h"
 
-#ifdef OTG_HAVE_AUDIO
+#if defined(OTG_HAVE_AUDIO) && !defined(_WIN32)
 
 #define _POSIX_C_SOURCE 200809L
 

@@ -42,8 +42,8 @@ USB HID 数据通道**不需要 adb、不需要开启 USB 调试**（和 `scrcpy
 
 两者串起来就是：`主机键盘鼠标 → deskflow → 本程序 → AOA HID → 手机`。
 
-Linux 实验性音频模式沿用 scrcpy 的 Android Server：AOA HID 仍传键鼠，ADB 独立
-转发 Android 音频到主机。构建和使用见[音频转发](docs/AUDIO.md)；不启用
+Linux/Windows 实验性音频模式沿用 scrcpy 的 Android Server：AOA HID 仍传键鼠，ADB 独立
+转发 Android 音频到主机（Linux 使用 ALSA，Windows 使用 WASAPI）。构建和使用见[音频转发](docs/AUDIO.md)；不启用
 `--audio` 时原有无需 USB 调试的 HID 模式不变。
 
 Linux 另提供 **Bluetooth LE HID** 传输，可不接 USB 控制手机。CLI 与 GUI 使用同一
