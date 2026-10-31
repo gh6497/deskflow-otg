@@ -12,6 +12,7 @@
 #include <QDateTime>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QLabel>
@@ -461,7 +462,10 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this)
     connect(m_logFilter, &QComboBox::currentIndexChanged, this, &MainWindow::refreshLog);
     setCentralWidget(central);
 
-    m_adb->setText(settings.value("adb", findAdb()).toString());
+    QString configuredAdb = settings.value("adb", findAdb()).toString();
+    if (!configuredAdb.isEmpty() && !QFileInfo(configuredAdb).isExecutable())
+        configuredAdb = findAdb();
+    m_adb->setText(configuredAdb);
     m_audio->setChecked(settings.value("audio", false).toBool());
     m_deskflow->setText(settings.value("deskflow", findDeskflow()).toString());
     m_serial->setText(settings.value("serial").toString());
