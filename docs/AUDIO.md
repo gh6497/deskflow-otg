@@ -92,17 +92,29 @@ HID 行为不变。
 ### 断开时暂停播放
 
 启用音频且会话启动成功后，GUI 断开/退出、CLI 正常退出或 Deskflow 断线触发清理时，
-会在关闭音频流前，通过 scrcpy server control socket 注入一次 `KEYCODE_MEDIA_PAUSE`。
-该路径不依赖 `adb shell input` 的 shell 注入权限。效果类似拔掉耳机后暂停媒体；使用明确的
-“暂停”而非“播放/暂停切换”，不会主动恢复播放，重新连接也不会自动播放。仅共享剪贴板、
-未启用音频或音频会话启动失败时不发送。
+会在关闭音频流前，对同一 `--adb-serial`（未指定时使用 USB serial）执行一次：
 
-暂停请求通过已有的 scrcpy control socket 发送，失败仅记录警告并继续清理，不重新连接 ADB
-或切换目标设备。
-这不是模拟耳机插拔，也不修改音量；具体播放器/ROM 可能不响应媒体暂停键。
+```text
+adb -s <音频设备> shell cmd media_session dispatch pause
+```
+
+该命令由 Android `MediaSessionService` 分发明确的 `KEYCODE_MEDIA_PAUSE`，不经过
+`InputManager.injectInputEvent`，因此不依赖「USB 调试（安全设置）」提供的 `INJECT_EVENTS`
+注入权限。普通 USB 调试或已授权的无线 ADB 仍是音频的前提。旧版 scrcpy control socket
+注入同样需要 `INJECT_EVENTS`，不能绕过这项限制。
+
+使用明确的“暂停”而非“播放/暂停切换”，不会主动恢复播放，重新连接也不会自动播放。
+仅共享剪贴板、未启用音频或音频会话启动失败时不发送。纯音频会话不创建 control socket；
+共享剪贴板仍使用独立 control socket，辅助 server 禁用自动按电源键唤醒（`power_on=false`）。
+
+等待暂停命令完成后再关闭音频流，命令最多等待 2 秒；失败或超时记录警告并继续清理，
+不重连 ADB、不切换目标设备。日志“pause request sent”仅表示命令成功返回，
+不是播放器已暂停的确认。这不是模拟耳机插拔，也不修改音量；具体播放器/ROM 仍可能
+不响应媒体会话暂停请求。
 USB 拔出、无线 ADB 已掉线或进程被强杀时不能保证暂停，不能保证完全避免手机短暂外放。
 Linux/Windows 共用此行为；macOS 当前不支持音频，不受影响。自动化验证使用 fake ADB，
-播放器兼容性仍需真机测试。
+本次 Linux GUI 测试构建已由用户实测确认断开暂停正常；其他播放器/ROM 和 Windows
+仍需分别验证。
 
 要求 Android 11 或更高版本；Android 11 在设备锁定时可能无法启动采集。DRM、
 通话以及主动禁止音频捕获的应用可能不会出现在输出中。
