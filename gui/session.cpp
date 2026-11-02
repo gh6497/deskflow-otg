@@ -158,6 +158,8 @@ void Session::start(const ConnectionOptions &options)
                               options.scrcpyVersion.isEmpty() || (ble && options.adbSerial.isEmpty()))) ||
         (options.transport != "usb" && !ble) ||
         (ble && (!peerPattern.match(options.blePeer).hasMatch() || options.mouseMode != "absolute")) ||
+        (options.tls && options.tlsFingerprint.isEmpty() && options.tlsFingerprintFile.isEmpty()) ||
+        (options.tls && !options.tlsFingerprint.isEmpty() && !options.tlsFingerprintFile.isEmpty()) ||
         !validScreenName(options.phone) ||
         options.host.trimmed().isEmpty() || options.host.contains(QRegularExpression("[\\x00-\\x20\\x7f]")) ||
         options.host.toUtf8().size() > 1024 || options.phone.toUtf8().size() > 255 ||
@@ -260,7 +262,8 @@ void Session::startConnection()
         fail("otg.error.screen_names");
         return;
     }
-    m_server.start({m_options.deskflow, m_options.computer, config, m_options.port});
+    m_server.start({m_options.deskflow, m_options.computer, config, m_options.port,
+                    m_options.tls, m_options.tlsCertificate});
 }
 
 void Session::launchBridge()
@@ -296,6 +299,12 @@ void Session::launchBridge()
 #endif
     } else {
         args << "--serial" << m_options.serial;
+    }
+    if (m_options.tls) {
+        args << "--tls";
+        if (!m_options.tlsCertificate.isEmpty()) args << "--tls-cert" << m_options.tlsCertificate;
+        if (!m_options.tlsFingerprint.isEmpty()) args << "--tls-fingerprint" << m_options.tlsFingerprint;
+        else args << "--tls-fingerprint-file" << m_options.tlsFingerprintFile;
     }
     if (windowsBle()) {
         m_bleActive = true;

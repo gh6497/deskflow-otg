@@ -76,6 +76,13 @@
   <message id="otg.label.phone_name"><source>Phone screen name</source><translation>Phone screen name</translation></message>
   <message id="otg.label.server_address"><source>Server address</source><translation>Server address</translation></message>
   <message id="otg.label.server_port"><source>Server port</source><translation>Server port</translation></message>
+  <message id="otg.tls.enabled"><source>Use Deskflow TLS encryption</source><translation>Use Deskflow TLS encryption</translation></message>
+  <message id="otg.tls.certificate"><source>Client certificate and private key (optional)</source><translation>Client certificate and private key (optional)</translation></message>
+  <message id="otg.tls.certificate_hint"><source>PEM file; required when the server requires client authentication</source><translation>PEM file; required when the server requires client authentication</translation></message>
+  <message id="otg.tls.fingerprint"><source>Trusted server SHA-256 fingerprint</source><translation>Trusted server SHA-256 fingerprint</translation></message>
+  <message id="otg.tls.fingerprint_hint"><source>64 hex characters, with or without colons</source><translation>64 hex characters, with or without colons</translation></message>
+  <message id="otg.tls.fingerprint_file"><source>Deskflow fingerprint database (optional)</source><translation>Deskflow fingerprint database (optional)</translation></message>
+  <message id="otg.tls.fingerprint_file_hint"><source>Use this instead of entering a fingerprint above</source><translation>Use this instead of entering a fingerprint above</translation></message>
   <message id="otg.section.programs"><source>Programs and mode</source><translation>Programs and mode</translation></message>
   <message id="otg.path.adb_hint"><source>Use bundled ADB by default, or select an external executable</source><translation>Use bundled ADB by default, or select an external executable</translation></message>
   <message id="otg.audio.enabled"><source>Forward Android audio (requires ADB; Linux/Windows)</source><translation>Forward Android audio (requires ADB; Linux/Windows)</translation></message>
@@ -136,6 +143,7 @@
   <message id="otg.error.write_layout"><source>Could not write Deskflow screen configuration: %1</source><translation>Could not write Deskflow screen configuration: %1</translation></message>
   <message id="otg.error.write_settings"><source>Could not write Deskflow startup settings.</source><translation>Could not write Deskflow startup settings.</translation></message>
   <message id="otg.error.disable_tls"><source>This Deskflow startup interface cannot explicitly disable TLS. Connect to an existing server instead.</source><translation>This Deskflow startup interface cannot explicitly disable TLS. Connect to an existing server instead.</translation></message>
+  <message id="otg.error.tls_interface"><source>This Deskflow startup interface cannot enable TLS. Connect to an existing server instead.</source><translation>This Deskflow startup interface cannot enable TLS. Connect to an existing server instead.</translation></message>
   <message id="otg.error.deskflow_interface"><source>Unrecognized Deskflow startup interface. Select deskflow-core / deskflow-server, or connect to an existing server.</source><translation>Unrecognized Deskflow startup interface. Select deskflow-core / deskflow-server, or connect to an existing server.</translation></message>
   <message id="otg.log.screen_config"><source>Using an independent screen configuration:
 </source><translation>Using an independent screen configuration:

@@ -128,7 +128,11 @@ bool ConnectionManager::start(const QString &id, const ConnectionOptions &option
     if (busy() || m_server.state() != DeskflowServer::State::Idle) {
         if (options.manageServer != m_shared.manageServer || options.port != m_shared.port ||
             options.host != m_shared.host || options.computer != m_shared.computer ||
-            options.deskflow != m_shared.deskflow || (options.manageServer && layout != m_layout))
+            options.deskflow != m_shared.deskflow || options.tls != m_shared.tls ||
+            options.tlsCertificate != m_shared.tlsCertificate ||
+            options.tlsFingerprint != m_shared.tlsFingerprint ||
+            options.tlsFingerprintFile != m_shared.tlsFingerprintFile ||
+            (options.manageServer && layout != m_layout))
             return reject(id, "otg.multi.shared_locked");
         if (m_server.state() == DeskflowServer::State::Stopping)
             return reject(id, "otg.multi.shared_locked");
@@ -144,7 +148,8 @@ bool ConnectionManager::start(const QString &id, const ConnectionOptions &option
     emit changed(id);
     if (!options.manageServer || m_server.state() == DeskflowServer::State::Running) launchPending();
     else if (m_server.state() == DeskflowServer::State::Idle)
-        m_server.start({options.deskflow, options.computer, layout, options.port});
+        m_server.start({options.deskflow, options.computer, layout, options.port,
+                        options.tls, options.tlsCertificate});
     return true;
 }
 

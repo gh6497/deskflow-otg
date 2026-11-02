@@ -237,6 +237,10 @@ static void usage(const char *prog)
              "      --mouse-mode MODE absolute (default) or relative (compatibility)\n"
              "      --audio             Forward Android output audio through ADB (Linux/Windows)\n"
               "      --clipboard         Share Deskflow text clipboard through ADB/scrcpy\n"
+              "      --tls               Use Deskflow TLS for the server connection\n"
+              "      --tls-cert FILE     PEM client certificate and private key (optional)\n"
+              "      --tls-fingerprint HEX  Trusted server SHA-256 fingerprint\n"
+              "      --tls-fingerprint-file FILE  Deskflow trusted fingerprint database\n"
               "      --auto-rotate       Follow Android rotation and update screen size (requires ADB feature)\n"
               "      --adb PATH          ADB executable for audio/clipboard (default adb)\n"
               "      --adb-serial SERIAL ADB transport (default USB serial; may be host:port)\n"
@@ -614,6 +618,10 @@ int main(int argc, char **argv)
     enum otg_mouse_mode mouse_mode = OTG_MOUSE_ABSOLUTE;
     int audio = 0;
     int clipboard = 0;
+    int tls = 0;
+    const char *tls_cert = NULL;
+    const char *tls_fingerprint = NULL;
+    const char *tls_fingerprint_file = NULL;
     int auto_rotate = 0;
 
     if (argc == 2 && strcmp(argv[1], "--usb-scan") == 0) {
@@ -699,6 +707,14 @@ int main(int argc, char **argv)
             audio = 1;
         } else if (strcmp(a, "--clipboard") == 0) {
             clipboard = 1;
+        } else if (strcmp(a, "--tls") == 0) {
+            tls = 1;
+        } else if (strcmp(a, "--tls-cert") == 0 && i + 1 < argc) {
+            tls_cert = argv[++i];
+        } else if (strcmp(a, "--tls-fingerprint") == 0 && i + 1 < argc) {
+            tls_fingerprint = argv[++i];
+        } else if (strcmp(a, "--tls-fingerprint-file") == 0 && i + 1 < argc) {
+            tls_fingerprint_file = argv[++i];
         } else if (strcmp(a, "--auto-rotate") == 0) {
             auto_rotate = 1;
         } else if (strcmp(a, "--adb") == 0 && i + 1 < argc) {
@@ -730,6 +746,23 @@ int main(int argc, char **argv)
     }
     if (auto_rotate && !(audio || clipboard)) {
         fprintf(stderr, "ERROR: --auto-rotate requires --audio or --clipboard\n");
+        return 2;
+    }
+    if (!tls && (tls_cert || tls_fingerprint || tls_fingerprint_file)) {
+        fprintf(stderr, "ERROR: TLS options require --tls\n");
+        return 2;
+    }
+    if (tls && ((!tls_fingerprint || !*tls_fingerprint) &&
+                (!tls_fingerprint_file || !*tls_fingerprint_file))) {
+        fprintf(stderr, "ERROR: --tls requires --tls-fingerprint or --tls-fingerprint-file\n");
+        return 2;
+    }
+    if (tls && tls_fingerprint && tls_fingerprint_file) {
+        fprintf(stderr, "ERROR: use either --tls-fingerprint or --tls-fingerprint-file, not both\n");
+        return 2;
+    }
+    if (tls && (ble_service || ble_status || ble_stop_service || ble_restore)) {
+        fprintf(stderr, "ERROR: TLS is only available for a Deskflow bridge connection\n");
         return 2;
     }
     if ((audio || clipboard) && (!scrcpy_server || !*scrcpy_server || !scrcpy_version || !*scrcpy_version)) {
@@ -987,7 +1020,14 @@ int main(int argc, char **argv)
             if (!state.display) fprintf(stderr, "WARN: automatic display size monitoring unavailable\n");
         }
         state.display_pending = false;
-        df_client *client=df_client_connect(host,(uint16_t)port,name,state.bridge.screen_w,state.bridge.screen_h,&cbs,&state);
+        df_client_tls_options tls_options = {
+            .enabled = tls != 0,
+            .certificate = tls_cert,
+            .fingerprint = tls_fingerprint,
+            .fingerprint_file = tls_fingerprint_file,
+        };
+        df_client *client=df_client_connect_ex(host,(uint16_t)port,name,state.bridge.screen_w,state.bridge.screen_h,
+                                               &cbs,&state,&tls_options);
         if(client) {
             state.client = client;
             df_client_enable_clipboard(client, clipboard && !state.clipboard_error);

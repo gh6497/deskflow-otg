@@ -12,6 +12,8 @@ struct ServerOptions {
     QString computer = "computer";
     QString configuration;
     int port = 24800;
+    bool tls = false;
+    QString tlsCertificate;
 };
 
 // Owns only the server it creates; never attaches to or stops an external server.

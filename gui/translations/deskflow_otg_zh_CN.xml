@@ -76,6 +76,13 @@
   <message id="otg.label.phone_name"><source>Phone screen name</source><translation>手机屏幕名称</translation></message>
   <message id="otg.label.server_address"><source>Server address</source><translation>服务地址</translation></message>
   <message id="otg.label.server_port"><source>Server port</source><translation>服务端口</translation></message>
+  <message id="otg.tls.enabled"><source>Use Deskflow TLS encryption</source><translation>使用 Deskflow TLS 加密</translation></message>
+  <message id="otg.tls.certificate"><source>Client certificate and private key (optional)</source><translation>客户端证书和私钥（可选）</translation></message>
+  <message id="otg.tls.certificate_hint"><source>PEM file; required when the server requires client authentication</source><translation>PEM 文件；服务端要求客户端认证时必须填写</translation></message>
+  <message id="otg.tls.fingerprint"><source>Trusted server SHA-256 fingerprint</source><translation>信任的服务端 SHA-256 指纹</translation></message>
+  <message id="otg.tls.fingerprint_hint"><source>64 hex characters, with or without colons</source><translation>64 个十六进制字符，可带或不带冒号</translation></message>
+  <message id="otg.tls.fingerprint_file"><source>Deskflow fingerprint database (optional)</source><translation>Deskflow 指纹数据库（可选）</translation></message>
+  <message id="otg.tls.fingerprint_file_hint"><source>Use this instead of entering a fingerprint above</source><translation>使用此文件即可，不必填写上面的指纹</translation></message>
   <message id="otg.section.programs"><source>Programs and mode</source><translation>程序与模式</translation></message>
   <message id="otg.path.adb_hint"><source>Use bundled ADB by default, or select an external executable</source><translation>优先使用随包提供的 ADB，也可指定外部程序</translation></message>
   <message id="otg.audio.enabled"><source>Forward Android audio (requires ADB; Linux/Windows)</source><translation>转发安卓音频（需要 ADB；Linux/Windows）</translation></message>
@@ -136,6 +143,7 @@
   <message id="otg.error.write_layout"><source>Could not write Deskflow screen configuration: %1</source><translation>无法写入 Deskflow 屏幕配置：%1</translation></message>
   <message id="otg.error.write_settings"><source>Could not write Deskflow startup settings.</source><translation>无法写入 Deskflow 启动设置。</translation></message>
   <message id="otg.error.disable_tls"><source>This Deskflow startup interface cannot explicitly disable TLS. Connect to an existing server instead.</source><translation>此 Deskflow 启动接口无法显式关闭 TLS，请使用连接已有服务模式。</translation></message>
+  <message id="otg.error.tls_interface"><source>This Deskflow startup interface cannot enable TLS. Connect to an existing server instead.</source><translation>此 Deskflow 启动接口无法显式开启 TLS，请使用连接已有服务模式。</translation></message>
   <message id="otg.error.deskflow_interface"><source>Unrecognized Deskflow startup interface. Select deskflow-core / deskflow-server, or connect to an existing server.</source><translation>未识别的 Deskflow 启动接口。请选择 deskflow-core / deskflow-server，或连接已有服务。</translation></message>
   <message id="otg.log.screen_config"><source>Using an independent screen configuration:
 </source><translation>使用独立屏幕配置：
