@@ -6,9 +6,10 @@ import sys
 import tempfile
 
 FAKE_ADB = r'''
-import os, pathlib, socket, struct, sys, time
+import os, pathlib, signal, socket, struct, sys, time
 args = sys.argv[1:]
 root = pathlib.Path(os.environ['OTG_TEST_AUX_ROOT'])
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
 target = os.environ.get('OTG_TEST_AUX_TARGET', 'FAKE_PHONE')
 if args[0] == '-s':
     assert args[:2] == ['-s', target]
@@ -47,17 +48,11 @@ if args[0] == 'forward':
         assert args[2].startswith('localabstract:scrcpy_')
         (root / 'port').write_text(args[1].split(':')[1])
     sys.exit(0)
-if args == ['shell', 'input', 'keyevent', 'KEYCODE_MEDIA_PAUSE']:
-    # Stop must still target this session and precede tunnel removal.
-    assert (root / 'port').exists()
-    pause = os.environ.get('OTG_TEST_AUX_PAUSE', '')
-    if pause == 'timeout':
-        time.sleep(30)
-    sys.exit(1 if pause == 'fail' else 0)
 assert args[0] == 'shell'
 assert 'video=false' in args and 'send_device_meta=false' in args and 'send_dummy_byte=true' in args
 audio = 'audio=true' in args
 control = 'control=true' in args
+clipboard = os.environ.get('OTG_TEST_AUX_CLIPBOARD') == '1'
 deadline = time.monotonic() + 5
 while not (root / 'port').exists():
     assert time.monotonic() < deadline
@@ -84,12 +79,24 @@ def read(n):
         out += part
     return out
 if control:
-    header = read(14)
-    assert header[0] == 9 and header[9] == 0
-    assert read(struct.unpack('>I', header[10:14])[0]) == b'computer'
-    channel.sendall(b'\x01' + header[1:9] + b'\x00\x00\x00\x00\x07android')
-while channel.recv(1):
-    pass
+    if clipboard:
+        header = read(14)
+        assert header[0] == 9 and header[9] == 0
+        assert read(struct.unpack('>I', header[10:14])[0]) == b'computer'
+        channel.sendall(b'\x01' + header[1:9] + b'\x00\x00\x00\x00\x07android')
+    pause_count = 0
+    while True:
+        first = channel.recv(1)
+        if not first:
+            break
+        message = first + read(13)
+        assert message[0] == 0
+        assert message[2:6] == b'\x00\x00\x00\x7f'
+        assert message[1] in (0, 1)
+        pause_count += 1
+    if audio:
+        assert pause_count == 2
+        (root / 'pause').touch()
 '''
 
 helper, audio_enabled = sys.argv[1:]
@@ -112,7 +119,7 @@ for mode, scenario, target, pause in cases:
         env = dict(os.environ, OTG_TEST_AUX_ROOT=directory)
         env["OTG_TEST_AUX_TARGET"] = target
         env["OTG_TEST_AUX_WIRELESS"] = scenario
-        env["OTG_TEST_AUX_PAUSE"] = pause
+        env["OTG_TEST_AUX_CLIPBOARD"] = "1" if mode in ("clipboard", "both") else "0"
         wireless_failure = scenario in ("connect-fail", "offline", "unauthorized", "timeout")
         if wireless_failure:
             env["OTG_TEST_AUX_EXPECT_FAIL"] = "1"
@@ -140,14 +147,8 @@ for mode, scenario, target, pause in cases:
         assert sum(line.startswith("push ") for line in calls) == (not wireless_failure), calls
         started = mode not in ("fail", "audio-fail") and not wireless_failure
         paused = started and mode in ("audio", "both")
-        pause_command = 'shell input keyevent KEYCODE_MEDIA_PAUSE'
-        assert calls.count(pause_command) == paused, calls
-        assert sum(line.startswith("shell ") for line in calls) == started + paused, calls
-        if paused:
-            assert calls.index(pause_command) < next(i for i, line in enumerate(calls)
-                                                   if line.startswith('forward --remove ')), calls
-        if pause:
-            assert 'could not pause Android media' in completed.stderr, completed
+        assert sum(line.startswith("shell ") for line in calls) == started, calls
+        assert (root / "pause").exists() == paused, calls
         assert sum(line.startswith("forward tcp:") for line in calls) == started, calls
         assert sum(line.startswith("forward --remove ") for line in calls) == started, calls
         assert not any(line.startswith(('disconnect', 'pair ', 'kill-server')) for line in calls), calls
