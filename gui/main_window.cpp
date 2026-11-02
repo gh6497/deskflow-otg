@@ -419,7 +419,7 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this)
     m_audio = translated(new QCheckBox, "text", "otg.audio.enabled");
     m_audio->setObjectName("audioEnabled");
     setTranslatedProperty(m_audio, "toolTip", "otg.audio.tooltip");
-    advancedForm->addRow(m_audio);
+    deviceForm->addRow(m_audio);
     m_clipboard = translated(new QCheckBox, "text", "otg.clipboard.enabled");
     m_clipboard->setObjectName("clipboardEnabled");
     setTranslatedProperty(m_clipboard, "toolTip", "otg.clipboard.tooltip");
@@ -733,6 +733,7 @@ void MainWindow::addDevice()
     profile["alias"] = name;
     profile["serial"] = "";
     profile["adbSerial"] = "";
+    profile["audio"] = false;
     profile["clipboard"] = false;
     profile["transport"] = "usb";
     profile["blePeer"] = "";
@@ -870,7 +871,7 @@ ConnectionOptions MainWindow::connectionOptions(const QVariantMap &profile) cons
     options.adbSerial = profile.value("adbSerial").toString().trimmed();
     options.transport = profile.value("transport", "usb").toString();
 #ifdef OTG_GUI_HAVE_AUDIO
-    options.audio = options.transport == "usb" && profile.value("audio", m_audio->isChecked()).toBool();
+    options.audio = options.transport == "usb" && profile.value("audio", false).toBool();
 #else
     options.audio = false;
 #endif
@@ -935,9 +936,9 @@ void MainWindow::updateEnabled()
     m_clipboardStatus->setText(idle ? qtTrId(m_clipboard->isChecked() ?
         "otg.clipboard.disconnected" : "otg.clipboard.off") : m_session->clipboardStatusMessage());
 #ifdef OTG_GUI_HAVE_AUDIO
-    m_programForm->setRowVisible(m_audio, !ble);
+    m_deviceForm->setRowVisible(m_audio, !ble);
 #else
-    m_programForm->setRowVisible(m_audio, false);
+    m_deviceForm->setRowVisible(m_audio, false);
 #endif
     m_deviceForm->setRowVisible(m_mouseMode, !ble);
     m_autoConnect.setReady(!m_closing);
@@ -1173,6 +1174,7 @@ void MainWindow::applyDeviceProfile(const QVariantMap &profile)
     m_adapter->setText(profile.value("bleAdapter", "hci0").toString());
     m_blePeer->setText(profile.value("blePeer").toString());
     m_bleIsolate->setChecked(profile.value("bleIsolate", false).toBool());
+    const QSignalBlocker audioBlocker(m_audio);
     m_audio->setChecked(profile.value("audio", false).toBool());
     const QSignalBlocker clipboardBlocker(m_clipboard);
     m_clipboard->setChecked(profile.value("clipboard", false).toBool());

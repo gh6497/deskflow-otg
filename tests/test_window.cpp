@@ -48,34 +48,84 @@ protected:
 class WindowTest : public QObject {
     Q_OBJECT
 private slots:
-    void clipboardProfiles()
+    void deviceFeatureProfiles_data()
     {
+        QTest::addColumn<QString>("objectName");
+        QTest::newRow("clipboard") << QString("clipboardEnabled");
+        QTest::newRow("audio") << QString("audioEnabled");
+    }
+    void deviceFeatureProfiles()
+    {
+        QFETCH(QString, objectName);
         QTemporaryDir dir;
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dir.path());
         QSettings().setValue("adb", "");
         {
             AutoConnectTestWindow window;
-            auto *clipboard = window.findChild<QCheckBox *>("clipboardEnabled");
+            auto *feature = window.findChild<QCheckBox *>(objectName);
             auto *list = window.findChild<QListWidget *>("deviceSidebar");
-            QVERIFY(clipboard && list);
-            QVERIFY(!clipboard->isChecked());
-            clipboard->setChecked(true);
+            QVERIFY(feature && list);
+            QVERIFY(!feature->isChecked());
+            feature->setChecked(true);
             window.findChild<QLineEdit *>("usbSerial")->setText("A");
             window.findChild<QPushButton *>("addDeviceButton")->click();
-            QVERIFY(!clipboard->isChecked());
+            QVERIFY(!feature->isChecked());
             window.findChild<QLineEdit *>("usbSerial")->setText("B");
             list->setCurrentRow(0);
-            QVERIFY(clipboard->isChecked());
+            QVERIFY(feature->isChecked());
             list->setCurrentRow(1);
-            QVERIFY(!clipboard->isChecked());
+            QVERIFY(!feature->isChecked());
         }
         AutoConnectTestWindow restored;
         auto *list = restored.findChild<QListWidget *>("deviceSidebar");
         list->setCurrentRow(0);
-        QVERIFY(restored.findChild<QCheckBox *>("clipboardEnabled")->isChecked());
+        QVERIFY(restored.findChild<QCheckBox *>(objectName)->isChecked());
         list->setCurrentRow(1);
-        QVERIFY(!restored.findChild<QCheckBox *>("clipboardEnabled")->isChecked());
+        QVERIFY(!restored.findChild<QCheckBox *>(objectName)->isChecked());
+    }
+    void audioPlacementAndAvailability()
+    {
+        QTemporaryDir dir;
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dir.path());
+        QSettings().setValue("adb", "");
+        QSettings().setValue("language", "zh_CN");
+        AutoConnectTestWindow window;
+        auto *audio = window.findChild<QCheckBox *>("audioEnabled");
+        auto *clipboard = window.findChild<QCheckBox *>("clipboardEnabled");
+        auto *tabs = window.findChild<QTabWidget *>("deviceTabs");
+        auto *transport = window.findChild<QComboBox *>("transportSelector");
+        QVERIFY(audio && clipboard && tabs && transport);
+        QCOMPARE(audio->text(), "转发安卓音频（需要 ADB；Linux/Windows）");
+        auto *language = window.findChild<QComboBox *>("languageSelector");
+        QVERIFY(language);
+        language->setCurrentIndex(language->findData("en"));
+        QCOMPARE(audio->text(), "Forward Android audio (requires ADB; Linux/Windows)");
+        language->setCurrentIndex(language->findData("zh_CN"));
+        QCOMPARE(audio->text(), "转发安卓音频（需要 ADB；Linux/Windows）");
+        QVERIFY(tabs->widget(0)->isAncestorOf(audio));
+        QCOMPARE(audio->parentWidget(), clipboard->parentWidget());
+        QVERIFY(!tabs->widget(2)->isAncestorOf(audio));
+#ifdef OTG_GUI_HAVE_AUDIO
+        QVERIFY(!audio->isHidden());
+#else
+        QVERIFY(audio->isHidden());
+#endif
+        const int ble = transport->findData("ble");
+        if (ble >= 0) {
+            transport->setCurrentIndex(ble);
+            QVERIFY(audio->isHidden());
+            QVERIFY(!audio->isEnabled());
+            transport->setCurrentIndex(0);
+#ifdef OTG_GUI_HAVE_AUDIO
+            QVERIFY(!audio->isHidden());
+            QVERIFY(audio->isEnabled());
+#else
+            QVERIFY(audio->isHidden());
+#endif
+        }
+        window.findChild<QAction *>("trayQuit")->trigger();
     }
     void multipleDevices()
     {
@@ -101,8 +151,9 @@ private slots:
             auto *serial = window.findChild<QLineEdit *>("usbSerial");
             auto *alias = window.findChild<QLineEdit *>("deviceAlias");
             auto *width = window.findChild<QSpinBox *>("screenWidth");
+            auto *audio = window.findChild<QCheckBox *>("audioEnabled");
             auto *connectButton = window.findChild<QPushButton *>("connectButton");
-            QVERIFY(manager && list && tabs && serial && alias && width);
+            QVERIFY(manager && list && tabs && serial && alias && width && audio);
             QCOMPARE(list->count(), 1);
             serial->setText("A"); alias->setText("Redmi K20 Pro"); width->setValue(1234);
             window.findChild<QPushButton *>("addDeviceButton")->click();
@@ -114,14 +165,17 @@ private slots:
             QTRY_COMPARE(manager->state(secondId), Session::State::Connected);
             QVERIFY(list->isEnabled());
             QVERIFY(!tabs->widget(2)->isEnabled());
+            QVERIFY(!audio->isEnabled());
             QVERIFY(!window.findChild<QPushButton *>("addDeviceButton")->isEnabled());
             for (int i = 0; i < list->count(); ++i)
                 if (list->item(i)->data(Qt::UserRole) == "initial") list->setCurrentRow(i);
             QCOMPARE(serial->text(), "A");
             QCOMPARE(width->value(), 1234);
             QVERIFY(serial->isEnabled());
+            QVERIFY(audio->isEnabled()); // Another device's connection must not lock this option.
             connectButton->click();
             QTRY_COMPARE(manager->state("initial"), Session::State::Connected);
+            QVERIFY(!audio->isEnabled());
             QCOMPARE(manager->state(secondId), Session::State::Connected);
             QVERIFY(window.findChild<QLabel *>("connectionSummary")->text().contains("2 / 2"));
             auto *logFilter = window.findChild<QComboBox *>("logFilter");
