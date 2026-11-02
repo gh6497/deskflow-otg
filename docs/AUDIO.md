@@ -10,7 +10,12 @@ Android AudioRecord → scrcpy-server(raw PCM) → ADB forward → ALSA/WASAPI
 ADB 与 USB HID 可以使用不同的传输。`--serial` 始终是 USB AOA HID 的物理设备序列号；
 `--adb-serial` 可单独指定音频使用的 ADB transport，例如无线调试地址
 `192.168.1.20:5555`。这样 Windows 不需要同时为同一条 USB 连接提供 ADB 和 WinUSB 驱动。
-先在系统设置中完成 Android 无线调试配对，再执行 `adb connect`。
+先完成 Android 无线调试配对（如需要，可使用 `adb pair`），再填写手机无线调试主页的
+IP 和**连接端口**，而非配对弹窗的端口。Linux、Windows、macOS 的共享会话会对显式
+`主机:端口`（IPv6 为 `[地址]:端口`）先检查 `adb -s ... get-state`；未就绪时自动执行一次
+`adb connect` 并再次确认状态为 `device`，然后才推送 server。已在线则不重复连接。
+连接/授权失败会提示检查端口、网络和配对；不自动配对、不回退到另一台 USB 设备，
+退出也不执行 `adb disconnect` 或重启 ADB server。macOS 当前仅提供剪贴板，不提供音频播放。
 
 主机端由共享的 `scrcpy_session` 管理 ADB、scrcpy-server、forward 以及音频/控制
 socket 生命周期；`audio_player` 只负责将 RAW PCM 播放到 ALSA/WASAPI。这样只启用

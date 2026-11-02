@@ -85,6 +85,7 @@ add_executable(deskflow-otg
   src/deskflow_client.c
   src/keymap.c
   src/clipboard.c
+  src/adb_target.c
 )
 if((LINUX OR APPLE) AND (BUILD_AUDIO OR BUILD_CLIPBOARD))
   target_sources(deskflow-otg PRIVATE platform/posix/scrcpy_session.c)
@@ -263,6 +264,9 @@ if(BUILD_TESTING)
     target_link_libraries(test_clipboard PRIVATE ws2_32)
   endif()
   add_test(NAME clipboard_protocol COMMAND test_clipboard)
+  add_executable(test_adb_target tests/test_adb_target.c src/adb_target.c)
+  target_include_directories(test_adb_target PRIVATE src)
+  add_test(NAME adb_target COMMAND test_adb_target)
   set_tests_properties(clipboard_protocol PROPERTIES TIMEOUT 15)
   if(UNIX)
     add_executable(test_clipboard_bridge tests/test_clipboard_bridge.c src/clipboard.c
@@ -275,7 +279,7 @@ if(BUILD_TESTING)
   if(BUILD_CLIPBOARD AND UNIX)
     find_package(Python3 QUIET COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
-      add_executable(test_auxiliary tests/test_auxiliary.c src/clipboard.c platform/posix/scrcpy_session.c)
+      add_executable(test_auxiliary tests/test_auxiliary.c src/clipboard.c src/adb_target.c platform/posix/scrcpy_session.c)
       target_include_directories(test_auxiliary PRIVATE src)
       target_compile_definitions(test_auxiliary PRIVATE OTG_HAVE_CLIPBOARD=1)
       if(BUILD_AUDIO)

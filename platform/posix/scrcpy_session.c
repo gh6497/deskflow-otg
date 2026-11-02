@@ -10,6 +10,7 @@
 #define _DARWIN_C_SOURCE 1
 #endif
 #include "scrcpy_session.h"
+#include "adb_target.h"
 #if defined(OTG_HAVE_AUDIO) || defined(OTG_HAVE_CLIPBOARD)
 #ifdef OTG_HAVE_AUDIO
 #include "audio_player.h"
@@ -86,6 +87,48 @@ static int wait_child(pid_t pid)
         (void)poll(NULL, 0, 10);
     }
     return WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : -1;
+}
+
+static int adb_target_command(void *ud, const char *target, bool connect)
+{
+    const char *adb = ud;
+    int output[2] = {-1, -1};
+    pid_t pid;
+    if (!connect) {
+        if (pipe(output) < 0) return -1;
+        /* Never block on output left open by a descendant after child exit. */
+        if (fcntl(output[0], F_SETFL, O_NONBLOCK) < 0) {
+            close(output[0]); close(output[1]);
+            return -1;
+        }
+    }
+    pid = fork();
+    if (pid == 0) {
+        if (connect) {
+            /* Keep human-readable ADB output out of GUI's JSON stdout. */
+            if (dup2(STDERR_FILENO, STDOUT_FILENO) < 0) _exit(127);
+            execlp(adb, adb, "connect", target, (char *)NULL);
+        } else {
+            int null_fd = open("/dev/null", O_WRONLY);
+            close(output[0]);
+            if (dup2(output[1], STDOUT_FILENO) < 0 || null_fd < 0 ||
+                dup2(null_fd, STDERR_FILENO) < 0) _exit(127);
+            if (output[1] > STDERR_FILENO) close(output[1]);
+            if (null_fd > STDERR_FILENO) close(null_fd);
+            execlp(adb, adb, "-s", target, "get-state", (char *)NULL);
+        }
+        _exit(127);
+    }
+    if (!connect) close(output[1]);
+    int result = pid < 0 ? -1 : wait_child(pid);
+    if (!connect) {
+        char state[32];
+        ssize_t size;
+        do { size = read(output[0], state, sizeof(state)); } while (size < 0 && errno == EINTR);
+        close(output[0]);
+        if (size < 0 || !otg_adb_state_is_device(state, (size_t)size)) result = -1;
+    }
+    return result;
 }
 
 static int adb_push(const char *adb, const char *serial, const char *source)
@@ -254,6 +297,7 @@ int scrcpy_session_start(struct scrcpy_session *session, const char *adb_path,
     session->adb_serial = copy_string(adb_serial);
     session->server_path = copy_string(server_path);
     if (!session->adb_path || !session->adb_serial || !session->server_path) goto fail;
+    if (otg_adb_target_prepare(session->adb_serial, adb_target_command, session->adb_path)) goto fail;
     if (adb_push(session->adb_path, session->adb_serial, session->server_path) != 0) {
         LOG_ERR("adb push of scrcpy-server failed\n");
         goto fail;

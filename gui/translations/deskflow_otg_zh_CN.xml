@@ -58,7 +58,7 @@
   <message id="otg.label.usb_serial"><source>USB serial number</source><translation>USB 序列号</translation></message>
   <message id="otg.label.adb_serial"><source>ADB serial for audio/clipboard (optional for USB)</source><translation>音频/剪贴板 ADB 序列号（USB 可选）</translation></message>
   <message id="otg.adb_serial.placeholder"><source>Leave empty to use the USB serial; e.g. 192.168.1.20:5555</source><translation>留空则使用 USB 序列号；例如 192.168.1.20:5555</translation></message>
-  <message id="otg.adb_serial.tooltip"><source>Audio and clipboard share this authorized ADB transport. For wireless ADB, pair/connect first. BLE clipboard requires an explicit ADB serial for the same phone.</source><translation>音频与剪贴板共用此已授权 ADB 连接。无线 ADB 请先配对/连接；BLE 剪贴板必须明确填写同一台手机的 ADB 序列号。</translation></message>
+  <message id="otg.adb_serial.tooltip"><source>Audio and clipboard share this authorized ADB transport. Wireless host:port targets connect automatically; pair first if required. Use the connection port, not the pairing port. BLE clipboard requires an explicit ADB serial for the same phone.</source><translation>音频与剪贴板共用此已授权 ADB 连接。无线地址（主机:端口）会自动连接；如需配对，请先手动配对。填写连接端口，而非配对端口。BLE 剪贴板必须明确填写同一台手机的 ADB 序列号。</translation></message>
   <message id="otg.device.debugging_required"><source>ADB screen-size detection requires USB debugging and authorization. USB auto-connect does not.</source><translation>ADB 识别尺寸需要 USB 调试及授权；USB 自动连接不需要。</translation></message>
   <message id="otg.action.swap_dimensions"><source>Swap dimensions</source><translation>交换宽高</translation></message>
   <message id="otg.label.original_size"><source>Original screen size</source><translation>原始屏幕尺寸</translation></message>

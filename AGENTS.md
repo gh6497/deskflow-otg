@@ -267,6 +267,9 @@ for f in platform/linux/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only
   共享生命周期；`audio_player.c` 仅负责平台音频播放。音频与剪贴板复用一个 ADB/server/forward，按音频、控制顺序
   连接独立 socket，先读首 socket dummy，再接控制；不等待音频头来接控制。
   纯剪贴板无 ALSA/WASAPI 依赖，POSIX 会话还用于 macOS 剪贴板（音频仍仅 Linux/Windows）。
+  显式无线 ADB `host:port` / `[IPv6]:port` 由 `src/adb_target.c` 共享启动策略先查状态，
+  未在线时执行一次 `adb connect` 并核对 `get-state=device` 后才 push；平台子进程命令均有界。
+  不自动 pair、不回退 USB、不 disconnect/kill-server；USB/mDNS 序列号不走自动连接。
   HID 前以 SET_CLIPBOARD ACK 做键盘屏障，最多64条/2秒；失败松开键盘但保留指针与键鼠连接，
   切出不向下次切屏重放。后台手机复制可能覆盖当前共享剪贴板；不记录正文。
   Windows 空闲 provider 的附加功能参数固定，修改前显式停止服务，不能擅自注销 GATT。
