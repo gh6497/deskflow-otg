@@ -452,6 +452,17 @@ static int cb_idle(void *ud)
     return 0;
 }
 
+/* Clipboard uses a short tick interval so that ADB control traffic does not
+ * delay Deskflow events.  Do not reuse cb_idle here: its USB transport check
+ * enumerates the device list, which is far too expensive to run every 5 ms on
+ * Windows and makes pointer motion visibly stutter. */
+static int cb_clipboard_tick(void *ud)
+{
+    app_state *s = ud;
+    clipboard_poll(s);
+    return 0;
+}
+
 static void destroy_transport_owner(app_state *s)
 {
 #ifdef OTG_HAVE_BLE
@@ -892,7 +903,7 @@ int main(int argc, char **argv)
         .on_mouse_wheel = cb_mouse_wheel,
         .on_disconnected = cb_disconnected,
         .on_idle = cb_idle,
-        .on_tick = state.transport_owner || clipboard ? cb_idle : NULL,
+        .on_tick = state.transport_owner ? cb_idle : clipboard ? cb_clipboard_tick : NULL,
         .tick_interval_ms = state.transport_owner ? 1 : clipboard ? 5 : 0,
         .on_clipboard = cb_clipboard,
         .on_clipboard_enabled = clipboard ? cb_clipboard_enabled : NULL,
