@@ -79,6 +79,11 @@ int df_client_run(df_client *c, volatile sig_atomic_t *stop);
 /* Disconnect and free the client. */
 void df_client_disconnect(df_client *c);
 
+/* Deskflow-loop thread only. 0: updated/unchanged; 1: defer until handshake or
+ * prior DINF acknowledgement; -1: invalid size or socket error. Mouse input
+ * from the old coordinate space is ignored until CIAK, as in Deskflow. */
+int df_client_resize(df_client *c, int32_t width, int32_t height);
+
 /* Opt-in; the server's CLPS/CLSZ settings remain authoritative. */
 void df_client_enable_clipboard(df_client *c, bool enabled);
 bool df_client_clipboard_enabled(const df_client *c);

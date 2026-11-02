@@ -48,6 +48,46 @@ protected:
 class WindowTest : public QObject {
     Q_OBJECT
 private slots:
+    void displayUpdatesArePerDevice()
+    {
+        QTemporaryDir dir;
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dir.path());
+        QSettings().setValue("adb", "");
+        {
+            AutoConnectTestWindow window;
+            auto *manager = window.findChild<ConnectionManager *>();
+            auto *list = window.findChild<QListWidget *>("deviceSidebar");
+            auto *width = window.findChild<QSpinBox *>("screenWidth");
+            auto *height = window.findChild<QSpinBox *>("screenHeight");
+            auto *sensitivity = window.findChild<QDoubleSpinBox *>("sensitivityMultiplier");
+            QVERIFY(manager && list && width && height && sensitivity);
+            width->setValue(1080); height->setValue(1920); sensitivity->setValue(2.0);
+            window.findChild<QPushButton *>("addDeviceButton")->click();
+            const auto second = list->currentItem()->data(Qt::UserRole).toString();
+            width->setValue(720); height->setValue(1600); sensitivity->setValue(1.5);
+            manager->session("initial")->displaySizeChanged(QSize(1920, 1080));
+            QCOMPARE(width->value(), 720); QCOMPARE(height->value(), 1600);
+            for (int i = 0; i < list->count(); ++i)
+                if (list->item(i)->data(Qt::UserRole) == "initial") list->setCurrentRow(i);
+            QCOMPARE(width->value(), 1920); QCOMPARE(height->value(), 1080);
+            QCOMPARE(sensitivity->value(), 2.0);
+            QVERIFY(window.findChild<QLabel *>("virtualScreenSize")->text().startsWith("960 × 540"));
+            manager->session(second)->displaySizeChanged(QSize(1600, 720));
+            QCOMPARE(width->value(), 1920);
+            window.findChild<QAction *>("trayQuit")->trigger();
+        }
+        AutoConnectTestWindow restored;
+        QCOMPARE(restored.findChild<QSpinBox *>("screenWidth")->value(), 1920);
+        QCOMPARE(restored.findChild<QSpinBox *>("screenHeight")->value(), 1080);
+        QCOMPARE(restored.findChild<QDoubleSpinBox *>("sensitivityMultiplier")->value(), 2.0);
+        auto *list = restored.findChild<QListWidget *>("deviceSidebar");
+        list->setCurrentRow(1);
+        QCOMPARE(restored.findChild<QSpinBox *>("screenWidth")->value(), 1600);
+        QCOMPARE(restored.findChild<QSpinBox *>("screenHeight")->value(), 720);
+        QCOMPARE(restored.findChild<QDoubleSpinBox *>("sensitivityMultiplier")->value(), 1.5);
+        restored.findChild<QAction *>("trayQuit")->trigger();
+    }
     void deviceFeatureProfiles_data()
     {
         QTest::addColumn<QString>("objectName");
@@ -92,11 +132,28 @@ private slots:
         QSettings().setValue("adb", "");
         QSettings().setValue("language", "zh_CN");
         AutoConnectTestWindow window;
+        window.show();
         auto *audio = window.findChild<QCheckBox *>("audioEnabled");
         auto *clipboard = window.findChild<QCheckBox *>("clipboardEnabled");
+        auto *autoRotate = window.findChild<QCheckBox *>("autoRotate");
         auto *tabs = window.findChild<QTabWidget *>("deviceTabs");
         auto *transport = window.findChild<QComboBox *>("transportSelector");
-        QVERIFY(audio && clipboard && tabs && transport);
+        QVERIFY(audio && clipboard && autoRotate && tabs && transport);
+        QVERIFY(autoRotate->isVisible());
+        QVERIFY(!autoRotate->isChecked());
+        QVERIFY(!autoRotate->isEnabled());
+#ifdef OTG_GUI_HAVE_AUDIO
+        audio->setChecked(true);
+        QVERIFY(autoRotate->isEnabled());
+        audio->setChecked(false);
+        QVERIFY(!autoRotate->isEnabled());
+#endif
+#ifdef OTG_GUI_HAVE_CLIPBOARD
+        clipboard->setChecked(true);
+        QVERIFY(autoRotate->isEnabled());
+        clipboard->setChecked(false);
+        QVERIFY(!autoRotate->isEnabled());
+#endif
         QCOMPARE(audio->text(), "转发安卓音频（需要 ADB；Linux/Windows）");
         auto *language = window.findChild<QComboBox *>("languageSelector");
         QVERIFY(language);

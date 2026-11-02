@@ -108,6 +108,7 @@ private:
     QLineEdit *m_serial, *m_adbSerial, *m_adb, *m_deskflow, *m_host, *m_computer, *m_phone;
     QCheckBox *m_audio;
     QCheckBox *m_clipboard;
+    QCheckBox *m_autoRotate;
     QLabel *m_clipboardStatus;
     QSpinBox *m_width, *m_height, *m_port;
     QDoubleSpinBox *m_sensitivity;

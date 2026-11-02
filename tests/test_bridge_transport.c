@@ -32,6 +32,18 @@ int main(void)
     otg_bridge_mouse_wheel(&b,120,120);CHECK(report[6]==1 && report[7]==1);
     otg_bridge_key(&b,'a',true);CHECK(last_id==1 && report[0]==0 && report[2]==4);
     otg_bridge_key(&b,'a',false);CHECK(report[2]==0);
+    otg_bridge_key(&b,'a',true);
+    CHECK(otg_bridge_resize(&b,2340,1080));
+    CHECK(b.active && b.keys[4] && !b.mouse_buttons && registrations==2 && closes==0);
+    CHECK(b.mouse_x==2339 && b.mouse_y==1079 && b.screen_w==2340 && b.screen_h==1080);
+    CHECK(last_id==2 && report[0]==2 && report[1]==0 && report[2]==255 && report[3]==127);
+    otg_bridge_mouse_move(&b,0,0);CHECK(report[2]==0 && report[4]==0);
+    otg_bridge_mouse_move(&b,2339,1079);CHECK(report[2]==255 && report[4]==255);
+    int unchanged=reports;CHECK(otg_bridge_resize(&b,2340,1080) && reports==unchanged);
+    CHECK(!otg_bridge_resize(&b,0,1080) && !otg_bridge_resize(&b,1080,32768) && reports==unchanged);
+    CHECK(otg_bridge_resize(&b,1,1) && b.mouse_x==0 && b.mouse_y==0);
+    CHECK(otg_bridge_resize(&b,1080,2340));
+    otg_bridge_key(&b,'a',false);
     otg_bridge_leave(&b);CHECK(last_id==2 && report[0]==0 && report[1]==0);
     int before=reports;otg_bridge_mouse_move(&b,50,50);CHECK(reports==before);
     otg_bridge_close(&b);CHECK(closes==1);

@@ -86,6 +86,7 @@ add_executable(deskflow-otg
   src/keymap.c
   src/clipboard.c
   src/adb_target.c
+  src/adb_display.c
 )
 if((LINUX OR APPLE) AND (BUILD_AUDIO OR BUILD_CLIPBOARD))
   target_sources(deskflow-otg PRIVATE platform/posix/scrcpy_session.c)
@@ -193,7 +194,7 @@ if(BUILD_TESTING)
   add_test(NAME ble_win_control COMMAND test_ble_win_control)
   if(BUILD_BLE_WIN)
     add_executable(test_ble_win_control_peer src/main.c platform/windows/ble_win_control.c src/bridge.c
-      src/keymap.c src/aoa_hid.c src/usb_scan.c src/scrcpy_session_stub.c src/clipboard.c tests/ble_win_control_peer.c)
+      src/keymap.c src/aoa_hid.c src/usb_scan.c src/scrcpy_session_stub.c src/clipboard.c src/adb_display.c tests/ble_win_control_peer.c)
     target_compile_definitions(test_ble_win_control_peer PRIVATE OTG_HAVE_BLE_WIN=1)
     target_include_directories(test_ble_win_control_peer PRIVATE src platform/windows
       "${PROJECT_BINARY_DIR}/generated" ${LIBUSB_INCLUDE_DIR})
@@ -267,10 +268,14 @@ if(BUILD_TESTING)
   add_executable(test_adb_target tests/test_adb_target.c src/adb_target.c)
   target_include_directories(test_adb_target PRIVATE src)
   add_test(NAME adb_target COMMAND test_adb_target)
+  add_executable(test_adb_display tests/test_adb_display.c)
+  target_include_directories(test_adb_display PRIVATE src)
+  add_test(NAME adb_display COMMAND test_adb_display)
+  set_tests_properties(adb_display PROPERTIES TIMEOUT 20)
   set_tests_properties(clipboard_protocol PROPERTIES TIMEOUT 15)
   if(UNIX)
     add_executable(test_clipboard_bridge tests/test_clipboard_bridge.c src/clipboard.c
-      src/bridge.c src/keymap.c src/scrcpy_session_stub.c src/usb_scan.c)
+      src/bridge.c src/keymap.c src/scrcpy_session_stub.c src/usb_scan.c src/adb_display.c)
     target_include_directories(test_clipboard_bridge PRIVATE src "${PROJECT_BINARY_DIR}/generated" ${LIBUSB_INCLUDE_DIR})
     target_link_libraries(test_clipboard_bridge PRIVATE ${LIBUSB_LIBRARY})
     add_test(NAME clipboard_bridge COMMAND test_clipboard_bridge)

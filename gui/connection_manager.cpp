@@ -29,6 +29,9 @@ Session *ConnectionManager::addDevice(const QString &id)
     connect(child, &Session::clipboardChanged, this, [this, id] { emit changed(id); });
     connect(child, &Session::log, this, [this, id](const QString &message) { emit log(id, message); });
     connect(child, &Session::usbAttached, this, &ConnectionManager::usbAttached);
+    connect(child, &Session::displaySizeChanged, this, [this, id](const QSize &size) {
+        emit displaySizeChanged(id, size);
+    });
     return child;
 }
 
