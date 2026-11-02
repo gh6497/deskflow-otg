@@ -34,7 +34,8 @@ static int read_full(SOCKET s, void *out, size_t n) {
     return 1;
 }
 
-static int run_adb(const char *adb, const char *serial, const char *command_line) {
+static int run_adb_timeout(const char *adb, const char *serial, const char *command_line,
+                           DWORD timeout_ms) {
     char command[2048];
     STARTUPINFOA si = { sizeof(si) };
     PROCESS_INFORMATION pi;
@@ -43,9 +44,9 @@ static int run_adb(const char *adb, const char *serial, const char *command_line
     memset(&pi, 0, sizeof(pi));
     if (!CreateProcessA(NULL, command, NULL, NULL, FALSE, CREATE_NO_WINDOW,
                         NULL, NULL, &si, &pi)) return -1;
-    if (WaitForSingleObject(pi.hProcess, 5000) != WAIT_OBJECT_0) {
+    if (WaitForSingleObject(pi.hProcess, timeout_ms) != WAIT_OBJECT_0) {
         TerminateProcess(pi.hProcess, 1);
-        WaitForSingleObject(pi.hProcess, INFINITE);
+        (void)WaitForSingleObject(pi.hProcess, 1000);
         CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
         return -1;
     }
@@ -53,6 +54,10 @@ static int run_adb(const char *adb, const char *serial, const char *command_line
     GetExitCodeProcess(pi.hProcess, &code);
     CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
     return code == 0 ? 0 : -1;
+}
+
+static int run_adb(const char *adb, const char *serial, const char *command_line) {
+    return run_adb_timeout(adb, serial, command_line, 5000);
 }
 
 static int adb_target_command(void *ud, const char *target, bool connect) {
@@ -193,6 +198,16 @@ fail: scrcpy_session_stop(s); return -1;
 
 void scrcpy_session_stop(struct scrcpy_session *s) {
     if (!s || !s->initialized) return;
+#ifdef OTG_HAVE_AUDIO
+    /* Pause before restoring speaker routing. Never toggle playback, reconnect
+     * ADB, or affect clipboard-only/failed startup sessions. */
+    if (s->started && s->player) {
+        s->started = false;
+        if (run_adb_timeout(s->adb_path, s->adb_serial,
+                            "shell input keyevent KEYCODE_MEDIA_PAUSE", 1500))
+            LOG_WARN("could not pause Android media before audio disconnect\n");
+    }
+#endif
     otg_clipboard_channel_close(&s->clipboard);
     if (s->control_fd != (intptr_t)INVALID_SOCKET) {
         shutdown((SOCKET)s->control_fd, SD_BOTH); closesocket((SOCKET)s->control_fd);

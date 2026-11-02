@@ -19,11 +19,13 @@ int main(int argc, char **argv)
     struct scrcpy_session s = {0};
     /* Stopping an unused or failed session must not close stdin/socket 0. */
     scrcpy_session_stop(&s);
-    bool audio = !strcmp(argv[2], "audio") || !strcmp(argv[2], "both");
-    bool clipboard = strcmp(argv[2], "audio") != 0;
+    bool audio = !strcmp(argv[2], "audio") || !strcmp(argv[2], "both") ||
+                 !strcmp(argv[2], "audio-fail");
+    bool clipboard = strcmp(argv[2], "audio") != 0 && strcmp(argv[2], "audio-fail") != 0;
     int result = scrcpy_session_start(&s, argv[1], argc == 4 ? argv[3] : "FAKE_PHONE",
                                      "fake-server", "5.0.1", audio, clipboard);
-    if (!strcmp(argv[2], "fail") || getenv("OTG_TEST_AUX_EXPECT_FAIL")) {
+    if (!strcmp(argv[2], "fail") || !strcmp(argv[2], "audio-fail") ||
+        getenv("OTG_TEST_AUX_EXPECT_FAIL")) {
         scrcpy_session_stop(&s);
         return result == -1 ? 0 : 1;
     }
