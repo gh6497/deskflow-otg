@@ -1,246 +1,152 @@
 # deskflow-otg
 
-一个把 [Deskflow](https://github.com/deskflow/deskflow)（键盘鼠标共享）和
-[scrcpy](https://github.com/Genymobile/scrcpy) 的 **OTG 模式**（USB AOA HID）连接起来的桥接程序。
+A bridge connecting [Deskflow](https://github.com/deskflow/deskflow) (keyboard and mouse sharing) with [scrcpy](https://github.com/Genymobile/scrcpy)'s **OTG mode** (USB AOA HID).
 
-在你的主机电脑上运行一个 Deskflow **server**，再运行本程序，手机通过 USB 线插在主机上，
-当鼠标滑到"手机"这块屏幕时，就可以用主机的键盘鼠标直接操控安卓手机 ——
-USB HID 数据通道**不需要 adb、不需要开启 USB 调试**（和 `scrcpy --otg` 同理）；
-但 Windows 仍需将手机 USB 接口绑定到 libusb 可用的驱动。Windows 的识别限制和排查
-步骤见 [Windows USB OTG 设备识别](docs/WINDOWS_USB.md)。
+Run a Deskflow **server** on the host computer and then run this program. With the phone connected to the host by USB, moving the mouse onto the "phone" screen lets you control the Android phone directly with the host keyboard and mouse.
+The USB HID data path **does not require adb or USB debugging** (similar to `scrcpy --otg`). On Windows, however, the phone's USB interface must still be bound to a driver usable by libusb. See [Windows USB OTG device recognition](docs/WINDOWS_USB.md) for Windows limitations and troubleshooting.
 
-提供命令行和可选的 **Qt 桌面 GUI**。GUI 可以通过 ADB 自动识别设备序列号、宽高和
-方向，配置并启动已安装的 Deskflow，再一键连接手机。只有 ADB 读取设备与尺寸需要 USB 调试；
-手动填写设备信息、已记住手机的 USB 自动连接均不需要。详见[桌面 GUI](#桌面-gui)。
+Both a command-line interface and an optional **Qt desktop GUI** are provided. The GUI can use ADB to detect the device serial number, dimensions, and orientation, configure and start an installed Deskflow server, and connect to the phone with one click. USB debugging is only needed for reading the device and its dimensions through ADB; manually entered device information and automatic USB connection for remembered phones do not require it. See [Desktop GUI](#desktop-gui) for details.
 
 ```
-┌─────────────────────────────── 主机电脑 ───────────────────────────────┐
+┌─────────────────────────────── Host computer ───────────────────────────┐
 │                                                                        │
-│   deskflow server（持有真实键盘鼠标）                                      │
+│   deskflow server (with the real keyboard and mouse)                   │
 │        │                                                               │
-│        │  Deskflow 协议 (TCP :24800)                                    │
+│        │  Deskflow protocol (TCP :24800)                               │
 │        ▼                                                               │
-│   deskflow-otg  ──(USB AOA HID)──▶ 安卓手机                              │
+│   deskflow-otg  ──(USB AOA HID)──▶ Android phone                       │
 │                                                                        │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-手机在 Deskflow 里表现为一块普通的"屏幕"，放在主机屏幕的左/右/上/下即可。
+In Deskflow, the phone appears as a normal "screen" that can be placed to the left, right, above, or below the host screen.
 
-## 工作原理
+## How it works
 
-- **deskflow 侧**：本程序实现了一个极简的 Deskflow *客户端*（secondary screen），
-  用 C 语言直接讲 Deskflow / Synergy / Barrier 的 TCP 二进制协议（握手、屏幕信息交换、
-  键鼠事件流、keep-alive、CNOP 应答）。协议格式参考 deskflow 的
-  `src/lib/deskflow/ProtocolTypes.h`。
-- **scrcpy/OTG 侧**：本程序通过 libusb 直接向手机发送 **AOA 2.0 HID** 控制请求
-  （`ACCESSORY_REGISTER_HID`=54 / `SET_HID_REPORT_DESC`=56 / `SEND_HID_EVENT`=57），
-  把键鼠事件编码成标准 USB HID 报告注入手机。USB 传输、键盘和相对鼠标参考 scrcpy 的
-  `app/src/usb/aoa_hid.c`、`app/src/hid/hid_keyboard.c`、`app/src/hid/hid_mouse.c`。
-  默认指针使用支持悬停的 **HID 数位板绝对坐标**，直接把 Deskflow 坐标映射到手机全屏，
-  避免 Android 鼠标加速造成坐标漂移。
+- **Deskflow side:** This program implements a minimal Deskflow *client* (secondary screen) in C. It speaks the Deskflow/Synergy/Barrier TCP binary protocol directly, including the handshake, screen information exchange, keyboard and mouse event stream, keep-alive, and CNOP replies. The protocol format is based on `src/lib/deskflow/ProtocolTypes.h` from Deskflow.
+- **scrcpy/OTG side:** Through libusb, the program sends **AOA 2.0 HID** control requests directly to the phone (`ACCESSORY_REGISTER_HID`=54 / `SET_HID_REPORT_DESC`=56 / `SEND_HID_EVENT`=57), encoding keyboard and mouse events as standard USB HID reports. USB transport, keyboard, and relative mouse code are based on scrcpy's `app/src/usb/aoa_hid.c`, `app/src/hid/hid_keyboard.c`, and `app/src/hid/hid_mouse.c`. The default pointer uses an **HID digitizer absolute coordinate** device with hover support, mapping Deskflow coordinates directly to the phone's full screen to avoid coordinate drift caused by Android mouse acceleration.
 
-两者串起来就是：`主机键盘鼠标 → deskflow → 本程序 → AOA HID → 手机`。
+The complete path is: `host keyboard and mouse → deskflow → this program → AOA HID → phone`.
 
-Linux/Windows 实验性音频模式沿用 scrcpy 的 Android Server：AOA HID 仍传键鼠，ADB 独立
-转发 Android 音频到主机（Linux 使用 ALSA，Windows 使用 WASAPI）。构建和使用见[音频转发](docs/AUDIO.md)；不启用
-`--audio` 时原有无需 USB 调试的 HID 模式不变。
+The experimental Linux/Windows audio mode uses scrcpy's Android Server: AOA HID still carries keyboard and mouse input, while ADB independently forwards Android audio to the host (ALSA on Linux and WASAPI on Windows). See [Audio forwarding](docs/AUDIO.md) for build and usage instructions. Without `--audio`, the original HID mode, which does not require USB debugging, is unchanged.
 
-可选[文本剪贴板共享](docs/CLIPBOARD.md)遵循 Deskflow 的所有权和切屏同步规则，
-通过 ADB/scrcpy 控制通道读写手机剪贴板，不依赖 GUI 所在电脑的系统剪贴板。
-`-DBUILD_CLIPBOARD=ON` 编译后，在 GUI 按设备开启或使用 `--clipboard`；默认关闭，
-与音频独立启用，但共用同一设备的 ADB/server 会话。开启后后台手机复制也可能更新共享剪贴板。
-音频 ADB 可通过 `--adb-serial` 独立指定无线调试 transport（例如 `192.168.1.20:5555`），
-而 `--serial` 继续只用于 USB AOA HID，适用于 Windows 上 ADB USB 驱动与 WinUSB 无法同时使用的情况。
+Optional [text clipboard sharing](docs/CLIPBOARD.md) follows Deskflow's ownership and screen-switch synchronization rules. It reads and writes the phone clipboard through the ADB/scrcpy control channel and does not depend on the system clipboard of the computer running the GUI. After building with `-DBUILD_CLIPBOARD=ON`, enable it per device in the GUI or use `--clipboard`; it is disabled by default. Clipboard sharing is independent of audio but uses the same device ADB/server session. When enabled, copying on the phone in the background may also update the shared clipboard.
+The audio ADB transport can be selected independently with `--adb-serial`, for example `192.168.1.20:5555`, while `--serial` continues to identify only the USB AOA HID device. This is useful on Windows when the ADB USB driver and WinUSB cannot be used at the same time.
 
-Linux 另提供 **Bluetooth LE HID** 传输，可不接 USB 控制手机。CLI 与 GUI 使用同一
-`deskflow-otg` 程序，常驻 GATT 服务和桥接会话是不同进程，不是额外的可执行程序。
-USB 仍为默认方式；macOS 暂不提供蓝牙后端。Windows 提供需显式编译开启的
-[实验性 BLE 后端](docs/WINDOWS_BLE.md)，可由 CLI 或 GUI 使用。
+Linux also provides a **Bluetooth LE HID** transport, allowing the phone to be controlled without USB. The CLI and GUI use the same `deskflow-otg` executable; the persistent GATT service and bridge session are separate processes, not additional executables. USB remains the default transport. macOS currently has no Bluetooth backend. Windows provides an [experimental BLE backend](docs/WINDOWS_BLE.md) that must be explicitly enabled at build time and can be used from either the CLI or GUI.
 
-Windows 原生 BLE HID 的独立[最小测试原型](experiments/windows-ble-hid/README.md)
-保留用于逐项真机验证；nova 9 的手动键盘、悬停、点击、拖拽及滚轮已通过，
-不代表连续 Deskflow 输入、重连或所有手机兼容性已验收。
+The standalone [minimal test prototype](experiments/windows-ble-hid/README.md) for native Windows BLE HID is retained for step-by-step real-device validation. Manual keyboard, hover, click, drag, and wheel tests have passed on a Nova 9, but this does not constitute acceptance of continuous Deskflow input, reconnection, or compatibility with all phones.
 
-## 依赖
+## Dependencies
 
-- Linux、macOS（Intel / Apple Silicon）或 Windows（x64）
-- GCC / Clang / MSVC（C11）
+- Linux, macOS (Intel / Apple Silicon), or Windows (x64)
+- GCC / Clang / MSVC (C11)
 - CMake ≥ 3.16
-- libusb-1.0（开发包）和 OpenSSL 1.1.1+/3.x 开发包
+- libusb-1.0 development files and OpenSSL 1.1.1+/3.x development files
 
-Linux BLE HID 后端还需要 BlueZ、GLib/GIO 开发包：
+The Linux BLE HID backend additionally requires BlueZ and GLib/GIO development files:
 
 ```bash
 sudo apt install libusb-1.0-0-dev libssl-dev libglib2.0-dev bluez
 ```
 
-Linux 默认编译 BLE 后端。仅需原有 USB CLI 时可用
-`cmake -S . -B build -DBUILD_BLE=OFF`，不要求 GLib/GIO 或 pkg-config；非 Linux 默认不编译 BLE。
+The BLE backend is enabled by default on Linux. To build only the original USB CLI, use `cmake -S . -B build -DBUILD_BLE=OFF`; GLib/GIO and pkg-config are then not required. BLE is disabled by default on non-Linux systems.
 
 ```bash
 # Debian / Ubuntu
 sudo apt install build-essential cmake libusb-1.0-0-dev libssl-dev
 
-# macOS（先安装 Homebrew）
+# macOS (install Homebrew first)
 xcode-select --install
 brew install cmake libusb openssl@3
 
-# Windows：Visual Studio C++ 工具链、CMake、vcpkg
+# Windows: Visual Studio C++ toolchain, CMake, and vcpkg
 vcpkg install libusb:x64-windows-static openssl:x64-windows-static
 ```
 
-命令行桥接不需要 Qt、不需要 FFmpeg、不需要 SDL —— 这就是本程序相对于"直接链接 deskflow/scrcpy
-库"的主要优势（scrcpy 的 `common.h → compat.h` 会拖入 FFmpeg 头文件，deskflow 会拖入 Qt）。
-可选 GUI 另需 C++17 编译器和 Qt 6.8+（Widgets、Network、LinguistTools，测试另需 Test 模块）。
+The command-line bridge does not require Qt, FFmpeg, or SDL. This is a major advantage over directly linking the Deskflow/scrcpy libraries (scrcpy's `common.h → compat.h` pulls in FFmpeg headers, while Deskflow pulls in Qt). The optional GUI additionally requires a C++17 compiler and Qt 6.8+ (Widgets, Network, and LinguistTools; the Test module is also required for tests).
 
-## 桌面 GUI
+## Desktop GUI
 
-支持 Windows x64、Linux x86_64、macOS Intel / Apple Silicon。GUI 发布包包含桥接程序、
-Qt 运行库和 ADB 36.0.2；**不包含 Deskflow**，请自行安装。GUI 启动时优先发现自带 ADB，
-也可以在界面指定外部 ADB。
+The GUI supports Windows x64, Linux x86_64, and macOS Intel / Apple Silicon. GUI release packages include the bridge program, Qt runtime, and ADB 36.0.2; **Deskflow is not included** and must be installed separately. At startup, the GUI looks for the bundled ADB first, and an external ADB can also be selected in the interface.
 
-GUI 支持中文和英文，可在窗口右上角切换，立即生效并自动保存。首次启动跟随系统语言
-（中文系统使用中文，其他系统使用英文）。切换语言不会改变设备、连接参数或中断连接；
-已有日志和 ADB / Deskflow / 桥接子进程的原始输出不重新翻译。
-GUI 会跟随当前桌面环境的亮色/暗色方案，并在系统主题运行时变化时自动更新，不保存独立的主题覆盖设置。
-使用 Qt 官方 ID 式国际化，代码通过 `qtTrId("otg.action.connect")` 等稳定 ID 引用文案。
-中英文分别维护在 `gui/translations/deskflow_otg_zh_CN.xml` 和 `deskflow_otg_en.xml`，
-构建时使用 `lrelease -idbased -nounfinished` 编译并嵌入程序，无需额外复制翻译文件。
-英文目录始终作为回退层，中文翻译缺失时显示英文，而不是直接显示 ID。
+The GUI supports Chinese and English. The language can be changed in the upper-right corner and takes effect immediately while being saved automatically. On first launch, the system language is used (Chinese on Chinese systems and English elsewhere). Changing the language does not change device or connection parameters or interrupt a connection; existing logs and raw ADB/Deskflow/bridge subprocess output are not translated again.
+The GUI follows the desktop environment's light/dark color scheme and updates when the system theme changes; it does not save a separate theme override. It uses Qt's official ID-based internationalization, with strings referenced in code through stable IDs such as `qtTrId("otg.action.connect")`.
+Chinese and English are maintained in `gui/translations/deskflow_otg_zh_CN.xml` and `deskflow_otg_en.xml`. They are compiled and embedded during the build with `lrelease -idbased -nounfinished`, so no translation files need to be copied separately. The English catalog is always the fallback layer; missing Chinese translations display English rather than the ID.
 
-文件内容仍采用 Qt TS XML 格式，使用 `.xml` 后缀以避免 IDE 将其误识别为 TypeScript。
-新增文案时，在两个 `.xml` 中添加相同的 `<message id="otg.…">`，`<source>` 统一使用英文，
-`<translation>` 分别填写中英文；修改文案不需要修改 ID。目录直接维护或用 Qt Linguist 编辑，
-不从代码运行 `lupdate` 重新生成（代码不包含源文案）。`gui_logic` 测试检查 ID 唯一性、
-双语覆盖、代码引用、占位符和编译后实际查找结果。
+The files still use the Qt TS XML format, but have an `.xml` suffix so that IDEs do not mistake them for TypeScript. When adding a string, add the same `<message id="otg.…">` to both XML files, use the same English text in `<source>`, and fill in the Chinese and English `<translation>` elements respectively. Changing wording does not require changing the ID. Maintain the catalogs directly or with Qt Linguist; do not regenerate them from the code with `lupdate` (the code contains no source strings). The `gui_logic` tests check ID uniqueness, bilingual coverage, code references, placeholders, and the actual lookup results after compilation.
 
-### 使用流程
+### Usage flow
 
-1. 启动 `bin/deskflow-otg-gui`（Windows 为 `.exe`）；macOS 打开 `deskflow-otg-gui.app`。
-2. 手机通过 USB 连接，开启 USB 调试并授权，点击「刷新设备」。启动 GUI 时也会自动读取。
-   列表显示型号、ADB 序列号和在线/授权状态，不选择无线 ADB 或模拟器。
-3. 选择手机，自动读取 `wm size`，优先采用 Override size，并根据屏幕方向交换宽高。
-   方向无法识别时会提示手动调整。识别结果作为「原始屏幕尺寸」，可设置「灵敏度倍率」
-   （1～10×）等比例缩小虚拟尺寸，界面实时显示实际虚拟尺寸；启用「跟随屏幕旋转」后，音频或
-   剪贴板使用的 ADB 会监测方向变化并在连接中动态更新屏幕尺寸，不重启音频、剪贴板或 HID
-   会话。该选项默认关闭；未启用时仍需断开、刷新或交换宽高后重新连接。
-4. 勾选「自动配置并启动本机 Deskflow」，选择手机在电脑的左、右、上、下哪一侧。
-   自动查找常见安装位置；未找到时指定 **deskflow-core / deskflow-server 可执行程序**，
-   不是 Deskflow 的 GUI 程序。macOS 通常位于 `/Applications/Deskflow.app/Contents/MacOS/`。
-5. 点击「连接」。USB HID 初始化且 Deskflow 接受屏幕信息后，状态才变为「已连接」。
-6. 关闭窗口会隐藏到系统托盘，不中断连接。点击托盘图标或菜单「显示窗口」恢复窗口，
-   也可以通过托盘菜单「断开」停止连接。
-7. 将鼠标移回电脑后，选择托盘菜单「退出」，GUI 会先释放桥接键鼠，再停止自己启动的 server。
-   如果桌面不支持系统托盘，关闭窗口仍会停止连接并退出。
+1. Start `bin/deskflow-otg-gui` (`.exe` on Windows); on macOS, open `deskflow-otg-gui.app`.
+2. Connect the phone by USB, enable and authorize USB debugging, and click "Refresh devices". The GUI also reads devices automatically at startup. The list shows the model, ADB serial number, and online/authorization state; wireless ADB devices and emulators are not selected.
+3. Select the phone. The GUI reads `wm size`, prefers Override size, and swaps width and height according to the screen orientation. If orientation cannot be detected, it prompts for manual adjustment. The result is treated as the "original screen size". A "sensitivity multiplier" (1–10×) can proportionally reduce the virtual size, and the effective virtual size is shown live. When "Follow screen rotation" is enabled, the ADB session used by audio or clipboard monitors orientation changes and updates the screen size dynamically without restarting the audio, clipboard, or HID session. This option is disabled by default; when disabled, disconnect and reconnect after refreshing or swapping width and height.
+4. Select "Automatically configure and start local Deskflow" and choose whether the phone is to the left, right, above, or below the computer. Common installation locations are searched automatically. If none is found, select the **deskflow-core / deskflow-server executable**, not the Deskflow GUI. On macOS it is usually under `/Applications/Deskflow.app/Contents/MacOS/`.
+5. Click "Connect". The state changes to "Connected" only after USB HID initialization succeeds and Deskflow accepts the screen information.
+6. Closing the window hides it in the system tray without interrupting the connection. Click the tray icon or "Show window" to restore it; the tray menu also provides "Disconnect".
+7. Move the mouse back to the computer and choose "Quit" from the tray menu. The GUI releases bridge keyboard and mouse input before stopping the server it started. If the desktop has no system tray, closing the window still stops the connection and exits.
 
-ADB 只有一个设备时自动选中；多设备时手动选择。GUI 查询 ADB 设备路径，再将序列号交给
-桥接核心与实际 USB 描述符精确匹配，不回退到任意设备。若厂商的 ADB 与 USB 标识不同，
-根据桥接日志列出的候选 USB 序列号手动修正。未开启 USB 调试时可选择手动模式填写序列号和宽高。
-Windows 原生 ADB USB 后端可能返回 `unknown` 路径，此时继续读取尺寸，并由桥接核心核对 USB 标识。
+When there is only one ADB device, it is selected automatically; with multiple devices, select one manually. The GUI queries the ADB device path and passes the serial number to the bridge core for an exact match with the actual USB descriptor; it does not fall back to an arbitrary device. If the vendor's ADB and USB identifiers differ, manually correct the value using the candidate USB serial numbers listed in the bridge log. Without USB debugging, use manual mode to enter the serial number and dimensions. The native Windows ADB USB backend may return an `unknown` path; in that case, dimension reading continues and the bridge core verifies the USB identity.
 
-### 多设备连接
+### Multiple devices
 
-GUI 左侧管理设备列表，右侧分为「设备配置」「屏幕布局」「共享服务」三个页签。
+The GUI manages the device list on the left and provides three tabs on the right: "Device configuration", "Screen layout", and "Shared service".
 
-1. 在连接前点击「添加设备」，为每台手机填写独立 USB 序列号（或 BLE 身份地址）、唯一
-   屏幕名、尺寸和灵敏度。ADB 发现列表用于识别当前所选设备，不会自动把所有手机加入配置。
-2. 在「屏幕布局」选择当前设备的相邻屏幕和方向。可配置为
-   `computer ↔ android ↔ android-2`，也可放在电脑的不同方向；预览不按实际分辨率缩放。
-   重名、边缘冲突、屏幕重叠、未知相邻屏幕和未连通电脑的布局会被拒绝。
-3. 「共享服务」只配置一次 Deskflow 程序、电脑屏幕名、地址和端口。自动模式只启动一个
-   Deskflow server；每台手机独立启动同一个 `deskflow-otg` 可执行文件的桥接进程，不弹终端。
-   使用外部服务时，请在 Deskflow 中自行配置所有手机屏幕和布局；GUI 不改写或停止外部服务。
-4. 可以单独连接、断开，也可以全部连接、全部断开。切换左侧设备只切换查看对象，不中断连接；
-   连接中的设备输入参数只读，其他未连接设备的尺寸和连接参数仍可编辑。
-5. 新增/移除设备、修改屏幕名、布局或共享服务前，先全部断开并等待清理完成。
-   移除被其他屏幕引用的设备前，要先调整它们的相邻屏幕。
-6. 日志可按设备或共享服务筛选。关闭窗口保留全部连接；托盘「全部断开」结束所有会话；
-   退出先逐台释放输入，再停止自建 Deskflow。某个桥接失败不会停止其他设备。
+1. Before connecting, click "Add device" and enter an independent USB serial number (or BLE identity address), unique screen name, dimensions, and sensitivity for each phone. The ADB discovery list identifies the currently selected device; it does not automatically add every phone to the configuration.
+2. In "Screen layout", select the neighboring screen and direction for the current device. A layout such as `computer ↔ android ↔ android-2` is supported, as are phones placed on different sides of the computer. The preview is not scaled to actual resolutions. Duplicate names, edge conflicts, overlapping screens, unknown neighbors, and layouts disconnected from the computer are rejected.
+3. Configure the Deskflow executable, computer screen name, address, and port once under "Shared service". Automatic mode starts one Deskflow server; each phone starts an independent bridge process using the same `deskflow-otg` executable, without opening a terminal. With an external service, configure all phone screens and the layout in Deskflow yourself; the GUI does not modify or stop external services.
+4. Devices can be connected or disconnected individually, or all at once. Selecting a device on the left only changes the object being viewed and does not interrupt connections. Parameters for connected devices are read-only, while dimensions and connection parameters for disconnected devices remain editable.
+5. Disconnect all devices and wait for cleanup before adding or removing a device or changing a screen name, layout, or shared service. Before removing a device referenced by another screen, update those neighboring-screen settings first.
+6. Logs can be filtered by device or shared service. Closing the window keeps all connections; "Disconnect all" in the tray ends every session. On exit, input is released from each device before the self-started Deskflow server is stopped. A failed bridge does not stop other devices.
 
-目前支持多台 USB，或 USB 与**一台 BLE 手机**混合使用；不支持同一适配器多 BLE 手机并发，
-Windows 空闲 BLE provider 也保留其目标占用。Linux 常驻服务仍遵守原有固定身份和生命周期约束。
-多设备是多台同时保持连接、通过 Deskflow 切屏控制，**不是向多台广播相同键鼠操作**。
-多进程、布局和窗口回归使用模拟设备验证，不等于多台手机真机验收。
+Multiple USB phones, or USB plus **one BLE phone**, are supported. Multiple concurrent BLE phones on one adapter are not supported, and an idle Windows BLE provider continues to reserve its target. The Linux persistent service still follows the existing fixed-identity and lifecycle rules. Multiple devices means multiple simultaneous connections controlled by Deskflow screen switching; it is **not broadcasting the same keyboard and mouse operations to several phones**. Multi-process, layout, and window regression tests use simulated devices and do not constitute real-device acceptance with multiple phones.
 
-### Windows 蓝牙连接（实验性）
+### Windows Bluetooth connection (experimental)
 
-构建时同时开启 `-DBUILD_GUI=ON -DBUILD_BLE_WIN=ON`，GUI 的「连接方式」即可选择
-「低功耗蓝牙（Windows，实验性）」。默认 USB 构建和 macOS 不显示该选项。
+Build with both `-DBUILD_GUI=ON -DBUILD_BLE_WIN=ON` to make "Bluetooth Low Energy (Windows, experimental)" available in the GUI's "Connection method" selector. The option is not shown in the default USB build or on macOS.
 
-1. 填写 Windows 报告的目标手机 BLE 地址与屏幕宽高；地址不是电脑适配器地址。
-   `BluetoothLE#BluetoothLE<电脑地址>-<手机地址>` 中取最后一段手机地址。
-2. 配置自动启动或已有 Deskflow 服务，点击「连接」，再从手机蓝牙设置配对/连接电脑。
-   无需 ADB 或 USB 调试；使用默认蓝牙适配器和绝对指针，不提供 Linux 隔离或常驻服务操作。
-3. 手机身份、配对和键鼠订阅就绪，且 Deskflow 完整握手后才显示「已连接」。同进程内
-   手机或 Deskflow 掉线会等待重新连接；配对等待期间可点「断开」取消。
-4. 点击「断开」只关闭 Deskflow 会话：丢弃未发送动作、等待释放报告处理后，保留同一
-   Windows GATT 进程与订阅。保持 GUI 运行，再点「连接」复用服务，也可更新地址、屏幕名和尺寸。
-   关闭窗口隐藏到托盘同样保留服务；「停止空闲蓝牙服务」或「退出」才停止该 GUI 创建的 GATT。
-   换手机/桥接程序前需显式停止旧服务。与 Linux 不同，GUI 退出后不保留独立常驻服务，
-   进程/系统重启仍可能遇到手机 GATT 缓存问题，不保证任意重启免重配。
-   不要与独立原型或 CLI 后台实例同时使用。
+1. Enter the target phone BLE address reported by Windows and its screen dimensions; this is not the computer adapter address. Use the last address segment in `BluetoothLE#BluetoothLE<computer-address>-<phone-address>`.
+2. Configure automatic startup or an existing Deskflow service, click "Connect", and pair/connect the computer from the phone's Bluetooth settings. ADB and USB debugging are not required. The default Bluetooth adapter and absolute pointer are used; Linux isolation and persistent-service controls are not available.
+3. The state becomes "Connected" only when the phone identity, pairing, keyboard subscription, pointer subscription, and complete Deskflow handshake are ready. If the phone or Deskflow disconnects in the same process, the GUI waits for reconnection; pairing can be canceled with "Disconnect".
+4. "Disconnect" only closes the Deskflow session: unsent actions are discarded, release reports are processed, and the same Windows GATT process and subscriptions are retained. Keep the GUI running and click "Connect" again to reuse the service; the address, screen name, and dimensions can also be updated. Closing the window hides it in the tray and keeps the service. The GATT created by this GUI is stopped only by "Stop idle Bluetooth service" or "Quit". Stop the old service explicitly before switching phones or bridge programs. Unlike Linux, the GUI does not leave an independent persistent service after exit; phone GATT cache issues may still occur after process or system restarts, so arbitrary restarts are not guaranteed to avoid re-pairing.
+   Do not use it together with the standalone prototype or a background CLI instance.
 
-此接入不代表连续输入、重连、休眠或重启的真机验收完成，详见
-[Windows BLE 用法与限制](docs/WINDOWS_BLE.md)。
+This integration does not constitute real-device acceptance of continuous input, reconnection, sleep, or restart behavior. See [Windows BLE usage and limitations](docs/WINDOWS_BLE.md).
 
-### 插入 USB 自动连接（无需 USB 调试）
+### Automatic USB connection on insertion (without USB debugging)
 
-在 GUI 为目标设备勾选「USB 插入时自动连接此设备」（默认关闭），再手动连接手机一次。
-只有状态变为「已连接」后，程序才记住该 USB 序列号及其配置；旧版本仅保存过表单的手机
-也需要重新成功连接一次。可不开启 USB 调试，直接填写 USB 序列号、原始屏幕宽高。
-不知道序列号时，可运行 `deskflow-otg --usb-scan` 查看可读设备的 `serial` 字段。
+In the GUI, enable "Automatically connect this device when USB is inserted" for the target device (disabled by default), then connect the phone manually once. The program remembers the USB serial number and its configuration only after the state becomes "Connected"; phones whose forms were merely saved by an older version must also complete one successful connection. USB debugging is not required: enter the USB serial number and original screen dimensions directly. If the serial number is unknown, run `deskflow-otg --usb-scan` and inspect the `serial` field of readable devices.
 
-- 程序优先使用 libusb 热插拔事件通知（运行时检测后端能力，Linux/macOS 通常支持），
-  不支持的后端（如常见 Windows 后端）、监听启动失败或异常退出时，自动回退到每 2 秒轮询。
-  当前检测方式会显示在日志中；事件模式空闲时不会周期性枚举 USB。
-- 启动时会扫描已插入的设备；热插拔事件到达后合并短时间内的通知，并做有限次短暂重试，
-  等待 USB 驱动/权限就绪。识别手机后恢复其屏幕尺寸、灵敏度、指针模式、Deskflow 地址/端口、
-  屏幕名、位置及自动启动设置，然后自动连接。全过程不会调用 ADB。
-- GUI 需保持运行，可以隐藏到托盘；启动 GUI 时已插着的已记住手机也会自动连接。
-  这不是开机自启动功能，完全退出程序后不再检测。
-- 手动断开或连接失败后，同一次 USB 插入不再自动重试；可手动点击「连接」，或拔插 USB。
-   多台已记住且启用自动连接的手机可以分别自动接入；序列号在 USB 快照或 GUI 配置中重复时，
-   不自动选择该序列号对应的设备。共享布局需提前配置完整。
-- 配置按手机分别保存。启用「跟随屏幕旋转」且使用音频或剪贴板时，ADB 会在连接期间检测转屏
-  并更新当前手机的 Deskflow 屏幕尺寸；无 ADB 或未启用该选项时无法自动更新分辨率或方向，
-  转屏后请断开，手动调整尺寸再连接。
-- USB 权限、兼容的 Windows 驱动和可读的 USB 序列号仍是前提；序列号随 USB 模式改变时，
-  需要用新序列号手动连接一次。`--usb-scan` 中序列号为空表示无法读取或设备没有序列号，
-  不会尝试连接这些设备。轮询回退模式下，快速拔插若 USB 地址未改变且未被观察到，
-  可能需要再拔插并稍等；事件模式会用拔出通知重置本次插入的连接记录。
+- The program prefers libusb hotplug notifications (backend capability is detected at runtime; Linux/macOS usually support this). If the backend does not support it, startup fails, or the watcher exits unexpectedly, it falls back to polling every two seconds. The current detection method is shown in the log; event mode does not periodically enumerate USB while idle.
+- Devices already connected are scanned at startup. After hotplug events, notifications arriving close together are coalesced and a limited number of short retries wait for USB drivers and permissions to become ready. Once a phone is identified, its screen dimensions, sensitivity, pointer mode, Deskflow address/port, screen name, position, and automatic-start setting are restored and it is connected automatically. ADB is never called during this process.
+- The GUI must remain running, though it can be hidden in the tray. Remembered phones already connected when the GUI starts are also connected automatically. This is not a boot-time autostart feature; detection stops after the program exits completely.
+- After a manual disconnect or failed connection, the same USB insertion is not retried automatically. Click "Connect" manually or unplug and reconnect the USB cable. Multiple remembered phones with automatic connection enabled can connect independently. If a serial number is duplicated in the USB snapshot or GUI configuration, no device using that serial is selected automatically. The shared layout must be configured beforehand.
+- Configuration is saved per phone. When "Follow screen rotation" is enabled together with audio or clipboard, ADB detects rotation during the connection and updates the current phone's Deskflow screen dimensions. Without ADB or without this option, resolution and orientation cannot be updated automatically; disconnect, adjust the dimensions manually, and reconnect after rotation.
+- USB permissions, a compatible Windows driver, and a readable USB serial number are prerequisites. If the serial changes with the USB mode, connect manually once with the new serial. An empty serial in `--usb-scan` means that it cannot be read or the device has no serial, and the device is not attempted. In polling fallback mode, a rapid unplug/replug may require another cycle and a short wait if the USB address did not change and the removal was not observed; event mode resets the insertion record on removal notification.
 
-### Deskflow 启动与版本兼容
+### Deskflow startup and version compatibility
 
-- 根据 `--help` 探测实际启动接口，不通过版本号白名单限制协议兼容性。
-- 支持新版 `deskflow-core server --settings`（含 1.26 接口），以及旧版
-  `deskflow-server --no-daemon --name --config --address`；根据实际参数设置连接安全模式。
-- 自动生成独立的临时设置与屏幕布局，不覆盖用户已有 Deskflow 配置。自动启动的 server
-  只监听 `127.0.0.1`；TLS 选项会同步写入临时设置，端口被占用时明确报错。
-- 取消「自动配置并启动本机 Deskflow」即可填写服务地址，连接已有 server。这时需要自己
-  配置同名手机屏幕、位置及 TLS；GUI 不会停止外部服务。
-- 新版本如果保持协议、启动参数及设置格式兼容即可继续使用；未知启动接口会提示使用已有服务模式。
-- 设备、尺寸、路径和连接参数自动保存。首次自动启动可能需要授予 Deskflow 键鼠捕获权限；
-  macOS 需辅助功能权限，Wayland 可能需要桌面门户确认。Windows USB 驱动仍须同时满足 ADB
-  与 libusb 的访问要求，不能仅以 ADB 可见判断 AOA 可用。
+- The actual startup interface is detected from `--help`; compatibility is not restricted by a version allowlist.
+- The newer `deskflow-core server --settings` interface (including the 1.26 interface) and the older `deskflow-server --no-daemon --name --config --address` interface are supported. Connection security mode is configured according to the detected arguments.
+- Independent temporary settings and screen layouts are generated without overwriting the user's existing Deskflow configuration. An automatically started server listens only on `127.0.0.1`; TLS options are written to the temporary settings, and a port conflict is reported clearly.
+- Uncheck "Automatically configure and start local Deskflow" to enter a server address and connect to an existing server. In that case, configure the phone screen name, position, and TLS yourself; the GUI does not stop external services.
+- New Deskflow versions can continue to work as long as their protocol, startup arguments, and settings format remain compatible. An unknown startup interface prompts the user to use an existing-service mode.
+- Device, dimension, path, and connection parameters are saved automatically. The first automatic startup may require permission for Deskflow to capture keyboard and mouse input; macOS requires Accessibility permission and Wayland may ask the desktop portal for confirmation. Windows USB drivers must satisfy both ADB and libusb access requirements; ADB visibility alone does not prove AOA availability.
 
-### 从源码构建 GUI
+### Building the GUI from source
 
-安装 Qt 6.8+，`CMAKE_PREFIX_PATH` 指向 Qt 安装前缀。保留 `BUILD_GUI=OFF`（默认值）可以
-继续只构建纯 C 命令行程序。
+Install Qt 6.8+ and set `CMAKE_PREFIX_PATH` to the Qt installation prefix. Keeping `BUILD_GUI=OFF` (the default) continues to build only the pure-C command-line program.
 
 ```bash
 cmake -S . -B build-gui -DBUILD_GUI=ON -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_PREFIX_PATH=/path正式发布校验 Git 标签与版本一致。/to/Qt/6.8.3/gcc_64
+    -DCMAKE_PREFIX_PATH=/path/to/Qt/6.8.3/gcc_64
 cmake --build build-gui --config Release --parallel
 ctest --test-dir build-gui -C Release --output-on-failure
 ```
 
-Linux/Windows GUI 与桥接程序位于同一输出目录；macOS 构建产物是 `.app`，桥接复制到
-包内 `Contents/MacOS`。Windows 仍需本 README 中的 vcpkg/libusb 工具链参数；GUI 使用
-动态 Qt 和动态 MSVC 运行库，桥接保持静态 libusb 构建。
+On Linux and Windows, the GUI and bridge program are placed in the same output directory. On macOS, the result is an `.app` and the bridge is copied into `Contents/MacOS`. Windows still requires the vcpkg/libusb toolchain options described in this README; the GUI uses dynamic Qt and the dynamic MSVC runtime, while the bridge uses a static libusb build.
 
-打包时下载固定版本并校验 SHA-256，保留 ADB 的许可证与必要 DLL：
+For packaging, download fixed versions and verify their SHA-256 hashes while retaining ADB licenses and required DLLs:
 
 ```bash
 python scripts/fetch_adb.py --output adb-bundle
@@ -251,102 +157,68 @@ cmake --install build-gui --config Release --prefix "$PWD/stage"
 python scripts/fetch_licenses.py --output stage/share/deskflow-otg/licenses
 ```
 
-发布的目录包可解压运行；Windows 入口在 `stage/bin`，macOS 入口为 `stage/*.app`。
-安装前缀需为绝对路径（Qt 生成 `qt.conf` 的要求）；PowerShell 可使用 `--prefix "$pwd/stage"`。
-Linux 还需系统 libusb、桌面图形库，Wayland 桌面可通过 XWayland 运行 GUI。macOS 桌面包
-部署桥接依赖的 libusb。第三方说明见 [THIRD_PARTY.md](THIRD_PARTY.md)。
+The resulting directory package can be extracted and run. The Windows entry point is in `stage/bin`; on macOS it is `stage/*.app`. The install prefix must be absolute (required by Qt when generating `qt.conf`); PowerShell can use `--prefix "$pwd/stage"`. Linux also needs system libusb and desktop GUI libraries; a Wayland desktop can run the GUI through XWayland. The macOS app bundle packages the bridge's libusb dependency. See [THIRD_PARTY.md](THIRD_PARTY.md) for third-party notices.
 
-测试覆盖设备输出解析、分辨率覆盖与方向、布局生成、端口冲突、子进程连接/拒绝/取消/退出、
-外部服务保留，以及完整窗口的模拟 ADB 识别。模拟测试不替代三平台手机 USB 真机验证。
+Tests cover device-output parsing, resolution overrides and orientation, layout generation, port conflicts, subprocess connection/rejection/cancellation/exit, preserving external services, and simulated ADB detection in the complete window. Simulated tests do not replace real-device USB validation on the three platforms.
 
-## 构建
+## Building
 
 ```bash
 git clone https://your-host/deskflow-otg.git
 cd deskflow-otg
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-# 产物: build/deskflow-otg
+# Output: build/deskflow-otg
 ```
 
-macOS 构建命令相同，默认会查找 Apple Silicon 的 `/opt/homebrew` 和 Intel 的
-`/usr/local` 下的 libusb。使用自定义 Homebrew 安装路径、或提示找不到 libusb 时：
+The macOS build command is the same. By default it searches for libusb under `/opt/homebrew` on Apple Silicon and `/usr/local` on Intel. For a custom Homebrew path, or when libusb is not found:
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix libusb)"
 cmake --build build
 ```
 
-编译器与 libusb 必须使用相同架构；不要混用 Rosetta 下的 Intel Homebrew 与原生
-Apple Silicon 编译器。构建和 socket 回归测试可用 `ctest --test-dir build --output-on-failure`
-验证；CI 覆盖 Linux、Intel macOS、Apple Silicon macOS 和 Windows，不包含手机 USB 真机测试。
+The compiler and libusb must use the same architecture; do not mix an Intel Homebrew installation under Rosetta with a native Apple Silicon compiler. Run `ctest --test-dir build --output-on-failure` to verify the build and socket regression tests. CI covers Linux, Intel macOS, Apple Silicon macOS, and Windows, but does not test USB hardware with a phone.
 
-### 发布预编译包
+### Publishing prebuilt packages
 
-#### 统一版本管理
+#### Unified version management
 
-CLI 和 GUI 共用仓库根目录的 `VERSION`（当前 `0.1.5`），不单独维护版本。
-`deskflow-otg --version`、`deskflow-otg-gui --version` 和 GUI 右上角「关于」显示版本及 Git 提交号。
-开发构建使用 `0.1.5+git.<提交号>`，已跟踪文件有未提交修改时追加 `.dirty`；无 Git 信息时用 `unknown`。
-版本信息在 CMake 配置时生成，切换提交或修改源码后应重新运行 `cmake -S . -B ...`。
+The CLI and GUI share the `VERSION` file at the repository root (currently `0.1.5`) and do not maintain separate versions. `deskflow-otg --version`, `deskflow-otg-gui --version`, and the GUI's "About" dialog show the version and Git commit. Development builds use `0.1.5+git.<commit>`, append `.dirty` when tracked files have uncommitted changes, and use `unknown` when Git information is unavailable. Version information is generated during CMake configuration; rerun `cmake -S . -B ...` after changing the commit or source.
 
-发布时先修改并提交 `VERSION`，再创建相同版本的 `vX.Y.Z` 标签。CI 通过
-`-DOTG_RELEASE_TAG=vX.Y.Z` 校验标签与版本文件一致且已跟踪文件干净；正式版使用纯 `X.Y.Z`。
-本地正式构建也需传此参数；开发构建留空。安装目录的 `share/deskflow-otg/BUILD_VERSION.txt`
-记录实际构建版本，DEB 和 Windows 打包脚本默认读取它，`--version` 仅用于一致性检查
-（旧安装目录没有此文件时允许手动指定）。因此不会把新包版本贴到旧二进制上。
+For a release, modify and commit `VERSION` first, then create a matching `vX.Y.Z` tag. CI uses `-DOTG_RELEASE_TAG=vX.Y.Z` to verify that the tag matches the version file and that tracked files are clean; release builds use the plain `X.Y.Z` version. Local release builds must pass the same option, while development builds leave it empty. `share/deskflow-otg/BUILD_VERSION.txt` in the install directory records the actual build version. DEB and Windows packaging scripts read it by default, and `--version` is used only for consistency checks (manual specification is allowed when an old install has no such file). This prevents a new package version from being applied to an old binary.
 
-推送以 `v` 开头的版本标签后，GitHub Actions 会在四个平台构建、测试、打包，全部成功后
-自动创建对应的 [Release](https://github.com/gh6497/deskflow-otg/releases)，并将 Linux x86_64、
-macOS arm64 / x86_64 和 Windows x86_64 的包放在 **Assets** 中。例如：
+After pushing a version tag beginning with `v`, GitHub Actions builds, tests, and packages all four platforms. When everything succeeds, it automatically creates the corresponding [Release](https://github.com/gh6497/deskflow-otg/releases) and places Linux x86_64, macOS arm64 / x86_64, and Windows x86_64 packages in **Assets**. For example:
 
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-普通分支提交和 PR 构建 CLI、GUI、测试并检查桌面包部署，不会创建 Release。
-标签发布同时提供 `deskflow-otg-*` 命令行包和 `deskflow-otg-gui-*` 桌面包。
-Linux CLI 包运行时需要安装 libusb-1.0 运行库；macOS CLI 压缩包运行时需要先
-`brew install libusb`。Windows 包使用静态链接的 libusb。
+Commits on ordinary branches and pull requests build the CLI, GUI, and tests and check desktop-package deployment, but do not create a Release. A tag release provides both `deskflow-otg-*` command-line packages and `deskflow-otg-gui-*` desktop packages. Linux CLI packages require the libusb-1.0 runtime; macOS CLI archives require `brew install libusb` first. Windows packages use statically linked libusb.
 
-Windows GUI 发布版另提供 `deskflow-otg-gui-windows-x86_64-setup.exe` 安装包。
-运行后按当前用户安装到 `%LOCALAPPDATA%\Programs\Deskflow OTG`，可通过开始菜单启动或在
-「已安装的应用」卸载，无需管理员权限；同时保留原有的免安装 ZIP。安装包含桥接程序、
-Qt、ADB 和依赖许可证，不包含 Deskflow。Windows USB 驱动仍需自行配置（见下文）。
-安装包尚未签名，Windows 可能提示未知发布者；请核对下载来源。升级时安装程序会先卸载
-旧版本。若 GUI 正在运行，请先退出再安装或卸载。本地制作安装包需在 Windows 上完成
-上文的 GUI 构建、`cmake --install` 和许可证收集，并安装 NSIS（`makensis` 在 PATH 中）：
+Windows GUI releases also provide `deskflow-otg-gui-windows-x86_64-setup.exe`. It installs per-user under `%LOCALAPPDATA%\Programs\Deskflow OTG`, can be started from the Start menu or removed from "Installed apps", and does not require administrator privileges; the portable ZIP remains available. The installation includes the bridge, Qt, ADB, and dependency licenses, but not Deskflow. Configure the Windows USB driver yourself as described below. The installer is not signed, so Windows may show an unknown-publisher warning; verify the download source. During upgrades, the installer uninstalls the old version first. Exit the GUI before installing or uninstalling. To create an installer locally, build the GUI, run `cmake --install`, collect licenses on Windows, and install NSIS (`makensis` must be in `PATH`):
 
 ```powershell
 python scripts/package_windows.py --stage stage --output dist/deskflow-otg-gui-windows-x86_64-setup.exe
 ```
 
-macOS GUI 发布版另提供 `deskflow-otg-gui-macos-arm64.dmg` 和
-`deskflow-otg-gui-macos-x86_64.dmg`。选择与 Mac 架构匹配的镜像，打开后将
-`deskflow-otg-gui.app` 拖入「Applications」即可安装；App 内含桥接程序、Qt、libusb、
-ADB 和依赖许可证，但不包含 Deskflow。无需为 GUI 安装 Homebrew libusb（单独的 CLI
-压缩包仍需要）。当前镜像未签名、公证，首次打开可能被 macOS Gatekeeper 拦截；确认来源后
-可在「系统设置 → 隐私与安全性」中选择「仍要打开」。本地制作镜像：
+macOS GUI releases also provide `deskflow-otg-gui-macos-arm64.dmg` and `deskflow-otg-gui-macos-x86_64.dmg`. Choose the image matching the Mac architecture, open it, and drag `deskflow-otg-gui.app` to `Applications`. The app contains the bridge, Qt, libusb, ADB, and dependency licenses, but not Deskflow. Homebrew libusb is not needed for the GUI (the standalone CLI archive still needs it). The image is currently unsigned and not notarized; macOS Gatekeeper may block it on first launch. After verifying the source, choose "Open Anyway" under "System Settings → Privacy & Security". Create an image locally with:
 
 ```bash
 python3 scripts/package_dmg.py --stage stage \
     --output dist/deskflow-otg-gui-macos-arm64.dmg
 ```
 
-先按上文以 `BUILD_GUI=ON` 构建、安装到 `stage`，下载 ADB 并收集许可证；输出文件名的
-架构应与构建机器一致。镜像仅提供拖拽安装，不会修改系统设置或自动安装 Deskflow。
+Build with `BUILD_GUI=ON`, install to `stage`, download ADB, and collect licenses as described above. The filename architecture must match the build machine. The image provides drag-and-drop installation only; it does not modify system settings or install Deskflow automatically.
 
-Linux GUI 发布版还提供 `.deb`（amd64），包含 GUI、GUI 必需的桥接程序及发布目录中的 Qt/ADB，
-不单独打包或安装 CLI 命令。安装后可从应用菜单启动，或运行 `deskflow-otg-gui`；仍需自行安装
-Deskflow，USB 访问仍需 root 或 udev 规则。下载 Release 中的 deb 后执行：
+Linux GUI releases also provide an amd64 `.deb` containing the GUI, its required bridge program, and Qt/ADB from the release directory. The CLI command is not packaged or installed separately. After installation, start it from the application menu or run `deskflow-otg-gui`; Deskflow must still be installed separately, and USB access still requires root or a udev rule. Install a downloaded release package with:
 
 ```bash
-sudo apt install ./deskflow-otg-gui-<版本>-linux-amd64.deb
+sudo apt install ./deskflow-otg-gui-<version>-linux-amd64.deb
 ```
 
-也可以从本地 GUI 安装目录制作 deb（需先按上文下载 ADB、以 `BUILD_GUI=ON`
-构建 GUI 并收集许可证；`stage` 必须是 GUI 安装目录）：
+You can also create a DEB from a local GUI install directory. First download ADB, build with `BUILD_GUI=ON`, and collect licenses as described above; `stage` must be the GUI install directory:
 
 ```bash
 cmake --install build-gui --prefix "$PWD/stage"
@@ -354,20 +226,16 @@ python3 scripts/package_deb.py --stage stage \
     --output dist/deskflow-otg-gui-0.1.0-$(dpkg --print-architecture).deb
 ```
 
-deb 安装到 `/opt/deskflow-otg` 并在 `/usr/bin` 提供 GUI 入口；不能与手动安装在相同路径
-的版本混用。GUI 打包需要有图形桌面运行时库；包内不包含 Deskflow。
+The DEB installs to `/opt/deskflow-otg` and provides a GUI entry point in `/usr/bin`; do not mix it with a version manually installed at the same path. GUI packaging requires desktop runtime libraries; Deskflow is not included.
 
-Linux GUI 发布版同时提供无需安装的 `deskflow-otg-gui-linux-x86_64.AppImage`，
-内含桥接程序、Qt、libusb 和 ADB（不含 Deskflow）。下载后执行：
+Linux GUI releases also provide the installation-free `deskflow-otg-gui-linux-x86_64.AppImage`, containing the bridge, Qt, libusb, and ADB (but not Deskflow). Run it with:
 
 ```bash
 chmod +x deskflow-otg-gui-linux-x86_64.AppImage
 ./deskflow-otg-gui-linux-x86_64.AppImage
 ```
 
-系统需要图形桌面和 FUSE；缺少 FUSE 时可加 `--appimage-extract-and-run`。
-USB 权限规则与 deb 相同。要从本地 GUI 安装目录生成 AppImage，先下载并校验
-`appimagetool-x86_64.AppImage` 与 `runtime-x86_64`（CI 中固定了 SHA-256），然后运行：
+The system needs a graphical desktop and FUSE; when FUSE is unavailable, add `--appimage-extract-and-run`. USB permission rules are the same as for the DEB. To create an AppImage from a local GUI install directory, first download and verify `appimagetool-x86_64.AppImage` and `runtime-x86_64` (CI pins their SHA-256 hashes), then run:
 
 ```bash
 python3 scripts/package_appimage.py --stage stage \
@@ -376,7 +244,7 @@ python3 scripts/package_appimage.py --stage stage \
     --output dist/deskflow-otg-gui-linux-x86_64.AppImage
 ```
 
-Windows（PowerShell，使用 Visual Studio x64 工具链；`VCPKG_ROOT` 指向 vcpkg 目录）：
+Windows (PowerShell, using the Visual Studio x64 toolchain; `VCPKG_ROOT` points to the vcpkg directory):
 
 ```powershell
 cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static
@@ -385,19 +253,18 @@ ctest --test-dir build -C Release --output-on-failure
 ./build/Release/deskflow-otg.exe --help
 ```
 
-## 使用
+## Usage
 
-### 1. 配置 Deskflow server
+### 1. Configure the Deskflow server
 
-在 Deskflow 主机上，把"手机"配置成一块屏幕（名字要和下面的 `--name` 一致），
-放在主机屏幕旁边。例如：
+On the Deskflow host, configure the "phone" as a screen whose name matches `--name`, and place it next to the host screen. For example:
 
-- 屏幕名：`android`
-- 位置：主机屏幕的 **右侧**
+- Screen name: `android`
+- Position: **right** of the host screen
 
-### 2. 连接手机并运行本程序
+### 2. Connect the phone and run the program
 
-用 USB 线把手机插到主机上，然后：
+Connect the phone to the host with a USB cable, then run:
 
 ```bash
 sudo ./build/deskflow-otg \
@@ -407,43 +274,28 @@ sudo ./build/deskflow-otg \
     --width 1080 --height 1920
 ```
 
-> **Linux**：需要 root 或 udev 规则才能访问 USB 设备。不想要 `sudo` 的话，配置一条
-> udev 规则即可（见下文）。**macOS**：先不带 `sudo` 运行；不使用 udev，见下面的说明。
+> **Linux:** Root or a udev rule is required to access USB devices. To avoid `sudo`, configure a udev rule as described below. **macOS:** Run without `sudo` first; macOS does not use udev, see the notes below.
 
-**Windows**：在 PowerShell 中运行 `./build/Release/deskflow-otg.exe --host 127.0.0.1
---name android --width 1080 --height 1920 -s <手机USB序列号>`。需安装可供 libusb 使用的
-USB 驱动（例如通过 Zadig 将手机对应 USB 接口绑定 WinUSB）；更换驱动可能影响 MTP/ADB，
-请确认选中的设备/接口并备份原驱动。若手机无法识别，先看
-[Windows USB OTG 设备识别](docs/WINDOWS_USB.md)。需要 TLS 时按上文配置指纹和证书。
+**Windows:** In PowerShell, run `./build/Release/deskflow-otg.exe --host 127.0.0.1 --name android --width 1080 --height 1920 -s <phone USB serial>`. Install a USB driver usable by libusb (for example, bind the phone's USB interface to WinUSB with Zadig). Replacing the driver may affect MTP/ADB, so verify the selected device/interface and back up the original driver. If the phone is not recognized, first see [Windows USB OTG device recognition](docs/WINDOWS_USB.md). Configure the fingerprint and certificate as described above when TLS is required.
 
-### macOS 运行与权限
+### macOS operation and permissions
 
 ```bash
 ./build/deskflow-otg --host 127.0.0.1 --name android \
-    --width 1080 --height 1920 -s <手机USB序列号>
+    --width 1080 --height 1920 -s <phone USB serial>
 ```
 
-- 在“系统设置 → 隐私与安全性”中允许 **Deskflow** 的辅助功能权限；如果系统提示需要
-  输入监控权限，也应允许。这些权限用于 Deskflow 捕获主机键鼠，本程序只接收 TCP 事件。
-- 使用支持数据传输的 USB 线；Mac 提示是否允许配件连接时，解锁 Mac 并选择允许。
-  不需要开启手机 USB 调试。
-- Mac 的其它 USB 设备也可能带序列号，建议通过 `-s` 指定手机；未指定时程序会列出
-  候选设备，多个候选时不会自动选择。
-- 遇到 USB 打开失败或 `ACCESS/BUSY` 错误时，先关闭其它占用手机的程序
-  （例如 scrcpy、Android 文件传输工具），重新插拔后重试。`sudo` 不能解决所有设备
-  占用或 macOS 配件授权问题，不需要关闭 SIP 或卸载系统驱动。
-- macOS 的构建与运行路径已适配，但具体手机的 AOA HID、拔线检测和绝对指针兼容性
-  仍需真机验证。
+- In "System Settings → Privacy & Security", grant **Deskflow** Accessibility permission. If macOS requests Input Monitoring permission, grant that too. These permissions let Deskflow capture the host keyboard and mouse; this program only receives TCP events.
+- Use a USB cable that supports data transfer. If macOS asks whether to allow an accessory, unlock the Mac and choose Allow. USB debugging on the phone is not required.
+- Other USB devices connected to the Mac may also have serial numbers, so specifying the phone with `-s` is recommended. Without it, the program lists candidates and does not select among multiple candidates automatically.
+- If opening the USB device fails or reports `ACCESS/BUSY`, close other programs using the phone (such as scrcpy or Android file-transfer tools), unplug and reconnect, and try again. `sudo` does not fix every device-lock or macOS accessory-authorization problem; do not disable SIP or remove system drivers.
+- The macOS build and runtime paths are supported, but AOA HID, unplug detection, and absolute-pointer compatibility with specific phones still require real-device validation.
 
-### 3. Linux BLE 操控手机
+### 3. Control the phone through Linux BLE
 
-开发交接、已验证范围及下一轮真机检查顺序见 [Linux BLE 交接文档](docs/LINUX_BLE_HANDOVER.md)。
+See the [Linux BLE handover document](docs/LINUX_BLE_HANDOVER.md) for development handover information, validated scope, and the order of the next real-device checks.
 
-Linux 可将电脑作为 BLE HID peripheral 广播，手机作为 HID Host 连接。该模式不依赖 USB，
-但需要手机完成配对并订阅键盘、指针两个 HID input characteristic；仅蓝牙连接或 Deskflow
-握手成功都不会被当作输入通道就绪。程序运行期间会临时将适配器名称设置为「Deskflow OTG」，
-退出时恢复原名称；不会自动配对、信任或删除配对。只有显式使用 `--ble-isolate` 才会临时
-修改适配器模式，普通 `--transport ble` 不切换模式。
+Linux can advertise the computer as a BLE HID peripheral and connect to it from the phone as an HID host. This mode does not depend on USB, but the phone must pair and subscribe to both the keyboard and pointer HID input characteristics; a Bluetooth connection or successful Deskflow handshake alone does not mean the input channel is ready. While running, the program temporarily sets the adapter name to "Deskflow OTG" and restores the original name on exit. It does not automatically pair, trust, or remove pairings. The adapter mode is changed temporarily only with explicit `--ble-isolate`; ordinary `--transport ble` does not switch it.
 
 ```bash
 ./build/deskflow-otg --transport ble --adapter hci0 --ble-peer AA:BB:CC:DD:EE:FF \
@@ -451,313 +303,232 @@ Linux 可将电脑作为 BLE HID peripheral 广播，手机作为 HID Host 连�
     --width 1080 --height 2340
 ```
 
-手机蓝牙设置中连接广播的「Deskflow OTG」，按系统提示确认配对后再将鼠标移入手机屏幕。
-必须用 `--ble-peer` 指定目标手机在 BlueZ 中的身份地址（可查 `bluetoothctl devices`，
-不是轮换的广播地址）。仅目标已配对、且适配器上只有这一个连接时才允许输入；
-键鼠 Value 信号仅发送给 BlueZ，不在系统 D-Bus 广播。多个连接时失败关闭输入，不猜测目标。
-这不是任意多客户端环境下的隔离保证，建议专用适配器；经典 HIDP 双模兼容及完整真机回归
-仍需验证。指针纯移动报告默认每 15ms 发送一次。配合下述隔离启动器取得实际连接间隔后，
-发送周期跟随该间隔（例如 7.5/12.5/15ms）；按键和滚轮报告不做此节流。
-断线时不保证已经断开的链路能够送达松键报告。
-BLE 事件泵在持续 Deskflow 输入及不完整包读取期间也会运行，输入期间等待上限为 1ms，
-不依赖原有 500ms USB 空闲检查发送最后一个坐标。常驻会话的输入 IPC 非阻塞，最多一个
-请求在途；发送前合并连续移动/拖拽坐标，保留按键、按钮、滚轮和范围变化的顺序。
-状态查询按需进行，服务由 socket 就绪立即唤醒；输入队列超限或服务无响应时结束会话并释放输入。
+Connect to the advertised "Deskflow OTG" in the phone's Bluetooth settings and confirm pairing as prompted before moving the mouse onto the phone screen. `--ble-peer` must specify the target phone's identity address in BlueZ (find it with `bluetoothctl devices`; it is not the rotating advertising address). Input is allowed only when the target is paired and it is the adapter's only connection. Keyboard and mouse Value signals are sent only to BlueZ and are not broadcast on the system D-Bus. If there are multiple connections, input is disabled rather than guessing the target.
+This is not an isolation guarantee for arbitrary multi-client environments; a dedicated adapter is recommended. Dual-mode classic HIDP compatibility and complete real-device regression testing are still pending. Pure pointer-movement reports are sent every 15 ms by default. When the isolation launcher below obtains the actual connection interval, the send period follows it (for example, 7.5/12.5/15 ms); keyboard and wheel reports are not throttled this way.
+If the link is disconnected, delivery of release reports on the already-disconnected link is not guaranteed.
+The BLE event pump also runs during continuous Deskflow input and incomplete packet reads, with a maximum 1 ms wait while input is active. It does not depend on the old 500 ms USB idle check to send the last coordinate. Input IPC for the persistent session is non-blocking with at most one request in flight; consecutive movement/drag coordinates are merged before sending while keyboard, button, wheel, and range changes retain their order. Status is queried on demand and the service wakes immediately when its socket is ready. An oversized input queue or unresponsive service ends the session and releases input.
 
-#### 原生仅 BLE 启动与自动恢复（无需 Python）
+#### Native BLE-only launch and automatic recovery (without Python)
 
-手机把双模电脑当作音频设备时，可以显式使用原生 `--ble-isolate`。需要 sudo、BlueZ 和
-util-linux 的 `/usr/sbin/runuser`；不依赖 Python、独立验证目录或任何测试脚本。
-启动时会临时断开该适配器的全部蓝牙连接，保存状态、禁用 BR/EDR。桥接子进程通过
-`runuser` 降权，仍以发起 sudo 的普通用户运行；root 父进程只管理本次适配器隔离与恢复。
-先停止旧桥接并等待恢复完成；不要同时运行多个隔离入口。
+When the phone treats the dual-mode computer as an audio device, native `--ble-isolate` can be used explicitly. It requires sudo, BlueZ, and util-linux's `/usr/sbin/runuser`; it does not depend on Python, a standalone validation directory, or test scripts.
+At startup, all Bluetooth connections on the adapter are temporarily disconnected, the state is saved, and BR/EDR is disabled. The bridge subprocess is demoted with `runuser` and continues to run as the ordinary user who invoked sudo; the root parent manages only isolation and recovery for this adapter. Stop any old bridge and wait for recovery before starting, and never run multiple isolation entry points at once.
 
 ```bash
 sudo ./build/deskflow-otg --transport ble --ble-isolate --adapter hci0 --ble-peer AA:BB:CC:DD:EE:FF \
   --host 127.0.0.1 --port 24800 --name android --width 1080 --height 2340
 ```
 
-root 启动器通过专用 IPC 收到 HID 就绪通知后，只对该适配器上
-唯一、已加密且本机为 peripheral 的已观测 LE 连接请求 7.5～15ms、latency=0 的参数。
-不接受子进程指定的连接句柄或任意 HCI 命令；多连接时不猜测目标。每次重新连接重新判断。
-HCI 监控不接受会话传来的任意句柄；输入侧另由 `--ble-peer` 绑定手机身份。
+After receiving an HID-ready notification through dedicated IPC, the root launcher requests 7.5–15 ms and `latency=0` only for the one observed LE connection on the adapter that is encrypted and has the computer as peripheral. It does not accept a connection handle or arbitrary HCI command from the child process, and it does not guess the target when there are multiple connections. HCI monitoring does not accept arbitrary handles from the session; the input side is separately bound to the phone identity by `--ble-peer`.
 
-只有日志 `BLE actual interval=... (controller event)` 才代表观测到的实际参数；
-`requesting interval` 只表示发出了请求。手机拒绝或 5 秒未确认时保留连接及已观测的参数，
-不循环重试、不改永久蓝牙配置、不安装服务、不赋予桥接程序 HCI 权限。
-不带 `--ble-isolate` 直接运行桥接时仍可连接，但不会自动请求低延迟参数。
+Only a log entry such as `BLE actual interval=... (controller event)` represents an observed actual parameter. `requesting interval` means only that a request was sent. If the phone rejects it or no confirmation arrives within five seconds, the connection and observed parameters are retained; the program does not retry in a loop, modify permanent Bluetooth settings, install a service, or grant HCI privileges to the bridge.
+The bridge can still connect when run directly without `--ble-isolate`, but it will not automatically request low-latency parameters.
 
-**日常重连不要取消配对，也不要关闭程序后再重新启动隔离。** 手机临时断开时，程序保留
-GATT 服务、广播及已有配对；关闭到 Deskflow 的 TCP 连接让电脑收回光标，丢弃旧按键和
-坐标，等待原手机重新连接。BlueZ 为已配对设备保留 CCC 订阅时，不要求它再次触发
-`StartNotify`。重连并确认实际链路与订阅就绪后，程序自动重新接入 Deskflow。
-首次配对仍由系统代理确认，程序不自动接受陌生设备。GUI 的隔离选项须先确认影响范围，
-再通过系统 pkexec 认证；不保存管理员密码。USB 自动连接与托盘行为不变。
+**Do not remove pairing or stop and restart isolation for ordinary reconnection.** When the phone temporarily disconnects, the program keeps the GATT service, advertisement, and existing pairing. It closes the Deskflow TCP connection so the computer regains the cursor, discards old keys and coordinates, and waits for the original phone to reconnect. If BlueZ retains CCC subscriptions for the paired device, the phone does not need to trigger `StartNotify` again. After reconnection and confirmation that the actual link and subscriptions are ready, the program reconnects to Deskflow automatically.
+The system agent still confirms the first pairing; the program does not automatically accept an unknown device. The GUI isolation option requires confirmation of its scope followed by system pkexec authentication and does not save the administrator password. USB automatic connection and tray behavior are unchanged.
 
-GATT 服务固定使用 `0x0100..0x0111`，包含键盘 LED 输出和 HID Control Point，并支持
-Report Map 的 offset 读取，避免每次重新注册时句柄漂移。该范围冲突会报错，不静默改成
-新句柄。旧实验版的不同 GATT 布局、手机缓存或两端已有密钥不一致仍需单独诊断，不能把
-这些代码修复当作已经完成真机免重配验收。
+The GATT service uses fixed handles `0x0100..0x0111`, includes keyboard LED output and the HID Control Point, and supports offset reads of the Report Map to avoid handle drift on every registration. A range conflict is reported instead of silently selecting new handles. Different GATT layouts from older prototypes, phone caches, or inconsistent keys on the two sides still require separate diagnosis; these code fixes must not be treated as completed real-device re-pairing-free acceptance.
 
-完全退出时，原生启动器核对恢复原 BR/EDR、LE、电源、安全、可发现/可配对及名称设置。
-恢复成功后才能清理快照。异常退出或恢复失败会保留 root 专用的
-`/run/deskflow-otg-ble-hci0.state`，再次启动拒绝覆盖原快照；用同一个二进制恢复：
+On complete exit, the native launcher verifies and restores the original BR/EDR, LE, power, security, discoverable/pairable, and name settings. The snapshot is removed only after successful recovery. An abnormal exit or failed recovery leaves the root-only `/run/deskflow-otg-ble-hci0.state`; a later start refuses to overwrite it. Restore with the same binary:
 
 ```bash
 sudo ./build/deskflow-otg --ble-restore --adapter hci0
 ```
 
-快照绑定适配器地址；控制器重试上电后仍失败时明确报错，不伪称恢复成功，不重启
-bluetoothd、不删除蓝牙数据。SIGKILL/断电无法自动清理，`/run` 快照不跨重启保存。
-此命令不能读取旧 Python 实验脚本的 JSON 快照，两者不要同时运行。
+The snapshot is bound to the adapter address. If the controller still fails after power-on retries, the program reports the failure clearly instead of claiming success; it does not restart bluetoothd or delete Bluetooth data. SIGKILL and power loss cannot be cleaned up automatically, and the `/run` snapshot does not survive reboot. This command cannot read JSON snapshots from the old Python experiment; do not run the two mechanisms together.
 
-#### 常驻 GATT 与可重启桥接会话（推荐）
+#### Persistent GATT and restartable bridge sessions (recommended)
 
-Android 可能缓存 HID 描述符并在重连时不重写 CCC；BlueZ 则在应用注销时删除该服务的 CCC。
-因此固定句柄并不足以保证 CLI 退出后免重配。推荐使用以下服务/会话分离路径：
+Android may cache HID descriptors and not rewrite CCC on reconnection; BlueZ removes the service's CCC when the application unregisters. Therefore fixed handles alone do not guarantee re-pairing-free operation after the CLI exits. The following service/session separation is recommended:
 
-1. 先正常结束旧 BLE 桥接，确认恢复成功、无 `.state` 遗留；发生 MGMT/HCI 超时先停止测试。
-2. 在普通用户终端运行常驻服务（**不加 sudo**），保持该终端运行：
+1. End the old BLE bridge normally and confirm recovery succeeded with no `.state` file left behind. Stop testing if an MGMT/HCI timeout occurs.
+2. In a terminal as a normal user (**without sudo**), run the persistent service and keep the terminal open:
 
    ```bash
    ./build/deskflow-otg --ble-service --adapter hci0
    ```
 
-3. 另开终端启动会话，仍由原生 root supervisor 隔离并在会话退出时恢复模式：
+3. In another terminal, start the session. The native root supervisor still performs isolation and restores the mode when the session exits:
 
    ```bash
     sudo ./build/deskflow-otg --transport ble --ble-session --ble-isolate --adapter hci0 \
       --ble-peer AA:BB:CC:DD:EE:FF --host 127.0.0.1 --port 24800 --name android --width 1080 --height 2340
    ```
 
-   系统已为 BLE 配置妥当时，去掉 `sudo` 与 `--ble-isolate` 即可，不切换模式。
+   If the system is already configured for BLE, remove `sudo` and `--ble-isolate`; the adapter mode is not changed.
 
-会话经 `/run/user/UID/deskflow-otg/ble-hci0.sock` 的私有 Unix seqpacket 连接服务；目录 0700、
-socket 0600，核对双方 UID、协议版本与包长度，每个适配器/用户仅允许一个活动会话。
-CLI 的 `--ble-service` 以前台普通用户运行。首次会话注册 GATT，
-以后会话复用它；必须使用相同 HID 描述符，目前只支持 absolute 指针，尺寸可按会话修改。
+The session connects to the service through the private Unix seqpacket socket `/run/user/UID/deskflow-otg/ble-hci0.sock`. The directory is mode 0700 and the socket is mode 0600; both UIDs, the protocol version, and packet lengths are checked. Only one active session is allowed per adapter and user.
+`--ble-service` runs in the foreground as a normal user. The first session registers GATT and later sessions reuse it. The same HID descriptor must be used; only the absolute pointer is currently supported, while dimensions may be changed per session.
 
-- 断开会话或桥接崩溃/EOF 时松键、结束指针范围、丢弃待发送坐标、停广告并恢复名称；
-  5 秒无会话 IPC 也会释放输入。root supervisor 会先检查服务清理完成，再尝试恢复原模式；
-  无法确认时不继续切换模式、不伪称恢复成功，保留快照供停止会话后显式恢复。
-- 会话退出**不注销 GATT**。服务保留真实 StartNotify 状态，仍须原手机在线、已配对、
-  两路已订阅且未挂起才就绪；不把“手机已连接”伪装成订阅成功。
-- 停止常驻服务会注销 GATT，丢失这次 CCC 连续性；服务崩溃、BlueZ/主机重启后的恢复仍未解决。
-  旧实验版已经损坏/丢失的 CCC 或 Android 缓存不会凭空补回；若仍无订阅，应抓包诊断，
-  不要删除配对来冒充此方案通过验收。
-- 本机 AX210/BlueZ 5.72 + Redmi K20 Pro（Android 14）已验证：原生隔离、桥接正常重启、
-  两次手机断线重连、桥接子进程 SIGKILL 自动恢复及再次接入，期间无需重新配对；
-  实际连接间隔由控制器确认降至 12.5～15ms。首次旧缓存迁移仍曾需要切手机蓝牙开关一次。
-  这是生命周期的实验性修正，不是 AX210 HCI Reset 超时的修复，不代表完整输入、长时间、
-  常驻服务/BlueZ/主机重启或其他设备已验收；不替代原有恢复快照机制。
+- When the session disconnects or the bridge crashes/receives EOF, keys are released, pointer range ends, pending coordinates are discarded, advertising stops, and the name is restored. Five seconds without session IPC also releases input. The root supervisor checks that service cleanup is complete before attempting to restore the original mode; if it cannot confirm cleanup, it does not continue switching modes or claim recovery and keeps the snapshot for explicit recovery after the session is stopped.
+- Ending a session **does not unregister GATT**. The service retains the real StartNotify state and still requires the original phone to be online and paired, with both channels subscribed and not suspended, before it is ready. A phone merely being connected is not presented as successful subscription.
+- Stopping the persistent service unregisters GATT and loses this CCC continuity. Recovery after a service crash or BlueZ/host restart is still unresolved. Damaged or lost CCC state from the old prototype or Android cache cannot be recreated; if there is still no subscription, capture packets for diagnosis rather than deleting the pairing to claim acceptance.
+- The local AX210/BlueZ 5.72 + Redmi K20 Pro (Android 14) setup has validated native isolation, normal bridge restart, two phone disconnect/reconnect cycles, automatic recovery after a bridge subprocess SIGKILL, and reconnection without re-pairing. The controller confirmed an actual connection interval of 12.5–15 ms. Migrating the initial old cache still once required toggling the phone's Bluetooth.
+  This is an experimental lifecycle fix, not a fix for AX210 HCI Reset timeouts. It does not represent acceptance of complete input, long-running operation, persistent-service/BlueZ/host restart, or other devices, and does not replace the existing recovery-snapshot mechanism.
 
-#### GUI 与安装包
+#### GUI and packages
 
-1. Linux BLE 构建的 GUI 在「连接方式」选择「低功耗蓝牙」，填写 `hci0` 等适配器名称、
-   手机身份地址及屏幕尺寸。无需 ADB；USB 自动连接在蓝牙模式暂停。
-2. 点击连接，GUI 检查同用户服务：空闲则复用，不存在则后台启动同一程序的 `--ble-service`。
-   其他会话占用或旧版协议不兼容会报错，不会终止旧进程。首次配对/连接通过系统蓝牙设置完成。
-3. 手机被当作音频设备时，可显式选中「临时使用仅 BLE 模式」。确认该适配器的所有连接将
-   断开后进行管理员认证；需要系统提供 `/usr/bin/pkexec` 和桌面认证代理、有线键鼠或专用适配器。
-4. 手机掉线后 GUI 显示等待重连，不退出会话、不删除配对。手动断开结束会话，等待监督器
-   恢复模式。GUI 不强杀拥有恢复责任的特权进程，失败原因见日志。
-5. 退出 GUI 也保留普通用户常驻服务（不继续广告或输入）。要更换目标手机、更新服务二进制
-   或彻底停止时，先断开会话，再点击「停止空闲蓝牙服务」并确认会丢失订阅连续性。
-   CLI 等价操作：
+1. In a Linux BLE GUI build, choose "Bluetooth Low Energy" under "Connection method" and enter an adapter name such as `hci0`, the phone identity address, and the screen dimensions. ADB is not required; USB automatic connection is paused in Bluetooth mode.
+2. Click connect. The GUI checks for a same-user service, reuses an idle one, or starts the same program in `--ble-service` mode in the background when none exists. It reports an error if another session owns it or if the protocol is incompatible, and does not terminate the old process. Complete first pairing/connection in the system Bluetooth settings.
+3. When the phone is treated as an audio device, explicitly select "Temporarily use BLE-only mode". Confirm that all connections on the adapter will be disconnected before authenticating as administrator. `/usr/bin/pkexec`, a desktop authentication agent, and a wired keyboard/mouse or dedicated adapter are required.
+4. After the phone disconnects, the GUI displays a reconnection wait state without ending the session or deleting pairing. Manual disconnect ends the session and waits for the supervisor to restore the mode. The GUI does not force-kill a privileged process responsible for recovery; see the log for the failure reason.
+5. Exiting the GUI retains the normal-user persistent service (but it does not continue advertising or sending input). To change the target phone, update the service binary, or stop it completely, end the session first, then click "Stop idle Bluetooth service" and confirm that subscription continuity will be lost. The CLI equivalents are:
 
    ```bash
    deskflow-otg --ble-status --adapter hci0
    deskflow-otg --ble-stop-service --adapter hci0
    ```
 
-服务在生命周期内固定绑定目标，不能用其他会话静默换手机。配置保存在 GUI 的 QSettings；
-自动后台服务日志在 Qt AppLocalDataLocation 的 `ble-hci0.log`（通常为
-`~/.local/share/deskflow-otg/deskflow-otg-gui/`，以实际应用标识为准）。首次从旧实验服务迁移
-协议时，必须先显式结束旧会话/服务；GUI 不会擅自替换正在运行的服务。
+The service remains bound to its target throughout its lifecycle; another session cannot silently switch phones. Configuration is stored in the GUI's QSettings. Automatic background-service logs are stored as `ble-hci0.log` in Qt's AppLocalDataLocation (usually `~/.local/share/deskflow-otg/deskflow-otg-gui/`, depending on the application identifier). When migrating from the old experimental service protocol, explicitly end the old session/service first; the GUI does not silently replace a running service.
 
-DEB 自动携带 CLI 快捷入口及可选的 `deskflow-otg-ble@.service` 用户单元，按构建元数据为
-BLE 包声明 BlueZ、GLib 和 pkexec 依赖；安装包**不自动启动/启用**服务、不改系统蓝牙配置。
-希望由用户 systemd 托管时，在没有现存常驻服务的情况下显式运行
-`systemctl --user start deskflow-otg-ble@hci0`，GUI 会复用该服务；不需要 root 常驻守护程序。
-AppImage/解压分发仍依赖主机 BlueZ、GLib 和桌面认证代理；FUSE 挂载可能不允许 root 执行，
-需要仅 BLE 隔离时优先安装 DEB 或解压到固定目录后运行，不以挂载中的 AppImage 承诺提权兼容。
+DEB packages automatically include a CLI shortcut and the optional `deskflow-otg-ble@.service` user unit. Based on build metadata, BLE packages declare BlueZ, GLib, and pkexec dependencies. Packages **do not automatically start or enable** the service and do not change system Bluetooth settings. To manage it with user systemd, explicitly run `systemctl --user start deskflow-otg-ble@hci0` when no persistent service already exists; the GUI reuses that service and no root persistent daemon is required.
+AppImage and extracted distributions still depend on host BlueZ, GLib, and the desktop authentication agent. A FUSE-mounted AppImage may not permit root execution; when BLE-only isolation is required, prefer a DEB or extract to a fixed directory rather than promising privilege escalation compatibility from a mounted AppImage.
 
-本次 CLI/GUI 接入与打包回归不等同于新增硬件验收。服务/BlueZ/系统重启后的订阅恢复、
-完整持键异常释放、锁屏和长时间稳定性仍需真机确认。
+This CLI/GUI integration and packaging regression does not constitute additional hardware acceptance. Subscription recovery after service/BlueZ/system restart, complete release of held keys on failure, lock-screen behavior, and long-term stability still require real-device confirmation.
 
-排查“显示输入设备但没有光标”时，查看常驻服务日志的 `BLE waiting:`：身份匹配以 BlueZ
-在线 Device1 的 `Address` 为准，不要求其对象路径与身份 MAC 相同；在线对象仍须已配对，
-不能借用另一个离线对象的配对标志。若提示 `waiting for both HID subscriptions`，表示尚未
-收到手机真实订阅，不是 Deskflow 已连接。保留配对检查手机输入设备开关/重连；服务重启后
-Android 缓存恢复仍可能需要手机蓝牙开关一次，不保证任意重启都免人工操作。就绪后还需确认
-GUI 的服务器地址、端口与实际 Deskflow 监听一致。
+When an input device is shown but there is no cursor, inspect `BLE waiting:` in the persistent-service log. Identity matching uses the `Address` of the online BlueZ Device1 and does not require its object path to match the identity MAC; the online object must still be paired, and the pairing flag from another offline object cannot be used. `waiting for both HID subscriptions` means that the phone has not made the real subscriptions, not that Deskflow is disconnected. Keep the pairing and check the phone's input-device switch or reconnect. Android cache recovery after a service restart may still require toggling the phone's Bluetooth, so arbitrary restarts are not guaranteed to be manual-operation-free. Once ready, also confirm that the GUI server address and port match the actual Deskflow listener.
 
-### 4. 操控手机
+### 4. Control the phone
 
-把鼠标移出主机屏幕边缘（滑向"手机"那块屏幕），此时键盘鼠标就会注入到手机。
-把鼠标再滑回主机屏幕边缘，即可回到主机。
+Move the mouse across the edge of the host screen toward the "phone" screen; the keyboard and mouse are then injected into the phone. Move the mouse back across the host edge to return to the computer.
 
-默认 `--mouse-mode absolute`：移动时悬停，按住左键拖动时连续按下，离开手机屏幕时松开。
-建议把 `--width/--height` 设为手机当前方向的分辨率，以获得自然的移动比例；绝对模式会
-把虚拟屏幕完整映射到手机显示区域，尺寸不一致也不会累积相对位移误差。
+The default is `--mouse-mode absolute`: movement hovers, holding the left button produces continuous button-down reports for dragging, and leaving the phone screen releases buttons. For natural movement, set `--width/--height` to the phone's current-orientation resolution. Absolute mode maps the complete virtual screen to the phone display, so a dimension mismatch does not accumulate relative-movement error.
 
-> **退出程序**：当鼠标停留在"手机"屏幕上时，键盘（包括 Ctrl+C）都被转发给了手机，
-> 不会到达终端。要退出，先把鼠标滑回主机屏幕，再按 Ctrl+C；或者直接拔掉手机 ——
-> 本程序会检测到 USB 断开、自动退出，并让鼠标回到主机。
+> **To exit:** When the mouse is on the "phone" screen, keyboard input, including Ctrl+C, is forwarded to the phone instead of the terminal. Move the mouse back to the computer first, then press Ctrl+C; alternatively unplug the phone. The program detects USB removal, exits automatically, and returns the mouse to the computer.
 
-## 命令行参数
+## Command-line options
 
 ```
-  -H, --host HOST       Deskflow server 地址 (默认 127.0.0.1)
-  -p, --port PORT       Deskflow server 端口 (默认 24800)
-  -n, --name NAME       上报给 server 的屏幕名 (默认 android)
-  -s, --serial SERIAL   安卓设备的 USB 序列号 (不指定则自动检测)
-      --transport MODE usb（默认）或 ble（Linux）
-      --adapter NAME   蓝牙适配器（默认 hci0）
-      --ble-isolate    sudo 原生仅 BLE 启动，退出恢复，无需 Python
-      --ble-restore    根据原生快照恢复适配器，不启动桥接
-      --ble-peer MAC   目标手机 BlueZ 身份地址（BLE 桥接必填）
-      --ble-service    普通用户前台常驻 GATT 服务
-      --ble-session    通过常驻服务运行桥接会话（仅 absolute）
-      --ble-status     查询服务 JSON 状态，不占用会话
-      --ble-stop-service 停止空闲服务，会失去订阅连续性
-      --width W         虚拟屏幕宽度，1..32767 (默认 1080)
-      --height H        虚拟屏幕高度，1..32767 (默认 1920)
-      --mouse-mode MODE absolute（默认）或 relative（兼容模式）
-      --gui             GUI 子进程模式：stdout 输出 JSON 状态，stdin 字节/EOF 请求退出
-      --usb-scan        输出 USB 设备 JSON 快照，不调用 ADB、不注册 HID
-      --usb-watch       输出 USB 热插拔 JSON 事件；stdin 字节/EOF 停止，不支持时退出码为 3
-  -v, --version         软件版本和 Git 提交号
-  -h, --help            帮助
+  -H, --host HOST       Deskflow server address (default: 127.0.0.1)
+  -p, --port PORT       Deskflow server port (default: 24800)
+  -n, --name NAME       Screen name reported to the server (default: android)
+  -s, --serial SERIAL   Android device USB serial (auto-detect if omitted)
+      --transport MODE usb (default) or ble (Linux)
+      --adapter NAME    Bluetooth adapter (default: hci0)
+      --ble-isolate     Native sudo BLE-only launch; restore on exit, no Python
+      --ble-restore     Restore the adapter from a native snapshot; do not bridge
+      --ble-peer MAC    Target phone BlueZ identity address (required for BLE bridge)
+      --ble-service     Persistent foreground GATT service as a normal user
+      --ble-session     Run a bridge session through the persistent service (absolute only)
+      --ble-status      Query service JSON status without acquiring a session
+      --ble-stop-service Stop an idle service; subscription continuity is lost
+      --width W         Virtual screen width, 1..32767 (default: 1080)
+      --height H        Virtual screen height, 1..32767 (default: 1920)
+      --mouse-mode MODE absolute (default) or relative (compatibility mode)
+      --gui              GUI subprocess mode: JSON status on stdout; stdin byte/EOF requests exit
+      --usb-scan         Output a USB device JSON snapshot; no ADB or HID registration
+      --usb-watch        Output USB hotplug JSON events; stdin byte/EOF stops; exit code 3 if unsupported
+  -v, --version         Software version and Git commit
+  -h, --help            Help
 ```
 
-### 鼠标灵敏度偏低、上下移动费手腕
+### Low mouse sensitivity and tiring vertical movement
 
-**GUI 操作**：确认「原始屏幕尺寸」后，将「灵敏度倍率」设为 `1.5×` 或 `2×`。
-虚拟宽高按 **原始宽高 ÷ 倍率** 四舍五入计算（最小为 1），始终从原始尺寸计算，
-反复调节不会累计缩放；`1×` 恢复原始尺寸。手动修改原始宽高、交换宽高或重新通过 ADB
-识别尺寸时，会重新应用当前倍率。原始尺寸与倍率分别保存，修改后重新连接生效。
-倍率仅用于绝对坐标模式；相对模式使用原始尺寸，并保留倍率设置供切回绝对模式使用。
+**GUI:** After confirming the "original screen size", set the "sensitivity multiplier" to `1.5×` or `2×`. The virtual width and height are calculated as **original dimensions ÷ multiplier**, rounded to the nearest integer with a minimum of 1. The calculation always starts from the original dimensions, so repeated adjustments do not compound scaling; `1×` restores the original size. Changing the original dimensions manually, swapping width and height, or detecting dimensions again through ADB reapplies the current multiplier. Original dimensions and the multiplier are saved separately, and the new setting takes effect after reconnecting.
+The multiplier applies only to absolute coordinates. Relative mode uses the original dimensions and retains the multiplier for a later switch back to absolute mode.
 
-如果指针能够到达全屏，但从顶部移到底部需要很大的手腕移动范围，不一定是卡顿或
-延迟，也可能是虚拟屏幕尺寸较大导致灵敏度偏低。默认绝对模式会把虚拟坐标映射到
-手机全屏，`--width/--height` 不必与手机实际分辨率一致：**等比例缩小虚拟尺寸可以
-提高移动灵敏度，仍然覆盖手机全屏**。
+If the pointer can reach the full screen but moving from top to bottom requires a large wrist movement, this may not be stutter or latency; the virtual screen may simply be large and therefore have low sensitivity. Absolute mode maps virtual coordinates to the complete phone screen, so `--width/--height` do not have to match the phone's real resolution: **proportionally reducing the virtual dimensions increases movement sensitivity while still covering the full phone screen**.
 
-例如，手机分辨率为 `1080 × 2340` 时，可先尝试 `720 × 1560`，移动灵敏度约为原来的
-1.5 倍；如果仍觉得费手腕，可尝试 `540 × 1170`，约为原来的 2 倍：
+For example, with a phone resolution of `1080 × 2340`, first try `720 × 1560`, which gives approximately 1.5× the original movement sensitivity. If it is still tiring, try `540 × 1170`, approximately 2×:
 
 ```bash
 sudo ./build/deskflow-otg --host 127.0.0.1 --port 24800 --name android \
-    --width 720 --height 1560 -s <手机USB序列号>
+    --width 720 --height 1560 -s <phone USB serial>
 ```
 
-宽高应等比例调整，避免横纵方向的移动比例失衡。修改参数前，先把鼠标移回电脑，
-再按 Ctrl+C 停止旧进程并重新启动。这种调整针对默认 `--mouse-mode absolute`，不需要
-切换到受 Android 鼠标加速影响的相对模式。
+Adjust width and height proportionally to avoid an imbalance between horizontal and vertical movement. Before changing parameters, move the mouse back to the computer, press Ctrl+C to stop the old process, and start it again. This adjustment targets the default absolute mode and does not require switching to the relative mode affected by Android mouse acceleration.
 
-### 鼠标提前碰到“看不见的边界”
+### The mouse reaches an invisible boundary too early
 
-旧版把 Deskflow 绝对坐标之差直接作为相对 HID 位移。但 Android 会按鼠标速度、加速设置
-改变实际移动距离，导致 server 认为已经到达边界，手机指针却还在屏幕中间。仅在进入时
-归零、拆分大位移或调整分辨率，不能保证消除这种偏差。
+The old version used the difference between Deskflow absolute coordinates directly as relative HID movement. Android changes the actual distance according to mouse speed and acceleration, so the server could believe the pointer had reached the boundary while the phone pointer was still in the middle. Resetting at entry, splitting large movements, or changing the resolution alone cannot guarantee removal of this error.
 
-新版默认的绝对坐标模式使用数位板的 `Tip Switch + In Range + ABS X/Y`，每个报告同时
-包含当前位置和按键状态，不依赖上一次指针位置。它仍通过 AOA 工作，无需 adb。
-Android 会把它识别为带鼠标按键的数位板/笔，个别应用对笔和鼠标的响应可能不同。
-如果设备不支持该模式，可加 `--mouse-mode relative` 使用原有相对鼠标；该模式仍受
-Android 加速影响，不能保证指针与 Deskflow 边界一致。
+The new default absolute-coordinate mode uses a digitizer's `Tip Switch + In Range + ABS X/Y`; every report contains both the current position and button state and does not depend on the previous pointer position. It still uses AOA and does not require adb. Android identifies it as a digitizer/pen with mouse buttons, so some applications may respond differently to a pen and a mouse.
+If a device does not support this mode, use the original relative mouse with `--mouse-mode relative`; it remains affected by Android acceleration and cannot guarantee that the pointer boundary matches Deskflow's boundary.
 
-## Linux 免 root 访问 USB（udev 规则）
+## Rootless USB access on Linux (udev rule)
 
-`/etc/udev/rules.d/51-android.rules`：
+`/etc/udev/rules.d/51-android.rules`:
 
 ```
 SUBSYSTEM=="usb", ATTR{idVendor}=="18d1", MODE="0666", GROUP="plugdev"
 ```
 
-（`18d1` 是 Google 的 USB vendor id，其它厂商的安卓设备需要相应补上。）
-然后 `sudo udevadm control --reload-rules && sudo udevadm trigger`。
+(`18d1` is Google's USB vendor ID; add the corresponding vendor IDs for Android devices from other manufacturers.) Then run `sudo udevadm control --reload-rules && sudo udevadm trigger`.
 
-## 目录结构
+## Directory structure
 
 ```
 src/
-  main.c              入口、参数解析、回调接线
-  deskflow_client.c   极简 Deskflow 客户端协议 (TCP 握手 + 消息循环)
-  aoa_hid.c           USB AOA HID (libusb 枚举/打开/注册/发送报告)
-  usb_scan.c          USB 设备快照与 libusb 热插拔事件监听
-  bridge.c            键鼠状态机 + HID 报告生成 (对应 scrcpy 的 hid_*)
-  keymap.c            deskflow KeyID → USB HID usage 映射
+  main.c              Entry point, argument parsing, callback wiring
+  deskflow_client.c   Minimal Deskflow client protocol (TCP handshake + message loop)
+  aoa_hid.c           USB AOA HID (libusb enumeration/open/register/report sending)
+  usb_scan.c          USB device snapshots and libusb hotplug event monitoring
+  bridge.c            Keyboard/mouse state machine + HID report generation (scrcpy hid_*)
+  keymap.c            deskflow KeyID → USB HID usage mapping
 platform/
   posix/
-    scrcpy_session.c  ADB/scrcpy-server/forward 与音频、控制 socket 生命周期
+    scrcpy_session.c  ADB/scrcpy-server/forward and audio/control socket lifecycle
   linux/
-    audio_player.c    scrcpy RAW PCM 音频帧与 ALSA 播放
-    ble_hid.c         Linux GATT/HID、稳定句柄与已配对设备重连
-    ble_supervisor.c  原生隔离、降权子进程、模式快照与异常恢复
-    ble_link.c        root 父进程的 HCI 参数监控与低延迟请求
-    ble_session.c     常驻 GATT 服务与本地桥接会话
+    audio_player.c    scrcpy RAW PCM audio frames and ALSA playback
+    ble_hid.c         Linux GATT/HID, stable handles, and paired-device reconnection
+    ble_supervisor.c  Native isolation, demoted subprocess, mode snapshot, and recovery
+    ble_link.c        HCI parameter monitoring and low-latency requests by the root parent
+    ble_session.c     Persistent GATT service and local bridge sessions
   windows/
-    scrcpy_session.c  Windows ADB/scrcpy-server/forward 与 socket 生命周期
-    audio_player.c    scrcpy RAW PCM 音频帧与 WASAPI 播放
-    ble_win.cpp       实验性 Windows 原生 BLE HID 后端
-    ble_win.h         Windows BLE 后端的 C 接口
-    ble_win_control.c/.h Windows GUI 的 BLE 会话控制解析器
+    scrcpy_session.c  Windows ADB/scrcpy-server/forward and socket lifecycle
+    audio_player.c    scrcpy RAW PCM audio frames and WASAPI playback
+    ble_win.cpp       Experimental native Windows BLE HID backend
+    ble_win.h         C interface for the Windows BLE backend
+    ble_win_control.c/.h Windows GUI BLE session control parser
 gui/
-  main_window.cpp     Qt Widgets 界面、ADB 自动识别和设置保存
-  session.cpp         Deskflow 配置/启动、桥接状态及进程生命周期
-  device_info.cpp     设备/尺寸/方向解析、屏幕布局生成
-  process_utils.cpp   异步命令执行、超时、可执行文件发现
-  usb_auto_connect.cpp USB 热插拔通知、轮询回退与已记住手机的自动连接策略
+  main_window.cpp     Qt Widgets UI, automatic ADB detection, and settings persistence
+  session.cpp         Deskflow configuration/startup, bridge state, and process lifecycle
+  device_info.cpp     Device/dimension/orientation parsing and screen-layout generation
+  process_utils.cpp   Asynchronous command execution, timeouts, and executable discovery
+  usb_auto_connect.cpp USB hotplug notifications, polling fallback, and remembered-phone auto-connect policy
 scripts/
-  fetch_adb.py        固定版本 ADB 下载和 SHA-256 校验
-  fetch_scrcpy_server.py 固定版本 scrcpy-server 下载、缓存和 SHA-256 校验
-  fetch_licenses.py   发布包依赖许可证收集
+  fetch_adb.py        Fixed-version ADB download and SHA-256 verification
+  fetch_scrcpy_server.py Fixed-version scrcpy-server download, caching, and SHA-256 verification
+  fetch_licenses.py   Dependency-license collection for release packages
 third_party/
-  scrcpy/scrcpy-server-v5.0.1  音频用 Android Server（Apache-2.0）
+  scrcpy/scrcpy-server-v5.0.1  Android Server for audio (Apache-2.0)
 ```
 
-## 与 scrcpy / deskflow 的关系（出处说明）
+## Relationship to scrcpy / Deskflow (source attribution)
 
-| 本仓库文件 | 对应来源 |
+| Repository file | Corresponding source |
 |---|---|
 | `src/aoa_hid.c` | scrcpy `app/src/usb/aoa_hid.c` + `app/src/usb/usb.c` |
-| `src/bridge.c`（键盘、相对鼠标） | scrcpy `app/src/hid/hid_keyboard.c` + `app/src/hid/hid_mouse.c` |
-| `src/bridge.c`（绝对指针） | HID Digitizer 规范；Android `TouchInputMapper::dispatchPointerStylus` |
-| `src/keymap.c`（KeyID 常量） | deskflow `src/lib/deskflow/KeyTypes.h` |
-| `src/deskflow_client.c`（协议格式） | deskflow `src/lib/deskflow/ProtocolTypes.h` |
+| `src/bridge.c` (keyboard, relative mouse) | scrcpy `app/src/hid/hid_keyboard.c` + `app/src/hid/hid_mouse.c` |
+| `src/bridge.c` (absolute pointer) | HID Digitizer specification; Android `TouchInputMapper::dispatchPointerStylus` |
+| `src/keymap.c` (KeyID constants) | Deskflow `src/lib/deskflow/KeyTypes.h` |
+| `src/deskflow_client.c` (protocol format) | Deskflow `src/lib/deskflow/ProtocolTypes.h` |
 
-scrcpy 的相关代码采用 Apache-2.0，本仓库亦采用 Apache-2.0（见 `LICENSE`）。
+The relevant scrcpy code is licensed under Apache-2.0, and this repository is also licensed under Apache-2.0 (see `LICENSE`).
 
-## TLS 说明
+## TLS
 
-桥接程序支持 Deskflow 1.26+ 的原生 TLS。TLS 使用 Deskflow 兼容的 OpenSSL 客户端实现，
-协议握手和键鼠/剪贴板数据仍使用原有 Deskflow 帧格式。由于 Deskflow 默认使用自签名证书和
-SHA-256 指纹数据库，启用 TLS 时必须指定服务端信任指纹：
+The bridge supports native TLS from Deskflow 1.26 onward. TLS uses a Deskflow-compatible OpenSSL client implementation; protocol handshake and keyboard/mouse/clipboard data still use the existing Deskflow frame format. Because Deskflow normally uses self-signed certificates and a SHA-256 fingerprint database, a trusted server fingerprint must be provided when TLS is enabled:
 
 ```bash
 sudo ./build/deskflow-otg --host 127.0.0.1 --port 24800 --name android \
-    --width 1080 --height 1920 -s <手机序列号> --tls \
+    --width 1080 --height 1920 -s <phone serial> --tls \
     --tls-fingerprint 001122...aabbccdd
 ```
 
-也可以直接使用 Deskflow 的指纹数据库（`v2:sha256:...`）：
+The Deskflow fingerprint database (`v2:sha256:...`) can also be used directly:
 
 ```bash
 ./build/deskflow-otg ... --tls --tls-fingerprint-file ~/.config/deskflow/tls/trustedServers.txt
 ```
 
-如果服务端启用了客户端证书认证，再添加 `--tls-cert <PEM文件>`；该 PEM 文件需要同时包含
-客户端证书和私钥。`--tls-fingerprint` 与 `--tls-fingerprint-file` 二选一。GUI 的连接设置中
-也提供相同选项，并会按设备保存。
+If the server enables client-certificate authentication, add `--tls-cert <PEM file>`; the PEM must contain both the client certificate and private key. Choose exactly one of `--tls-fingerprint` and `--tls-fingerprint-file`. The GUI connection settings provide the same options and save them per device.
 
-## 当前限制
+## Current limitations
 
-- TLS 使用 SHA-256 服务端证书指纹固定；未提供信任指纹时不会连接。
-- 键盘映射按 **US 布局**（其它布局下部分符号键可能错位）。
-- 剪贴板仅支持可选的 ADB 文本共享，不支持图片/文件剪贴板；不支持文件拖放和屏幕截图。
-- 只支持键盘 + 鼠标，不支持游戏手柄（AOA gamepad 未实现）。
-- 默认绝对指针依赖 Android 的 HID 数位板支持，具体设备兼容性需真机验证。
-- `--mouse-mode relative` 为兼容模式，Android 鼠标加速可能造成漂移、提前碰边。
-- 需要先能访问 USB 设备（Linux 使用 root 或 udev 规则；macOS 需允许 USB 配件连接；Windows 需兼容 libusb 的驱动）。
+- TLS pins the server certificate by SHA-256 fingerprint; without a trusted fingerprint, the program does not connect.
+- Keyboard mapping uses the **US layout**; some symbol keys may be wrong with other layouts.
+- Clipboard support is optional ADB text sharing only; image/file clipboards, file drag-and-drop, and screenshots are not supported.
+- Only keyboard and mouse are supported; gamepads (AOA gamepad) are not implemented.
+- The default absolute pointer depends on Android HID digitizer support; compatibility with specific devices requires real-device validation.
+- `--mouse-mode relative` is a compatibility mode; Android mouse acceleration may cause drift and early boundary contact.
+- USB access must be available first (root or a udev rule on Linux, USB accessory permission on macOS, and a libusb-compatible driver on Windows).
