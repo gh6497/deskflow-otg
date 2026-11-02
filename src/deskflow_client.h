@@ -52,6 +52,17 @@ typedef struct df_client_callbacks {
 
 typedef struct df_client df_client;
 
+/* Deskflow-compatible TLS client settings. Deskflow trusts peers by SHA-256
+ * certificate fingerprint rather than by a public CA. The certificate file
+ * is optional unless the server requires a client certificate; when supplied
+ * it contains a PEM certificate and private key. */
+typedef struct df_client_tls_options {
+    bool enabled;
+    const char *certificate;
+    const char *fingerprint;
+    const char *fingerprint_file;
+} df_client_tls_options;
+
 /* Optional cancellation check for this single-threaded client, including
  * partial packet reads. Set before connecting; NULL restores CLI behaviour. */
 void df_client_set_stop_check(int (*check)(void));
@@ -66,8 +77,15 @@ void df_client_set_stop_check(int (*check)(void));
  * NULL on failure.
  */
 df_client *df_client_connect(const char *host, uint16_t port, const char *name,
-                             int32_t screen_w, int32_t screen_h,
-                             const df_client_callbacks *cbs, void *ud);
+                              int32_t screen_w, int32_t screen_h,
+                              const df_client_callbacks *cbs, void *ud);
+
+/* Extended connection entry point with native Deskflow TLS support. The
+ * legacy entry point remains plaintext for source compatibility. */
+df_client *df_client_connect_ex(const char *host, uint16_t port, const char *name,
+                                int32_t screen_w, int32_t screen_h,
+                                const df_client_callbacks *cbs, void *ud,
+                                const df_client_tls_options *tls);
 
 /*
  * Run the message loop until the server closes the connection, an error

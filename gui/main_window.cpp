@@ -408,6 +408,22 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this)
     addTranslatedRow(deviceForm, "otg.label.phone_name", m_phone);
     addTranslatedRow(serverForm, "otg.label.server_address", m_host);
     addTranslatedRow(serverForm, "otg.label.server_port", m_port);
+    m_tls = translated(new QCheckBox, "text", "otg.tls.enabled");
+    m_tls->setObjectName("tlsEnabled");
+    serverForm->addRow(m_tls);
+    m_tlsCert = new QLineEdit;
+    m_tlsCert->setObjectName("tlsCertificate");
+    setTranslatedProperty(m_tlsCert, "placeholderText", "otg.tls.certificate_hint");
+    addTranslatedRow(serverForm, "otg.tls.certificate", m_tlsCert);
+    m_tlsFingerprint = new QLineEdit;
+    m_tlsFingerprint->setObjectName("tlsFingerprint");
+    setTranslatedProperty(m_tlsFingerprint, "placeholderText", "otg.tls.fingerprint_hint");
+    addTranslatedRow(serverForm, "otg.tls.fingerprint", m_tlsFingerprint);
+    m_tlsFingerprintFile = new QLineEdit;
+    m_tlsFingerprintFile->setObjectName("tlsFingerprintFile");
+    setTranslatedProperty(m_tlsFingerprintFile, "placeholderText", "otg.tls.fingerprint_file_hint");
+    addTranslatedRow(serverForm, "otg.tls.fingerprint_file", m_tlsFingerprintFile);
+    connect(m_tls, &QCheckBox::toggled, this, [this] { updateEnabled(); });
     m_sharedBox = new QWidget;
     auto *sharedLayout = new QVBoxLayout(m_sharedBox);
     sharedLayout->addWidget(serverBox);
@@ -505,6 +521,10 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this)
     m_host->setText(settings.value("host", "127.0.0.1").toString());
     m_port->setValue(settings.value("port", 24800).toInt());
     m_manage->setChecked(settings.value("manageServer", true).toBool());
+    m_tls->setChecked(settings.value("tls", false).toBool());
+    m_tlsCert->setText(settings.value("tlsCertificate").toString());
+    m_tlsFingerprint->setText(settings.value("tlsFingerprint").toString());
+    m_tlsFingerprintFile->setText(settings.value("tlsFingerprintFile").toString());
     m_direction->setCurrentIndex(qMax(0, m_direction->findData(settings.value("direction", "right"))));
     m_mouseMode->setCurrentIndex(qMax(0, m_mouseMode->findData(settings.value("mouseMode", "absolute"))));
     if (m_transport->currentData() == "ble") m_mouseMode->setCurrentIndex(0);
@@ -893,6 +913,10 @@ ConnectionOptions MainWindow::connectionOptions(const QVariantMap &profile) cons
     options.host = m_host->text().trimmed();
     options.port = m_port->value();
     options.manageServer = m_manage->isChecked();
+    options.tls = m_tls->isChecked();
+    options.tlsCertificate = m_tlsCert->text().trimmed();
+    options.tlsFingerprint = m_tlsFingerprint->text().trimmed();
+    options.tlsFingerprintFile = m_tlsFingerprintFile->text().trimmed();
     options.phone = profile.value("phone", "android").toString();
     options.serial = profile.value("serial").toString();
     options.adbSerial = profile.value("adbSerial").toString().trimmed();
@@ -994,6 +1018,9 @@ void MainWindow::updateEnabled()
                           !(ble ? m_blePeer : m_serial)->text().trimmed().isEmpty());
     m_disconnect->setEnabled(!idle && m_connections.state(m_selectedId) != Session::State::Stopping);
     m_host->setEnabled(!m_manage->isChecked());
+    m_tlsCert->setEnabled(m_tls->isChecked());
+    m_tlsFingerprint->setEnabled(m_tls->isChecked());
+    m_tlsFingerprintFile->setEnabled(m_tls->isChecked());
     m_direction->setEnabled(sharedIdle && m_manage->isChecked());
     m_computer->setEnabled(m_manage->isChecked());
     m_phone->setEnabled(sharedIdle || !m_manage->isChecked());
@@ -1182,7 +1209,10 @@ QVariantMap MainWindow::deviceProfile() const
             {"sensitivityMultiplier", m_sensitivity->value()},
             {"deskflow", m_deskflow->text()}, {"computer", m_computer->text()},
              {"phone", m_phone->text()}, {"host", m_host->text()}, {"port", m_port->value()},
-             {"manageServer", m_manage->isChecked()}, {"direction", m_direction->currentData()},
+              {"manageServer", m_manage->isChecked()}, {"tls", m_tls->isChecked()},
+               {"tlsCertificate", m_tlsCert->text()}, {"tlsFingerprint", m_tlsFingerprint->text()},
+               {"tlsFingerprintFile", m_tlsFingerprintFile->text()},
+               {"direction", m_direction->currentData()},
               {"mouseMode", m_mouseMode->currentData()}, {"audio", m_audio->isChecked()},
                {"clipboard", m_clipboard->isChecked()}, {"autoRotate", m_autoRotate->isChecked()}};
 }
@@ -1201,6 +1231,10 @@ void MainWindow::applyDeviceProfile(const QVariantMap &profile)
     m_sensitivity->setValue(profile.value("sensitivityMultiplier", 1.0).toDouble());
     m_phone->setText(profile.value("phone", "android").toString());
     m_alias->setText(profile.value("alias", m_phone->text()).toString());
+    m_tls->setChecked(profile.value("tls", false).toBool());
+    m_tlsCert->setText(profile.value("tlsCertificate").toString());
+    m_tlsFingerprint->setText(profile.value("tlsFingerprint").toString());
+    m_tlsFingerprintFile->setText(profile.value("tlsFingerprintFile").toString());
     m_transport->setCurrentIndex(qMax(0, m_transport->findData(profile.value("transport", "usb"))));
     m_adapter->setText(profile.value("bleAdapter", "hci0").toString());
     m_blePeer->setText(profile.value("blePeer").toString());
@@ -1267,6 +1301,10 @@ void MainWindow::saveSettings()
     settings.setValue("host", m_host->text());
     settings.setValue("port", m_port->value());
     settings.setValue("manageServer", m_manage->isChecked());
+    settings.setValue("tls", m_tls->isChecked());
+    settings.setValue("tlsCertificate", m_tlsCert->text());
+    settings.setValue("tlsFingerprint", m_tlsFingerprint->text());
+    settings.setValue("tlsFingerprintFile", m_tlsFingerprintFile->text());
     settings.setValue("direction", m_direction->currentData());
     settings.setValue("mouseMode", m_mouseMode->currentData());
     settings.setValue("autoConnect", m_autoConnectEnabled->isChecked());

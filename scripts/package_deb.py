@@ -81,7 +81,7 @@ def main():
         control = root / "DEBIAN"
         control.mkdir()
         # Qt and ADB are bundled, but their platform plugins still need system libraries.
-        dependencies = ("libusb-1.0-0, libc6, libstdc++6, libgl1, libegl1, "
+        dependencies = ("libusb-1.0-0, libssl3 | libssl3t64, libc6, libstdc++6, libgl1, libegl1, "
                         "libx11-6, libxcb1, libxkbcommon0, libxcb-cursor0")
         if ble:
             dependencies += ", bluez, libglib2.0-0t64 | libglib2.0-0, pkexec"

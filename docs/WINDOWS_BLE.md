@@ -60,7 +60,7 @@ GUI 参数、状态和停止流程有离线模拟测试；真实 `main.c` + brid
 ## 配置 Deskflow
 
 1. 使用已有 Deskflow GUI，将手机配置为名为 `android` 的 secondary screen，放在电脑一侧。
-2. 关闭 server 的 TLS/加密；桥接目前只支持明文协议。仅本机使用时监听回环地址。
+2. 如启用 server 的 TLS/加密，在桥接参数中同时配置服务端 SHA-256 指纹；仅本机使用时监听回环地址。
 3. 确保 server 已运行，地址/端口与下方参数一致。CLI 不会启动、修改或关闭已有 Deskflow。
 4. 停止独立 BLE 原型后再启动桥接，不要让两套 HID 服务同时运行。
 

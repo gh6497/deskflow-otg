@@ -237,7 +237,7 @@ for f in platform/linux/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only
   首次缓存迁移仍需切过一次手机蓝牙；常驻服务/BlueZ/主机重启和持键强杀未验收。
   详细证据和仍运行的服务/会话见 `docs/LINUX_BLE_HANDOVER.md` 第 7 节，勿擅自停止用户连接。
 
-- **只支持明文协议**，不支持 deskflow 的 TLS（deskflow 1.26 默认开 TLS，需在 server 侧关闭）。
+- 支持 deskflow 的 TLS；使用 `--tls` 并配置服务端 SHA-256 指纹，服务端要求客户端认证时再提供 `--tls-cert`。
 - 键盘 **US 布局**（其它布局符号键可能错位）。
 - 支持键盘 + 鼠标；可选 `BUILD_CLIPBOARD` 通过 ADB/scrcpy 共享纯文本，不支持游戏手柄、文件拖放、视频。
 - Linux 需要 root 或 udev 规则才能访问 USB；macOS 需允许配件连接，Deskflow 需辅助功能权限。
@@ -248,7 +248,7 @@ for f in platform/linux/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only
 - ✅ 真机环境下已连上 deskflow server（`connected ... as "android"`）。
 - ✅ 已复现相对模式加速漂移，并加入默认绝对数位板指针；主机仿真与构建通过。
 - ⏳ **待真机实测**：绝对模式在用户手机上的悬停、全屏到达、拖拽、滚轮与切屏兼容性。
-- 潜在后续项：游戏手柄支持、多键盘布局、TLS 支持、udev 规则/systemd 示例。
+- 潜在后续项：游戏手柄支持、多键盘布局、udev 规则/systemd 示例。
 
 ## 代码风格约定
 
@@ -324,7 +324,7 @@ for f in platform/linux/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only
   `serverConfiguration` 验证唯一名称、相邻屏幕、双向边、网格重叠和电脑连通性；预览只读。
   当前保守限制为多 USB + 至多一台 BLE（包括空闲 Windows provider 的身份占用），不能放宽
   底层单目标门控。多设备测试全为 fake 子进程，不访问 USB/系统蓝牙，不等于真机验收。
-- `gui/session.cpp` 只管理自己创建的 Deskflow 和桥接进程。自动启动生成独立配置、监听回环地址并关闭 TLS；
+- `gui/session.cpp` 只管理自己创建的 Deskflow 和桥接进程。自动启动生成独立配置、监听回环地址并同步 TLS 配置；
   外部服务模式不更改或终止已有 Deskflow。根据 `--help` 区分现代 `deskflow-core server --settings` 与传统 server 参数。
 - `src/main.c --gui` 在 stdout 输出 JSON 行 `usb-ready` / `connected` / `disconnected`；日志仍走 stderr。
   stdin 任意字节或 EOF 请求优雅退出，Windows 使用 PeekNamedPipe，Unix 使用 poll。

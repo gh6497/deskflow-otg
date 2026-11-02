@@ -27,6 +27,7 @@ class DebPackageTest(unittest.TestCase):
                                 "--stage", str(stage), "--version", "0.1.2+test1",
                                 "--output", str(package)], check=True)
                 deps = subprocess.check_output(["dpkg-deb", "--field", str(package), "Depends"], text=True)
+                self.assertTrue("libssl3" in deps or "libssl3t64" in deps)
                 self.assertEqual("bluez" in deps, ble)
                 self.assertEqual("pkexec" in deps, ble)
                 extracted = root / "extracted"

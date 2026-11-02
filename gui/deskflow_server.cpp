@@ -103,7 +103,10 @@ void DeskflowServer::launch(const QString &help)
     settings.setValue("core/processMode", 1);
     settings.setValue("core/interface", "127.0.0.1");
     settings.setValue("core/port", m_options.port);
-    settings.setValue("security/tlsEnabled", false);
+    settings.setValue("security/tlsEnabled", m_options.tls);
+    settings.setValue("security/checkPeerFingerprints", false);
+    if (m_options.tls && !m_options.tlsCertificate.isEmpty())
+        settings.setValue("security/certificate", m_options.tlsCertificate);
     settings.setValue("server/externalConfig", true);
     settings.setValue("server/externalConfigFile", layout);
     settings.setValue("server/enableClipboard", false);
@@ -117,7 +120,11 @@ void DeskflowServer::launch(const QString &help)
                help.contains("--address") && help.contains("--no-daemon")) {
         args = {"--no-daemon", "--name", m_options.computer, "--config", layout,
                 "--address", "127.0.0.1:" + QString::number(m_options.port)};
-        if (help.contains("--disable-crypto")) args << "--disable-crypto";
+        if (m_options.tls) {
+            if (help.contains("--enable-crypto")) args << "--enable-crypto";
+            else if (help.contains("--settings")) args << "--settings" << path;
+            else { fail("otg.error.tls_interface"); return; }
+        } else if (help.contains("--disable-crypto")) args << "--disable-crypto";
         else if (help.contains("--settings")) args << "--settings" << path;
         else if (!help.contains("--enable-crypto")) { fail("otg.error.disable_tls"); return; }
     } else { fail("otg.error.deskflow_interface"); return; }

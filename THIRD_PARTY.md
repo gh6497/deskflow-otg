@@ -50,6 +50,16 @@ source and build recipe allow relinking against a modified libusb.
 - Sources and notices: <https://github.com/libusb/libusb>
 - License: <https://github.com/libusb/libusb/blob/master/COPYING>
 
+## OpenSSL
+
+The bridge uses OpenSSL libssl/libcrypto for the optional Deskflow TLS client.
+Linux and macOS builds normally link the system or Homebrew libraries; Windows
+builds use the vcpkg package. OpenSSL is distributed under the Apache License
+2.0.
+
+- Sources: <https://github.com/openssl/openssl>
+- License: <https://www.openssl.org/source/license.html>
+
 ## Linux Bluetooth runtime
 
 Linux BLE builds dynamically link GLib/GIO (LGPL-2.1-or-later). BlueZ and

@@ -67,12 +67,12 @@ Windows 原生 BLE HID 的独立[最小测试原型](experiments/windows-ble-hid
 - Linux、macOS（Intel / Apple Silicon）或 Windows（x64）
 - GCC / Clang / MSVC（C11）
 - CMake ≥ 3.16
-- libusb-1.0（开发包）
+- libusb-1.0（开发包）和 OpenSSL 1.1.1+/3.x 开发包
 
 Linux BLE HID 后端还需要 BlueZ、GLib/GIO 开发包：
 
 ```bash
-sudo apt install libusb-1.0-0-dev libglib2.0-dev bluez
+sudo apt install libusb-1.0-0-dev libssl-dev libglib2.0-dev bluez
 ```
 
 Linux 默认编译 BLE 后端。仅需原有 USB CLI 时可用
@@ -80,14 +80,14 @@ Linux 默认编译 BLE 后端。仅需原有 USB CLI 时可用
 
 ```bash
 # Debian / Ubuntu
-sudo apt install build-essential cmake libusb-1.0-0-dev
+sudo apt install build-essential cmake libusb-1.0-0-dev libssl-dev
 
 # macOS（先安装 Homebrew）
 xcode-select --install
-brew install cmake libusb
+brew install cmake libusb openssl@3
 
 # Windows：Visual Studio C++ 工具链、CMake、vcpkg
-vcpkg install libusb:x64-windows-static
+vcpkg install libusb:x64-windows-static openssl:x64-windows-static
 ```
 
 命令行桥接不需要 Qt、不需要 FFmpeg、不需要 SDL —— 这就是本程序相对于"直接链接 deskflow/scrcpy
@@ -214,11 +214,11 @@ Windows 空闲 BLE provider 也保留其目标占用。Linux 常驻服务仍遵�
 
 - 根据 `--help` 探测实际启动接口，不通过版本号白名单限制协议兼容性。
 - 支持新版 `deskflow-core server --settings`（含 1.26 接口），以及旧版
-  `deskflow-server --no-daemon --name --config --address`；根据实际参数设置明文连接。
+  `deskflow-server --no-daemon --name --config --address`；根据实际参数设置连接安全模式。
 - 自动生成独立的临时设置与屏幕布局，不覆盖用户已有 Deskflow 配置。自动启动的 server
-  只监听 `127.0.0.1`，关闭 TLS；端口被占用时明确报错。
+  只监听 `127.0.0.1`；TLS 选项会同步写入临时设置，端口被占用时明确报错。
 - 取消「自动配置并启动本机 Deskflow」即可填写服务地址，连接已有 server。这时需要自己
-  配置同名手机屏幕、位置并关闭 TLS；GUI 不会停止外部服务。
+  配置同名手机屏幕、位置及 TLS；GUI 不会停止外部服务。
 - 新版本如果保持协议、启动参数及设置格式兼容即可继续使用；未知启动接口会提示使用已有服务模式。
 - 设备、尺寸、路径和连接参数自动保存。首次自动启动可能需要授予 Deskflow 键鼠捕获权限；
   macOS 需辅助功能权限，Wayland 可能需要桌面门户确认。Windows USB 驱动仍须同时满足 ADB
@@ -414,7 +414,7 @@ sudo ./build/deskflow-otg \
 --name android --width 1080 --height 1920 -s <手机USB序列号>`。需安装可供 libusb 使用的
 USB 驱动（例如通过 Zadig 将手机对应 USB 接口绑定 WinUSB）；更换驱动可能影响 MTP/ADB，
 请确认选中的设备/接口并备份原驱动。若手机无法识别，先看
-[Windows USB OTG 设备识别](docs/WINDOWS_USB.md)。Deskflow 的 TLS 仍需关闭。
+[Windows USB OTG 设备识别](docs/WINDOWS_USB.md)。需要 TLS 时按上文配置指纹和证书。
 
 ### macOS 运行与权限
 
@@ -732,13 +732,29 @@ scrcpy 的相关代码采用 Apache-2.0，本仓库亦采用 Apache-2.0（见 `L
 
 ## TLS 说明
 
-deskflow 1.26+ 默认开启 TLS（`security/tlsEnabled`）。本桥接程序目前**只支持明文协议**，
-如果 server 开了 TLS，连接会卡住或报错。需要在 Deskflow 设置里把 **TLS 关掉**（Security → TLS，
-或者配置文件里 `security/tlsEnabled=false`）再使用。
+桥接程序支持 Deskflow 1.26+ 的原生 TLS。TLS 使用 Deskflow 兼容的 OpenSSL 客户端实现，
+协议握手和键鼠/剪贴板数据仍使用原有 Deskflow 帧格式。由于 Deskflow 默认使用自签名证书和
+SHA-256 指纹数据库，启用 TLS 时必须指定服务端信任指纹：
+
+```bash
+sudo ./build/deskflow-otg --host 127.0.0.1 --port 24800 --name android \
+    --width 1080 --height 1920 -s <手机序列号> --tls \
+    --tls-fingerprint 001122...aabbccdd
+```
+
+也可以直接使用 Deskflow 的指纹数据库（`v2:sha256:...`）：
+
+```bash
+./build/deskflow-otg ... --tls --tls-fingerprint-file ~/.config/deskflow/tls/trustedServers.txt
+```
+
+如果服务端启用了客户端证书认证，再添加 `--tls-cert <PEM文件>`；该 PEM 文件需要同时包含
+客户端证书和私钥。`--tls-fingerprint` 与 `--tls-fingerprint-file` 二选一。GUI 的连接设置中
+也提供相同选项，并会按设备保存。
 
 ## 当前限制
 
-- 只支持**明文协议**，不支持 deskflow 的 TLS（见上文）。
+- TLS 使用 SHA-256 服务端证书指纹固定；未提供信任指纹时不会连接。
 - 键盘映射按 **US 布局**（其它布局下部分符号键可能错位）。
 - 剪贴板仅支持可选的 ADB 文本共享，不支持图片/文件剪贴板；不支持文件拖放和屏幕截图。
 - 只支持键盘 + 鼠标，不支持游戏手柄（AOA gamepad 未实现）。

@@ -106,6 +106,8 @@ private:
     QPushButton *m_stopBleService;
     bool m_stoppingBleService = false;
     QLineEdit *m_serial, *m_adbSerial, *m_adb, *m_deskflow, *m_host, *m_computer, *m_phone;
+    QLineEdit *m_tlsCert, *m_tlsFingerprint, *m_tlsFingerprintFile;
+    QCheckBox *m_tls;
     QCheckBox *m_audio;
     QCheckBox *m_clipboard;
     QCheckBox *m_autoRotate;

@@ -39,6 +39,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
+
+#include <openssl/crypto.h>
+#include <openssl/err.h>
+#include <openssl/evp.h>
+#include <openssl/ssl.h>
+#include <openssl/x509.h>
 
 #define DF_PROTOCOL_MAJOR 1
 #define DF_PROTOCOL_MINOR 8
@@ -101,6 +108,33 @@ static int df_socket_wait_timeout(df_socket fd, int timeout_ms)
 
 static int io_wait_interval_ms = 500;
 
+static int df_socket_wait_events(df_socket fd, short events, int timeout_ms)
+{
+#ifdef _WIN32
+    WSAPOLLFD pfd = {0};
+    pfd.fd = fd;
+    pfd.events = events;
+    return WSAPoll(&pfd, 1, timeout_ms);
+#else
+    struct pollfd pfd = { .fd = fd, .events = events };
+    return poll(&pfd, 1, timeout_ms);
+#endif
+}
+
+static int df_socket_set_nonblocking(df_socket fd, bool enabled)
+{
+#ifdef _WIN32
+    u_long value = enabled ? 1UL : 0UL;
+    return ioctlsocket(fd, FIONBIO, &value) == 0 ? 0 : -1;
+#else
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0) return -1;
+    if (enabled) flags |= O_NONBLOCK;
+    else flags &= ~O_NONBLOCK;
+    return fcntl(fd, F_SETFL, flags);
+#endif
+}
+
 static int df_socket_wait(df_socket fd)
 {
     return df_socket_wait_timeout(fd, io_wait_interval_ms);
@@ -121,6 +155,11 @@ struct df_client {
     size_t clipboard_limit;
     uint8_t *clipboard_local;
     size_t clipboard_local_size;
+    SSL_CTX *tls_ctx;
+    SSL *tls_ssl;
+    char *tls_fingerprint;
+    char *tls_fingerprint_file;
+    bool tls_enabled;
     struct {
         uint8_t *data;
         size_t size, expected;
@@ -131,6 +170,15 @@ struct df_client {
 
 static int (*stop_check)(void);
 static df_client *io_client;
+
+static char *df_strdup(const char *text)
+{
+    if (!text) return NULL;
+    size_t length = strlen(text) + 1;
+    char *copy = malloc(length);
+    if (copy) memcpy(copy, text, length);
+    return copy;
+}
 
 void df_client_set_stop_check(int (*check)(void))
 {
@@ -161,6 +209,181 @@ static void socket_enable_low_latency(df_socket fd)
                      (const char *)&enabled, sizeof(enabled));
 }
 
+#ifdef _WIN32
+#define DF_POLL_READ  POLLRDNORM
+#define DF_POLL_WRITE POLLWRNORM
+#else
+#define DF_POLL_READ  POLLIN
+#define DF_POLL_WRITE POLLOUT
+#endif
+
+static void tls_log_error(const char *operation)
+{
+    unsigned long error = ERR_get_error();
+    char message[256] = "unknown OpenSSL error";
+    if (error) ERR_error_string_n(error, message, sizeof(message));
+    LOG_ERR("TLS %s failed: %s\n", operation, message);
+}
+
+static int tls_wait(df_socket fd, short events)
+{
+    for (;;) {
+        if (stop_check && stop_check()) return -1;
+        int ready = df_socket_wait_events(fd, events, io_wait_interval_ms);
+        if (ready > 0) return 0;
+        if (ready < 0 && df_socket_interrupted()) continue;
+        if (ready < 0) return -1;
+        if (io_client && io_client->cbs.on_tick && io_client->cbs.on_tick(io_client->ud)) {
+            return -1;
+        }
+    }
+}
+
+/* Accept both Deskflow's v2:sha256:... database line and the compact or
+ * colon-separated form printed by its status UI. */
+static int tls_parse_fingerprint(const char *text, uint8_t output[32])
+{
+    if (!text) return -1;
+    const char *value = text;
+    const char *prefix = strstr(value, "v2:sha256:");
+    if (prefix) value = prefix + strlen("v2:sha256:");
+
+    size_t digits = 0;
+    int high = -1;
+    for (const unsigned char *p = (const unsigned char *)value; *p; ++p) {
+        if (*p == ':' || *p == '-' || *p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') continue;
+        if (!isxdigit(*p) || digits >= 64) return -1;
+        int digit = *p <= '9' ? *p - '0' :
+                    (*p <= 'F' ? *p - 'A' + 10 : *p - 'a' + 10);
+        if (high < 0) high = digit;
+        else {
+            output[digits / 2] = (uint8_t)((high << 4) | digit);
+            high = -1;
+        }
+        ++digits;
+    }
+    return digits == 64 && high < 0 ? 0 : -1;
+}
+
+static int tls_fingerprint_matches(const uint8_t actual[32], const char *text)
+{
+    uint8_t expected[32];
+    return tls_parse_fingerprint(text, expected) == 0 &&
+           CRYPTO_memcmp(actual, expected, sizeof(expected)) == 0;
+}
+
+static int tls_verify_peer_fingerprint(const df_client *client)
+{
+    X509 *certificate = SSL_get1_peer_certificate(client->tls_ssl);
+    if (!certificate) {
+        LOG_ERR("TLS server did not provide a certificate\n");
+        return -1;
+    }
+    uint8_t digest[EVP_MAX_MD_SIZE];
+    unsigned int digest_size = 0;
+    int digest_ok = X509_digest(certificate, EVP_sha256(), digest, &digest_size);
+    X509_free(certificate);
+    if (!digest_ok || digest_size != 32) {
+        LOG_ERR("could not calculate TLS server certificate fingerprint\n");
+        return -1;
+    }
+    char fingerprint[65];
+    for (unsigned i = 0; i < 32; ++i)
+        snprintf(fingerprint + i * 2, 3, "%02x", (unsigned)digest[i]);
+    fingerprint[64] = '\0';
+    LOG_INFO("TLS server SHA-256 fingerprint: %s\n", fingerprint);
+
+    if (client->tls_fingerprint && tls_fingerprint_matches(digest, client->tls_fingerprint)) {
+        return 0;
+    }
+    if (client->tls_fingerprint_file) {
+        FILE *file = fopen(client->tls_fingerprint_file, "r");
+        if (!file) {
+            LOG_ERR("could not open TLS fingerprint file '%s'\n", client->tls_fingerprint_file);
+            return -1;
+        }
+        char line[512];
+        while (fgets(line, sizeof(line), file)) {
+            if (tls_fingerprint_matches(digest, line)) {
+                fclose(file);
+                return 0;
+            }
+        }
+        fclose(file);
+    }
+    LOG_ERR("TLS server certificate fingerprint is not trusted\n");
+    return -1;
+}
+
+static int tls_setup(df_client *client, const df_client_tls_options *options)
+{
+    if (!options || !options->enabled) return 0;
+    if ((!options->fingerprint || !*options->fingerprint) &&
+        (!options->fingerprint_file || !*options->fingerprint_file)) {
+        LOG_ERR("TLS requires --tls-fingerprint or --tls-fingerprint-file\n");
+        return -1;
+    }
+    client->tls_ctx = SSL_CTX_new(TLS_client_method());
+    if (!client->tls_ctx) {
+        tls_log_error("context creation");
+        return -1;
+    }
+    if (!SSL_CTX_set_min_proto_version(client->tls_ctx, TLS1_2_VERSION)) {
+        tls_log_error("setting minimum protocol version");
+        return -1;
+    }
+    /* Deskflow authenticates self-signed peers by SHA-256 fingerprint. */
+    SSL_CTX_set_verify(client->tls_ctx, SSL_VERIFY_NONE, NULL);
+    SSL_CTX_clear_mode(client->tls_ctx, SSL_MODE_AUTO_RETRY);
+
+    if (options->certificate && *options->certificate) {
+        if (SSL_CTX_use_certificate_chain_file(client->tls_ctx, options->certificate) != 1 ||
+            SSL_CTX_use_PrivateKey_file(client->tls_ctx, options->certificate, SSL_FILETYPE_PEM) != 1 ||
+            SSL_CTX_check_private_key(client->tls_ctx) != 1) {
+            tls_log_error("loading client certificate");
+            return -1;
+        }
+    }
+    client->tls_ssl = SSL_new(client->tls_ctx);
+    if (!client->tls_ssl || SSL_set_fd(client->tls_ssl, (int)client->fd) != 1) {
+        tls_log_error("creating connection");
+        return -1;
+    }
+    client->tls_fingerprint = df_strdup(options->fingerprint);
+    client->tls_fingerprint_file = df_strdup(options->fingerprint_file);
+    if ((options->fingerprint && !client->tls_fingerprint) ||
+        (options->fingerprint_file && !client->tls_fingerprint_file)) return -1;
+    client->tls_enabled = true;
+    return 0;
+}
+
+static int tls_handshake(df_client *client)
+{
+    if (!client->tls_enabled) return 0;
+    if (df_socket_set_nonblocking(client->fd, true) != 0) {
+        LOG_ERR("could not make TLS socket non-blocking\n");
+        return -1;
+    }
+    io_wait_interval_ms = 100;
+    for (;;) {
+        if (stop_check && stop_check()) return -1;
+        int result = SSL_connect(client->tls_ssl);
+        if (result == 1) break;
+        int error = SSL_get_error(client->tls_ssl, result);
+        if (error == SSL_ERROR_WANT_READ) {
+            if (tls_wait(client->fd, DF_POLL_READ) != 0) return -1;
+        } else if (error == SSL_ERROR_WANT_WRITE) {
+            if (tls_wait(client->fd, DF_POLL_WRITE) != 0) return -1;
+        } else {
+            tls_log_error("handshake");
+            return -1;
+        }
+    }
+    if (tls_verify_peer_fingerprint(client) != 0) return -1;
+    LOG_INFO("TLS connected (%s)\n", SSL_get_cipher(client->tls_ssl));
+    return 0;
+}
+
 static int io_read_full(df_socket fd, void *buf, size_t n)
 {
     uint8_t *p = buf;
@@ -180,7 +403,26 @@ static int io_read_full(df_socket fd, void *buf, size_t n)
                 return -1;
             }
         }
-        int r = recv(fd, (char *)p + got, (int)(n - got), 0);
+        int r;
+        if (io_client && io_client->fd == fd && io_client->tls_enabled) {
+            r = SSL_read(io_client->tls_ssl, (char *)p + got, (int)(n - got));
+            if (r <= 0) {
+                int error = SSL_get_error(io_client->tls_ssl, r);
+                if (error == SSL_ERROR_WANT_READ) {
+                    if (tls_wait(fd, DF_POLL_READ) != 0) return -1;
+                    continue;
+                }
+                if (error == SSL_ERROR_WANT_WRITE) {
+                    if (tls_wait(fd, DF_POLL_WRITE) != 0) return -1;
+                    continue;
+                }
+                if (error == SSL_ERROR_ZERO_RETURN) return 0;
+                tls_log_error("read");
+                return -1;
+            }
+        } else {
+            r = recv(fd, (char *)p + got, (int)(n - got), 0);
+        }
         if (r < 0) {
             if (df_socket_interrupted()) {
                 continue;
@@ -200,11 +442,29 @@ static int io_write_full(df_socket fd, const void *buf, size_t n)
     const uint8_t *p = buf;
     size_t sent = 0;
     while (sent < n) {
+        int r;
+        if (io_client && io_client->fd == fd && io_client->tls_enabled) {
+            r = SSL_write(io_client->tls_ssl, (const char *)p + sent, (int)(n - sent));
+            if (r <= 0) {
+                int error = SSL_get_error(io_client->tls_ssl, r);
+                if (error == SSL_ERROR_WANT_READ) {
+                    if (tls_wait(fd, DF_POLL_READ) != 0) return -1;
+                    continue;
+                }
+                if (error == SSL_ERROR_WANT_WRITE) {
+                    if (tls_wait(fd, DF_POLL_WRITE) != 0) return -1;
+                    continue;
+                }
+                tls_log_error("write");
+                return -1;
+            }
+        } else {
 #ifdef MSG_NOSIGNAL
-        int r = send(fd, (const char *)p + sent, (int)(n - sent), MSG_NOSIGNAL);
+            r = send(fd, (const char *)p + sent, (int)(n - sent), MSG_NOSIGNAL);
 #else
-        int r = send(fd, (const char *)p + sent, (int)(n - sent), 0);
+            r = send(fd, (const char *)p + sent, (int)(n - sent), 0);
 #endif
+        }
         if (r < 0) {
             if (df_socket_interrupted()) {
                 continue;
@@ -636,9 +896,10 @@ static df_socket tcp_connect(const char *host, uint16_t port)
     return fd;
 }
 
-df_client *df_client_connect(const char *host, uint16_t port, const char *name,
-                             int32_t screen_w, int32_t screen_h,
-                             const df_client_callbacks *cbs, void *ud)
+df_client *df_client_connect_ex(const char *host, uint16_t port, const char *name,
+                                int32_t screen_w, int32_t screen_h,
+                                const df_client_callbacks *cbs, void *ud,
+                                const df_client_tls_options *tls)
 {
     if (df_socket_init() != 0) {
         return NULL;
@@ -662,6 +923,14 @@ df_client *df_client_connect(const char *host, uint16_t port, const char *name,
     c->ud = ud;
     c->clipboard_server = true;
     c->clipboard_limit = OTG_CLIPBOARD_WIRE_MAX;
+
+    if (tls_setup(c, tls) != 0 || tls_handshake(c) != 0) {
+        goto fail;
+    }
+    /* Packet helpers use the active client to select TLS or plain socket I/O.
+     * Keep it active through the initial hello and optional clipboard setup. */
+    io_client = c;
+    io_wait_interval_ms = c->cbs.tick_interval_ms > 0 ? c->cbs.tick_interval_ms : 500;
 
     /* 1. server -> hello packet: "%7s%2i%2i" (protocol name + major + minor). */
     uint8_t *hello = NULL;
@@ -704,10 +973,23 @@ df_client *df_client_connect(const char *host, uint16_t port, const char *name,
     return c;
 
 fail:
+    if (io_client == c) io_client = NULL;
+    io_wait_interval_ms = 500;
+    if (c->tls_ssl) SSL_free(c->tls_ssl);
+    if (c->tls_ctx) SSL_CTX_free(c->tls_ctx);
+    free(c->tls_fingerprint);
+    free(c->tls_fingerprint_file);
     df_close_socket(fd);
     df_socket_cleanup();
     free(c);
     return NULL;
+}
+
+df_client *df_client_connect(const char *host, uint16_t port, const char *name,
+                             int32_t screen_w, int32_t screen_h,
+                             const df_client_callbacks *cbs, void *ud)
+{
+    return df_client_connect_ex(host, port, name, screen_w, screen_h, cbs, ud, NULL);
 }
 
 /* ---- message dispatch ---------------------------------------------------- */
@@ -1053,6 +1335,20 @@ void df_client_disconnect(df_client *c)
     if (!c) {
         return;
     }
+    if (io_client == c) io_client = NULL;
+    if (c->tls_ssl) {
+        SSL_shutdown(c->tls_ssl);
+        SSL_free(c->tls_ssl);
+        c->tls_ssl = NULL;
+    }
+    if (c->tls_ctx) {
+        SSL_CTX_free(c->tls_ctx);
+        c->tls_ctx = NULL;
+    }
+    free(c->tls_fingerprint);
+    free(c->tls_fingerprint_file);
+    c->tls_fingerprint = NULL;
+    c->tls_fingerprint_file = NULL;
     if (c->fd != DF_INVALID_SOCKET) {
         df_close_socket(c->fd);
         c->fd = DF_INVALID_SOCKET;

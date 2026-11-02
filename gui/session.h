@@ -23,6 +23,9 @@ struct ConnectionOptions {
     QString phone = "android";
     QString direction = "right";
     QString mouseMode = "absolute";
+    QString tlsCertificate;
+    QString tlsFingerprint;
+    QString tlsFingerprintFile;
     QString transport = "usb";
 #ifdef Q_OS_WIN
     QString adapter; // Windows BLE only supports the default adapter.
@@ -35,6 +38,7 @@ struct ConnectionOptions {
     int width = 1080;
     int height = 1920;
     bool manageServer = true;
+    bool tls = false;
     bool audio = false;
     bool clipboard = false;
     bool autoRotate = false;
