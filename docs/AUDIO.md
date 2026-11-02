@@ -50,7 +50,10 @@ cmake --build build-audio
 Windows 使用 Visual Studio 生成器时同样启用 `-DBUILD_AUDIO=ON`，不需要额外音频库：
 WASAPI 由 Windows SDK 提供。ADB 可以是 PATH 中的 `adb.exe`，或 GUI 随包携带的版本。
 
-GUI 中勾选音频后，可在设备页的“音频/剪贴板 ADB 序列号”字段填写无线 ADB 序列号；
+GUI 在“设备配置”页提供“转发安卓音频”开关，与“共享文本”一样按设备独立保存，
+新设备默认关闭；连接期间仅锁定当前设备的开关，不影响其他空闲设备。当前 GUI 音频仍仅支持
+Linux/Windows 的 USB 键鼠连接模式，未编译音频功能时不显示开关。
+勾选音频后，可在同页的“音频/剪贴板 ADB 序列号”字段填写无线 ADB 序列号；
 USB serial 仍填写 `--usb-scan` 得到的物理 USB 序列号。该字段留空时，音频回退使用 USB serial。
 
 仓库已经内置并打包 `third_party/scrcpy/scrcpy-server-v5.0.1`，不需要联网下载。
