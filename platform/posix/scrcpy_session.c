@@ -71,10 +71,10 @@ static uint64_t auxiliary_now_ms(void)
     return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
 }
 
-static int wait_child_timeout(pid_t pid, unsigned timeout_ms)
+static int wait_child(pid_t pid)
 {
     int status;
-    uint64_t deadline = auxiliary_now_ms() + timeout_ms;
+    uint64_t deadline = auxiliary_now_ms() + 5000;
     for (;;) {
         pid_t result = waitpid(pid, &status, WNOHANG);
         if (result == pid) break;
@@ -89,25 +89,44 @@ static int wait_child_timeout(pid_t pid, unsigned timeout_ms)
     return WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : -1;
 }
 
-static int wait_child(pid_t pid)
+#ifdef OTG_HAVE_AUDIO
+static int send_full(int fd, const void *buffer, size_t size)
 {
-    return wait_child_timeout(pid, 5000);
+    const unsigned char *p = buffer;
+    while (size) {
+        int flags = 0;
+#ifdef MSG_NOSIGNAL
+        flags = MSG_NOSIGNAL;
+#endif
+        ssize_t sent = send(fd, p, size, flags);
+        if (sent < 0) {
+            if (errno == EINTR) continue;
+            return -1;
+        }
+        if (!sent) return -1;
+        p += (size_t)sent;
+        size -= (size_t)sent;
+    }
+    return 0;
 }
 
-#ifdef OTG_HAVE_AUDIO
-/* Explicit PAUSE (127), never PLAY_PAUSE (85): an already paused player must
- * stay paused. Use the existing target without reconnecting or selecting USB. */
-static int adb_pause_media(const struct scrcpy_session *session)
+/* scrcpy control_msg INJECT_KEYCODE: type, action, keycode, repeat, meta. */
+static int pause_media(struct scrcpy_session *session)
 {
-    pid_t pid = fork();
-    if (pid < 0) return -1;
-    if (pid == 0) {
-        if (dup2(STDERR_FILENO, STDOUT_FILENO) < 0) _exit(127);
-        execlp(session->adb_path, session->adb_path, "-s", session->adb_serial,
-              "shell", "input", "keyevent", "KEYCODE_MEDIA_PAUSE", (char *)NULL);
-        _exit(127);
-    }
-    return wait_child_timeout(pid, 1500);
+    static const unsigned char down[14] = {
+        0, 0, 0, 0, 0, 127, 0, 0, 0, 0, 0, 0, 0, 0
+    };
+    static const unsigned char up[14] = {
+        0, 1, 0, 0, 0, 127, 0, 0, 0, 0, 0, 0, 0, 0
+    };
+    int flags = fcntl((int)session->control_fd, F_GETFL, 0);
+    if (flags >= 0) (void)fcntl((int)session->control_fd, F_SETFL, flags & ~O_NONBLOCK);
+    if (send_full((int)session->control_fd, down, sizeof(down)) ||
+        send_full((int)session->control_fd, up, sizeof(up))) return -1;
+    /* There is no reply for INJECT_KEYCODE. Let the server consume and inject
+     * both events before the owning process tears the server down. */
+    (void)poll(NULL, 0, 50);
+    return 0;
 }
 #endif
 
@@ -250,7 +269,7 @@ static int wait_for_stream(int fd)
 }
 
 static int start_server_process(struct scrcpy_session *session, unsigned scid,
-                                const char *server_version, bool audio, bool clipboard)
+                                const char *server_version, bool audio, bool control)
 {
     char scid_arg[32];
     pid_t pid;
@@ -267,7 +286,7 @@ static int start_server_process(struct scrcpy_session *session, unsigned scid,
         execlp(session->adb_path, session->adb_path, "-s", session->adb_serial,
               "shell", "CLASSPATH=" SCRCPY_REMOTE_PATH, "app_process", "/",
               "com.genymobile.scrcpy.Server", server_version, audio ? "audio=true" : "audio=false", "video=false",
-              clipboard ? "control=true" : "control=false", "clipboard_autosync=true",
+               control ? "control=true" : "control=false", "clipboard_autosync=true",
               "cleanup=true", "tunnel_forward=true",
               "send_device_meta=false", "send_dummy_byte=true",
               "send_stream_meta=true",
@@ -329,7 +348,8 @@ int scrcpy_session_start(struct scrcpy_session *session, const char *adb_path,
     scid = (unsigned)getpid() & 0x7fffffffU;
     snprintf(remote, sizeof(remote), "localabstract:scrcpy_%08x", scid);
     snprintf(local, sizeof(local), "tcp:%d", port);
-    if (start_server_process(session, scid, server_version, audio, clipboard) != 0) goto fail;
+    bool control = audio || clipboard;
+    if (start_server_process(session, scid, server_version, audio, control) != 0) goto fail;
     session->forward_port = port;
     if (adb_forward(session->adb_path, session->adb_serial, local, remote) != 0) {
         LOG_ERR("adb forward to %s failed\n", remote);
@@ -353,11 +373,11 @@ int scrcpy_session_start(struct scrcpy_session *session, const char *adb_path,
      * control socket. Waiting for audio metadata here would deadlock. */
     unsigned char dummy;
     if (read_full((int)session->audio_fd, &dummy, 1) != 1 || dummy != 0) goto fail;
-    if (clipboard) {
+    if (control) {
         if (audio) session->control_fd = connect_local(port);
         else { session->control_fd = session->audio_fd; session->audio_fd = -1; }
-        if (session->control_fd < 0 ||
-            otg_clipboard_channel_open(&session->clipboard, session->control_fd)) goto fail;
+        if (session->control_fd < 0) goto fail;
+        if (clipboard && otg_clipboard_channel_open(&session->clipboard, session->control_fd)) goto fail;
     }
 #ifdef OTG_HAVE_AUDIO
     if (audio) {
@@ -378,11 +398,11 @@ void scrcpy_session_stop(struct scrcpy_session *session)
 {
     if (!session || !session->initialized) return;
 #ifdef OTG_HAVE_AUDIO
-    /* Pause before closing the stream restores the phone's speaker routing.
+    /* Pause through scrcpy's control socket before closing the audio stream.
      * Failed startup and clipboard-only sessions must not affect playback. */
     if (session->started && session->player) {
         session->started = false;
-        if (adb_pause_media(session))
+        if (pause_media(session))
             LOG_WARN("could not pause Android media before audio disconnect\n");
     }
 #endif
