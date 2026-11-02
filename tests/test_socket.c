@@ -18,6 +18,8 @@ static int cancel_check_count;
 static int cancel_partial(void) { return ++cancel_check_count > 1; }
 static void accepted(void *ud) { ++*(int *)ud; }
 static int tick_twice(void *ud) { return ++*(int *)ud == 2; }
+static void motion(void *ud, int16_t x, int16_t y) { (void)x; (void)y; ++*(int *)ud; }
+static void button(void *ud, uint8_t id) { (void)id; ++*(int *)ud; }
 #ifndef _WIN32
 static int cancel_stalled_read(void) { return ++cancel_check_count > 4; }
 #endif
@@ -45,6 +47,43 @@ static void check_acceptance(df_socket fd)
     CHECK(count == 1);
     CHECK(handle_message(&client, "EUNK", &msg) == -1);
     CHECK(count == 1);
+}
+
+static void check_resize(df_socket fd, df_socket peer)
+{
+    int count = 0;
+    df_client c = {0};
+    c.fd = fd; c.ud = &count; c.screen_w = 1080; c.screen_h = 1920;
+    c.cbs.on_mouse_move = c.cbs.on_mouse_rel_move = c.cbs.on_mouse_wheel = motion;
+    c.cbs.on_mouse_down = c.cbs.on_mouse_up = button;
+    CHECK(df_client_resize(&c, 1920, 1080) == 1); // Cannot race the initial handshake.
+    c.accepted = 1;
+    CHECK(df_client_resize(&c, 0, 1080) == -1 && df_client_resize(&c, 1080, 32768) == -1);
+    CHECK(df_client_resize(&c, 1080, 1920) == 0 && df_socket_wait_timeout(peer, 0) == 0);
+    CHECK(df_client_resize(&c, 1920, 1080) == 0 && c.resizing);
+    uint8_t *data = NULL;
+    CHECK(recv_packet(peer, &data) == 18 && !memcmp(data, "DINF", 4));
+    CHECK(data[8] == 7 && data[9] == 128 && data[10] == 4 && data[11] == 56);
+    free(data);
+    CHECK(df_client_resize(&c, 1080, 1920) == 1); // Serialize rapid changes until CIAK.
+    const uint8_t coords[] = {0, 100, 0, 100};
+    const char *codes[] = {"DMMV", "DMRM", "DMWM", "DMDN", "DMUP"};
+    for (unsigned i = 0; i < 5; ++i) {
+        struct msg m = {coords, sizeof(coords), 0};
+        CHECK(handle_message(&c, codes[i], &m) == 0);
+    }
+    CHECK(count == 1); // Release is never gated; stale motion/press/wheel is.
+    struct msg empty = {NULL, 0, 0};
+    CHECK(handle_message(&c, "CIAK", &empty) == 0 && !c.resizing);
+    struct msg move = {coords, sizeof(coords), 0};
+    CHECK(handle_message(&c, "DMMV", &move) == 0 && count == 2);
+    CHECK(df_client_resize(&c, 1080, 1920) == 0);
+    CHECK(recv_packet(peer, &data) == 18); free(data);
+    CHECK(handle_message(&c, "QINF", &empty) == 0);
+    CHECK(recv_packet(peer, &data) == 18 && data[8] == 4 && data[9] == 56); free(data);
+    CHECK(handle_message(&c, "CIAK", &empty) == 0 && c.resizing);
+    CHECK(handle_message(&c, "CIAK", &empty) == 0 && !c.resizing);
+    CHECK(c.accepted == 1 && df_socket_wait_timeout(peer, 0) == 0);
 }
 
 int main(void)
@@ -75,6 +114,7 @@ int main(void)
     CHECK(socket_suppress_sigpipe(fds[0]) == 0);
     CHECK(socket_suppress_sigpipe(fds[1]) == 0);
     check_acceptance(fds[0]);
+    check_resize(fds[0], fds[1]);
     df_client_set_stop_check(cancelled);
     uint8_t cancelled_byte;
     CHECK(io_read_full(fds[0], &cancelled_byte, 1) == -1);

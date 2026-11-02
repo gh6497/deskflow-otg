@@ -151,6 +151,14 @@ int main(int argc, char **argv)
                 server.nextPendingConnection()->deleteLater();
         });
     } else if (args.contains("--gui")) {
+        if (qEnvironmentVariableIsSet("OTG_TEST_DISPLAY_UPDATES")) {
+            QTimer::singleShot(250, &app, [] {
+                output("{\"event\":\"display-size\",\"width\":1920,\"height\":1080,\"virtual-width\":960,\"virtual-height\":540}\n");
+            });
+            QTimer::singleShot(350, &app, [] {
+                output("{\"event\":\"display-size\",\"width\":0,\"height\":32768,\"virtual-width\":1,\"virtual-height\":1}\n");
+            });
+        }
         if (args.contains("--clipboard")) {
             if (!args.contains("--adb") || !args.contains("--scrcpy-server") ||
                 !args.contains("--scrcpy-version")) return 11;

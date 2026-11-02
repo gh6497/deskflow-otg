@@ -424,6 +424,10 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this)
     m_clipboard->setObjectName("clipboardEnabled");
     setTranslatedProperty(m_clipboard, "toolTip", "otg.clipboard.tooltip");
     deviceForm->addRow(m_clipboard);
+    m_autoRotate = translated(new QCheckBox, "text", "otg.display.auto_rotate");
+    m_autoRotate->setObjectName("autoRotate");
+    setTranslatedProperty(m_autoRotate, "toolTip", "otg.display.auto_rotate.tooltip");
+    deviceForm->addRow(m_autoRotate);
     m_clipboardStatus = new QLabel;
     m_clipboardStatus->setObjectName("clipboardStatus");
     m_clipboardStatus->setWordWrap(true);
@@ -483,7 +487,10 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this)
     m_adbSerial->setText(settings.value("adbSerial").toString());
     m_audio->setChecked(settings.value("audio", false).toBool());
     m_clipboard->setChecked(settings.value("clipboard", false).toBool());
+    m_autoRotate->setChecked(settings.value("autoRotate", false).toBool());
+    connect(m_audio, &QCheckBox::toggled, this, [this] { updateEnabled(); });
     connect(m_clipboard, &QCheckBox::toggled, this, [this] { updateEnabled(); });
+    connect(m_autoRotate, &QCheckBox::toggled, this, [this] { updateEnabled(); });
     m_deskflow->setText(settings.value("deskflow", findDeskflow()).toString());
     m_serial->setText(settings.value("serial").toString());
     m_transport->setCurrentIndex(qMax(0, m_transport->findData(settings.value("transport", "usb"))));
@@ -603,6 +610,25 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this)
         appendLog(id.isEmpty() ? message : "[" + name + "] " + message, id);
     });
     connect(&m_connections, &ConnectionManager::usbAttached, &m_autoConnect, &UsbAutoConnect::suppressAttachment);
+    connect(&m_connections, &ConnectionManager::displaySizeChanged, this, [this](const QString &id, const QSize &size) {
+        if (m_closing || !m_records.contains(id)) return;
+        auto &profile = m_records[id];
+        profile["originalWidth"] = size.width();
+        profile["originalHeight"] = size.height();
+        if (m_pendingProfiles.contains(id)) m_pendingProfiles[id] = profile;
+        if (id == m_selectedId) {
+            m_width->setValue(size.width());
+            m_height->setValue(size.height());
+        }
+        // Keep remembered USB configurations in the same orientation, including
+        // phones rotating while another device is selected or the window hidden.
+        const auto serial = profile.value("serial").toString();
+        if (profile.value("transport", "usb") == "usb" && m_profiles.contains(serial)) {
+            m_pendingProfile = profile;
+            rememberDevice();
+        }
+        persistDevices();
+    });
     connect(&m_connections, &ConnectionManager::changed, this, [this](const QString &id) {
         m_sessionStatus = true;
         m_status->setText(m_connections.status(m_selectedId));
@@ -735,6 +761,7 @@ void MainWindow::addDevice()
     profile["adbSerial"] = "";
     profile["audio"] = false;
     profile["clipboard"] = false;
+    profile["autoRotate"] = false;
     profile["transport"] = "usb";
     profile["blePeer"] = "";
     profile["bleIsolate"] = false;
@@ -878,6 +905,8 @@ ConnectionOptions MainWindow::connectionOptions(const QVariantMap &profile) cons
 #ifdef OTG_GUI_HAVE_CLIPBOARD
     options.clipboard = profile.value("clipboard", false).toBool();
 #endif
+    options.autoRotate = options.transport == "usb" &&
+        (options.audio || options.clipboard) && profile.value("autoRotate", false).toBool();
     options.mouseMode = options.transport == "ble" ? "absolute" : profile.value("mouseMode", "absolute").toString();
     options.blePeer = profile.value("blePeer").toString();
 #ifdef Q_OS_LINUX
@@ -941,6 +970,7 @@ void MainWindow::updateEnabled()
     m_deviceForm->setRowVisible(m_audio, false);
 #endif
     m_deviceForm->setRowVisible(m_mouseMode, !ble);
+    m_deviceForm->setRowVisible(m_autoRotate, !ble);
     m_autoConnect.setReady(!m_closing);
     if (m_closing)
         m_autoConnect.setEnabled(false);
@@ -973,6 +1003,7 @@ void MainWindow::updateEnabled()
     m_refresh->setEnabled(!ble);
     m_adb->setEnabled(adbFeatures);
     m_audio->setEnabled(!ble);
+    m_autoRotate->setEnabled(!ble && (m_audio->isChecked() || m_clipboard->isChecked()) && idle);
     m_autoConnectEnabled->setEnabled(!ble);
     m_adapter->setEnabled(linuxBle);
     m_blePeer->setEnabled(ble);
@@ -1153,7 +1184,7 @@ QVariantMap MainWindow::deviceProfile() const
              {"phone", m_phone->text()}, {"host", m_host->text()}, {"port", m_port->value()},
              {"manageServer", m_manage->isChecked()}, {"direction", m_direction->currentData()},
               {"mouseMode", m_mouseMode->currentData()}, {"audio", m_audio->isChecked()},
-              {"clipboard", m_clipboard->isChecked()}};
+               {"clipboard", m_clipboard->isChecked()}, {"autoRotate", m_autoRotate->isChecked()}};
 }
 
 void MainWindow::applyDeviceProfile(const QVariantMap &profile)
@@ -1178,6 +1209,8 @@ void MainWindow::applyDeviceProfile(const QVariantMap &profile)
     m_audio->setChecked(profile.value("audio", false).toBool());
     const QSignalBlocker clipboardBlocker(m_clipboard);
     m_clipboard->setChecked(profile.value("clipboard", false).toBool());
+    const QSignalBlocker autoRotateBlocker(m_autoRotate);
+    m_autoRotate->setChecked(profile.value("autoRotate", false).toBool());
     m_autoConnectEnabled->setChecked(profile.value("autoConnect", false).toBool());
     m_direction->setCurrentIndex(qMax(0, m_direction->findData(profile.value("direction", "right"))));
     m_mouseMode->setCurrentIndex(qMax(0, m_mouseMode->findData(profile.value("mouseMode", "absolute"))));
@@ -1215,6 +1248,7 @@ void MainWindow::saveSettings()
     settings.setValue("adb", m_adb->text());
     settings.setValue("audio", m_audio->isChecked());
     settings.setValue("clipboard", m_clipboard->isChecked());
+    settings.setValue("autoRotate", m_autoRotate->isChecked());
     settings.setValue("deskflow", m_deskflow->text());
     settings.setValue("serial", m_serial->text());
     settings.setValue("adbSerial", m_adbSerial->text());

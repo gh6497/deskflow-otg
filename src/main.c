@@ -25,6 +25,7 @@
 #include "deskflow_client.h"
 #include "usb_scan.h"
 #include "scrcpy_session.h"
+#include "adb_display.h"
 #ifdef OTG_HAVE_BLE
 #include "ble_hid.h"
 #include "ble_supervisor.h"
@@ -235,7 +236,8 @@ static void usage(const char *prog)
             "      --height H        Virtual screen height, 1..32767 (default %d)\n"
              "      --mouse-mode MODE absolute (default) or relative (compatibility)\n"
              "      --audio             Forward Android output audio through ADB (Linux/Windows)\n"
-             "      --clipboard         Share Deskflow text clipboard through ADB/scrcpy\n"
+              "      --clipboard         Share Deskflow text clipboard through ADB/scrcpy\n"
+              "      --auto-rotate       Follow Android rotation and update screen size (requires ADB feature)\n"
               "      --adb PATH          ADB executable for audio/clipboard (default adb)\n"
               "      --adb-serial SERIAL ADB transport (default USB serial; may be host:port)\n"
               "      --scrcpy-server PATH  Matching scrcpy-server jar/apk for ADB features\n"
@@ -270,6 +272,9 @@ static int parse_screen_size(const char *arg)
 struct app_state {
     struct otg_bridge bridge;
     struct scrcpy_session scrcpy;
+    struct otg_display_monitor *display;
+    struct otg_display_size display_size;
+    bool display_pending;
     const char *serial;
     void *transport_owner;
     bool resident_session;
@@ -463,6 +468,37 @@ static int cb_clipboard_tick(void *ud)
     return 0;
 }
 
+static int display_poll(app_state *s)
+{
+    struct otg_display_size size;
+    if (otg_display_monitor_poll(s->display, &size)) {
+        s->display_size = size;
+        s->display_pending = true;
+    }
+    if (!s->display_pending || !s->client) return 0;
+    size = s->display_size;
+    int result = df_client_resize(s->client, size.virtual_width, size.virtual_height);
+    if (result < 0) return 1;
+    if (result > 0) return 0;
+    (void)otg_bridge_resize(&s->bridge, size.virtual_width, size.virtual_height);
+    s->display_pending = false;
+    fprintf(stderr, "INFO: display size updated: %dx%d (virtual %dx%d); sessions retained\n",
+            size.width, size.height, size.virtual_width, size.virtual_height);
+    if (g_gui) {
+        printf("{\"event\":\"display-size\",\"width\":%d,\"height\":%d,\"virtual-width\":%d,\"virtual-height\":%d}\n",
+               size.width, size.height, size.virtual_width, size.virtual_height);
+        fflush(stdout);
+    }
+    return 0;
+}
+
+static int cb_tick(void *ud)
+{
+    app_state *s = ud;
+    int result = s->transport_owner ? cb_idle(s) : cb_clipboard_tick(s);
+    return result || display_poll(s);
+}
+
 static void destroy_transport_owner(app_state *s)
 {
 #ifdef OTG_HAVE_BLE
@@ -578,6 +614,7 @@ int main(int argc, char **argv)
     enum otg_mouse_mode mouse_mode = OTG_MOUSE_ABSOLUTE;
     int audio = 0;
     int clipboard = 0;
+    int auto_rotate = 0;
 
     if (argc == 2 && strcmp(argv[1], "--usb-scan") == 0) {
         return otg_usb_scan();
@@ -662,6 +699,8 @@ int main(int argc, char **argv)
             audio = 1;
         } else if (strcmp(a, "--clipboard") == 0) {
             clipboard = 1;
+        } else if (strcmp(a, "--auto-rotate") == 0) {
+            auto_rotate = 1;
         } else if (strcmp(a, "--adb") == 0 && i + 1 < argc) {
             adb_path = argv[++i];
         } else if (strcmp(a, "--adb-serial") == 0 && i + 1 < argc) {
@@ -687,6 +726,10 @@ int main(int argc, char **argv)
     }
     if ((audio || clipboard) && (!(adb_serial && *adb_serial) && !(serial && *serial))) {
         fprintf(stderr, "ERROR: ADB features require --adb-serial or --serial\n");
+        return 2;
+    }
+    if (auto_rotate && !(audio || clipboard)) {
+        fprintf(stderr, "ERROR: --auto-rotate requires --audio or --clipboard\n");
         return 2;
     }
     if ((audio || clipboard) && (!scrcpy_server || !*scrcpy_server || !scrcpy_version || !*scrcpy_version)) {
@@ -903,8 +946,8 @@ int main(int argc, char **argv)
         .on_mouse_wheel = cb_mouse_wheel,
         .on_disconnected = cb_disconnected,
         .on_idle = cb_idle,
-        .on_tick = state.transport_owner ? cb_idle : clipboard ? cb_clipboard_tick : NULL,
-        .tick_interval_ms = state.transport_owner ? 1 : clipboard ? 5 : 0,
+        .on_tick = state.transport_owner || audio || clipboard ? cb_tick : NULL,
+        .tick_interval_ms = state.transport_owner ? 1 : clipboard ? 5 : audio ? 50 : 0,
         .on_clipboard = cb_clipboard,
         .on_clipboard_enabled = clipboard ? cb_clipboard_enabled : NULL,
     };
@@ -938,7 +981,13 @@ int main(int argc, char **argv)
             if (!clipboard) { ret = 1; break; } /* Preserve audio-only startup semantics. */
             clipboard_failed(&state);
         }
-        df_client *client=df_client_connect(host,(uint16_t)port,name,width,height,&cbs,&state);
+        if (auto_rotate && scrcpy_session_started(&state.scrcpy)) {
+            state.display = otg_display_monitor_create(adb_path, adb_serial ? adb_serial : serial,
+                                                       state.bridge.screen_w, state.bridge.screen_h);
+            if (!state.display) fprintf(stderr, "WARN: automatic display size monitoring unavailable\n");
+        }
+        state.display_pending = false;
+        df_client *client=df_client_connect(host,(uint16_t)port,name,state.bridge.screen_w,state.bridge.screen_h,&cbs,&state);
         if(client) {
             state.client = client;
             df_client_enable_clipboard(client, clipboard && !state.clipboard_error);
@@ -948,6 +997,8 @@ int main(int argc, char **argv)
             state.held_key_count = 0;
             df_client_disconnect(client);
         } else ret=1;
+        otg_display_monitor_destroy(state.display); state.display = NULL;
+        state.display_pending = false;
         scrcpy_session_stop(&state.scrcpy);
         if(!state.transport_owner || g_stop) break;
 #ifdef OTG_HAVE_BLE_WIN

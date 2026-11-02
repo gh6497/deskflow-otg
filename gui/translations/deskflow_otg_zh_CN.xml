@@ -80,6 +80,8 @@
   <message id="otg.path.adb_hint"><source>Use bundled ADB by default, or select an external executable</source><translation>优先使用随包提供的 ADB，也可指定外部程序</translation></message>
   <message id="otg.audio.enabled"><source>Forward Android audio (requires ADB; Linux/Windows)</source><translation>转发安卓音频（需要 ADB；Linux/Windows）</translation></message>
   <message id="otg.clipboard.enabled"><source>Share text clipboard through Deskflow (requires ADB)</source><translation>通过 Deskflow 共享文本剪贴板（需要 ADB）</translation></message>
+  <message id="otg.display.auto_rotate"><source>Follow screen rotation (dynamic size update)</source><translation>跟随屏幕旋转（动态更新尺寸）</translation></message>
+  <message id="otg.display.auto_rotate.tooltip"><source>When audio or clipboard uses ADB, update the Deskflow screen size after Android rotates. Disabled by default.</source><translation>音频或剪贴板使用 ADB 时，安卓旋转屏幕后动态更新 Deskflow 屏幕尺寸，默认关闭。</translation></message>
   <message id="otg.clipboard.tooltip"><source>Shares UTF-8 text using Deskflow ownership and screen-switch rules, including background copies. Sensitive copied text may reach other devices. Uses the same ADB/scrcpy session as audio; images and files are not shared.</source><translation>按 Deskflow 所有权和切屏规则共享文本，包含后台设备的复制。敏感文字可能传到其他设备。与音频共用 ADB/scrcpy 会话；不共享图片和文件。</translation></message>
   <message id="otg.clipboard.off"><source>Clipboard: off</source><translation>剪贴板：已关闭</translation></message>
   <message id="otg.clipboard.waiting"><source>Clipboard: waiting for ADB and Deskflow</source><translation>剪贴板：等待 ADB 与 Deskflow</translation></message>

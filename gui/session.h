@@ -6,6 +6,7 @@
 #include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QSize>
 #include "deskflow_server.h"
 class QJsonObject;
 
@@ -36,6 +37,7 @@ struct ConnectionOptions {
     bool manageServer = true;
     bool audio = false;
     bool clipboard = false;
+    bool autoRotate = false;
 };
 
 // Only owned bridge/server processes are stopped. A resident BLE service is
@@ -64,6 +66,7 @@ signals:
     void usbAttached(const QString &id, const QString &serial);
     void bleProviderChanged();
     void clipboardChanged();
+    void displaySizeChanged(const QSize &size);
 
 private:
     void setState(State state, const char *id, const QString &detail = {});

@@ -101,6 +101,43 @@ int main(void)
     cb_key_down(&s, 'a', 0);
     CHECK(s.clipboard_error && !s.held_key_count && !s.bridge.hid_mods);
     CHECK(s.bridge.active && s.bridge.mouse_buttons == 1);
+    /* A live resize retains clipboard ACK/key barriers and the same sockets.
+     * Only the drag is released, never re-register HID or restart scrcpy. */
+    s.clipboard_error = false;
+    CHECK(!otg_clipboard_channel_open(&s.scrcpy.clipboard, fds[0]));
+    df_client_enable_clipboard(&c, true);
+    cb_clipboard(&s, "rotation", 8);
+    cb_key_down(&s, 'v', 0);
+    CHECK(s.held_key_count == 1);
+    int df[2]; CHECK(!socketpair(AF_UNIX, SOCK_STREAM, 0, df));
+    CHECK(!socket_suppress_sigpipe(df[0]));
+    c.fd = df[0]; c.accepted = 1; c.screen_w = 1080; c.screen_h = 1920;
+    s.scrcpy.started = true;
+    s.display_size = (struct otg_display_size){1920, 1080, 1920, 1080};
+    s.display_pending = true;
+    CHECK(!display_poll(&s) && !s.display_pending && c.resizing);
+    CHECK(s.bridge.active && !s.bridge.mouse_buttons && s.bridge.screen_w == 1920 && s.bridge.screen_h == 1080);
+    CHECK(s.scrcpy.started && s.scrcpy.clipboard.ready && s.held_key_count == 1);
+    uint8_t *info = NULL;
+    CHECK(recv_packet(df[1], &info) == 18 && !memcmp(info, "DINF", 4)); free(info);
+    s.display_size = (struct otg_display_size){1080, 1920, 1080, 1920};
+    s.display_pending = true;
+    CHECK(!display_poll(&s) && s.display_pending && s.bridge.screen_w == 1920);
+    struct msg empty = {NULL, 0, 0};
+    CHECK(!handle_message(&c, "CIAK", &empty));
+    CHECK(!display_poll(&s) && !s.display_pending && s.bridge.screen_w == 1080);
+    CHECK(recv_packet(df[1], &info) == 18); free(info);
+    CHECK(!handle_message(&c, "CIAK", &empty));
+    clipboard_poll(&s); sent(fds[1], 8);
+    before = keyboard_count;
+    ack(fds[1], &s.scrcpy.clipboard); clipboard_poll(&s);
+    CHECK(!s.held_key_count && keyboard_count == before + 1 && s.scrcpy.started);
+    close(df[1]);
+    s.display_pending = true;
+    s.display_size = (struct otg_display_size){1920, 1080, 1920, 1080};
+    CHECK(display_poll(&s) == 1 && s.bridge.screen_w == 1080); // Failed DINF cannot desynchronize HID.
+    close(df[0]);
+    otg_clipboard_channel_close(&s.scrcpy.clipboard);
     close(fds[0]); close(fds[1]);
     clipboard_clear(&c); otg_bridge_close(&s.bridge);
     puts("PASS: main/HID ACK barrier, ordered releases, leave cancellation and failure isolation");

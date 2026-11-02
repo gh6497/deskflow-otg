@@ -65,6 +65,7 @@ int df_client_run(df_client *c, volatile sig_atomic_t *stop)
     return 0;
 }
 void df_client_disconnect(df_client *c) { (void)c; trace("tcp-closed"); }
+int df_client_resize(df_client *c, int32_t w, int32_t h) { (void)c; (void)w; (void)h; return 0; }
 void df_client_enable_clipboard(df_client *c, bool enabled) { (void)c; (void)enabled; }
 bool df_client_clipboard_enabled(const df_client *c) { (void)c; return false; }
 int df_client_set_clipboard(df_client *c, const char *text, size_t size)

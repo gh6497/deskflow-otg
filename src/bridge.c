@@ -515,6 +515,21 @@ void otg_bridge_reset_input(struct otg_bridge *b)
     }
 }
 
+bool otg_bridge_resize(struct otg_bridge *b, int32_t width, int32_t height)
+{
+    if (width < 1 || width > INT16_MAX || height < 1 || height > INT16_MAX) return false;
+    if (width == b->screen_w && height == b->screen_h) return true;
+    b->mouse_buttons = 0;
+    b->residual_hscroll = b->residual_vscroll = 0;
+    if (b->active) send_mouse_state(b, 0, 0); /* Release at the old drag location. */
+    b->mouse_x = b->screen_w > 1 ? (int32_t)((int64_t)b->mouse_x * (width - 1) / (b->screen_w - 1)) : 0;
+    b->mouse_y = b->screen_h > 1 ? (int32_t)((int64_t)b->mouse_y * (height - 1) / (b->screen_h - 1)) : 0;
+    b->screen_w = width; b->screen_h = height;
+    if (b->mouse_mode == OTG_MOUSE_RELATIVE) b->have_mouse_pos = false;
+    if (b->active) send_mouse_state(b, 0, 0);
+    return true;
+}
+
 void otg_bridge_enter(struct otg_bridge *b, int16_t x, int16_t y, uint16_t mask)
 {
     /* Seed modifier state from the server's reported active-modifier mask;

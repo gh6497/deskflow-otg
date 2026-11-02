@@ -90,6 +90,41 @@ static QStringList placeholders(const QString &text)
 class GuiTest : public QObject {
     Q_OBJECT
 private slots:
+    void dynamicDisplay_data()
+    {
+        QTest::addColumn<bool>("audio"); QTest::addColumn<bool>("clipboard");
+        QTest::newRow("audio") << true << false;
+        QTest::newRow("clipboard") << false << true;
+        QTest::newRow("both") << true << true;
+        QTest::newRow("no-adb-ignores-event") << false << false;
+    }
+    void dynamicDisplay()
+    {
+        QFETCH(bool, audio); QFETCH(bool, clipboard);
+        qputenv("OTG_TEST_DISPLAY_UPDATES", "1");
+        const auto restore = qScopeGuard([] { qunsetenv("OTG_TEST_DISPLAY_UPDATES"); });
+        ConnectionOptions options;
+        options.manageServer = false; options.bridge = options.adb = peerPath();
+        options.serial = "rotation-phone";
+        options.scrcpyServer = "fake-server"; options.scrcpyVersion = "5.0.1";
+        options.audio = audio; options.clipboard = clipboard; options.autoRotate = audio || clipboard;
+        Session session;
+        QSignalSpy sizes(&session, &Session::displaySizeChanged);
+        QSignalSpy states(&session, &Session::changed);
+        session.start(options);
+        QTRY_COMPARE(session.state(), Session::State::Connected);
+        if (audio || clipboard) {
+            QTRY_COMPARE(sizes.size(), 1);
+            QCOMPARE(sizes.first().first().toSize(), QSize(1920, 1080));
+        }
+        QTest::qWait(450);
+        QCOMPARE(sizes.size(), audio || clipboard ? 1 : 0);
+        QCOMPARE(states.size(), 2); // Starting, Connected; never disconnected/reconnected.
+        QVERIFY(!session.hasFailure());
+        session.stop();
+        QTRY_COMPARE(session.state(), Session::State::Idle);
+        QCOMPARE(sizes.size(), audio || clipboard ? 1 : 0);
+    }
     void clipboardSession_data()
     {
         QTest::addColumn<bool>("audio");

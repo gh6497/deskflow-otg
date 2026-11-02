@@ -27,6 +27,7 @@ signals:
     void changed(const QString &id);
     void log(const QString &id, const QString &message);
     void usbAttached(const QString &id, const QString &serial);
+    void displaySizeChanged(const QString &id, const QSize &size);
 private:
     struct Entry {
         Session *session = nullptr;

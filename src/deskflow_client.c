@@ -114,6 +114,8 @@ struct df_client {
     df_client_callbacks cbs;
     void *ud;
     int accepted;
+    unsigned info_pending;
+    bool resizing;
     bool clipboard_requested, clipboard_server, clipboard_active, clipboard_owned;
     uint32_t clipboard_seq;
     size_t clipboard_limit;
@@ -710,14 +712,28 @@ fail:
 
 /* ---- message dispatch ---------------------------------------------------- */
 
+int df_client_resize(df_client *c, int32_t width, int32_t height)
+{
+    if (!c || width < 1 || width > INT16_MAX || height < 1 || height > INT16_MAX) return -1;
+    if (!c->accepted || c->info_pending) return 1;
+    if (width == c->screen_w && height == c->screen_h) return 0;
+    if (send_dinfo(c->fd, width, height)) return -1;
+    c->screen_w = width; c->screen_h = height;
+    ++c->info_pending; c->resizing = true;
+    return 0;
+}
+
 static int handle_message(df_client *c, const char code[4], struct msg *m)
 {
     uint16_t a, b, ctr;
 
     if (memcmp(code, "QINF", 4) == 0) {
+        ++c->info_pending;
         return send_dinfo(c->fd, c->screen_w, c->screen_h);
     }
     if (memcmp(code, "CIAK", 4) == 0) {
+        if (c->info_pending) --c->info_pending;
+        if (!c->info_pending) c->resizing = false;
         return 0;
     }
     if (memcmp(code, "DSOP", 4) == 0) {
@@ -839,7 +855,7 @@ static int handle_message(df_client *c, const char code[4], struct msg *m)
         if (msg_read_u8(m, &btn) != 0) {
             return -1;
         }
-        if (c->cbs.on_mouse_down) {
+        if (!c->resizing && c->cbs.on_mouse_down) {
             c->cbs.on_mouse_down(c->ud, btn);
         }
         return 0;
@@ -858,7 +874,7 @@ static int handle_message(df_client *c, const char code[4], struct msg *m)
         if (msg_read_u16(m, &a) != 0 || msg_read_u16(m, &b) != 0) {
             return -1;
         }
-        if (c->cbs.on_mouse_move) {
+        if (!c->resizing && c->cbs.on_mouse_move) {
             c->cbs.on_mouse_move(c->ud, (int16_t)a, (int16_t)b);
         }
         return 0;
@@ -867,7 +883,7 @@ static int handle_message(df_client *c, const char code[4], struct msg *m)
         if (msg_read_u16(m, &a) != 0 || msg_read_u16(m, &b) != 0) {
             return -1;
         }
-        if (c->cbs.on_mouse_rel_move) {
+        if (!c->resizing && c->cbs.on_mouse_rel_move) {
             c->cbs.on_mouse_rel_move(c->ud, (int16_t)a, (int16_t)b);
         }
         return 0;
@@ -876,7 +892,7 @@ static int handle_message(df_client *c, const char code[4], struct msg *m)
         if (msg_read_u16(m, &a) != 0 || msg_read_u16(m, &b) != 0) {
             return -1;
         }
-        if (c->cbs.on_mouse_wheel) {
+        if (!c->resizing && c->cbs.on_mouse_wheel) {
             c->cbs.on_mouse_wheel(c->ud, (int16_t)a, (int16_t)b);
         }
         return 0;

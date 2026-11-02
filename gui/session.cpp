@@ -279,6 +279,7 @@ void Session::launchBridge()
         args << "--adb" << m_options.adb << "--scrcpy-server" << m_options.scrcpyServer
              << "--scrcpy-version" << m_options.scrcpyVersion;
         if (!m_options.adbSerial.isEmpty()) args << "--adb-serial" << m_options.adbSerial;
+        if (m_options.autoRotate) args << "--auto-rotate";
     }
     if (ble) {
         m_deadline.stop(); // Pairing and desktop authentication are user paced.
@@ -362,6 +363,16 @@ void Session::readBleEvents()
 void Session::handleBridgeEvent(const QJsonObject &object)
 {
     const auto event = object.value("event").toString();
+    if (event == "display-size" && m_state == State::Connected && m_options.autoRotate) {
+        const int width = object.value("width").toInt(), height = object.value("height").toInt();
+        const int vw = object.value("virtual-width").toInt(), vh = object.value("virtual-height").toInt();
+        if (width > 0 && width <= 32767 && height > 0 && height <= 32767 &&
+            vw > 0 && vw <= 32767 && vh > 0 && vh <= 32767) {
+            m_options.width = vw; m_options.height = vh;
+            emit displaySizeChanged(QSize(width, height));
+        }
+        return;
+    }
     if (m_options.clipboard && (event == "clipboard-ready" || event == "clipboard-unavailable" ||
                                event == "clipboard-disabled")) {
         m_clipboardStatusId = event == "clipboard-ready" ? "otg.clipboard.ready" :

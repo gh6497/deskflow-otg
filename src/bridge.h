@@ -110,4 +110,8 @@ bool otg_bridge_ready(const struct otg_bridge *b);
 /* Drop input state without reopening HID; best-effort release if still ready. */
 void otg_bridge_reset_input(struct otg_bridge *b);
 
+/* Release any drag before switching coordinate spaces; preserve keyboard and
+ * transport registration. The caller gates old Deskflow motion until CIAK. */
+bool otg_bridge_resize(struct otg_bridge *b, int32_t width, int32_t height);
+
 #endif /* DESKFLOW_OTG_BRIDGE_H */
