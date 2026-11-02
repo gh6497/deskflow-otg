@@ -270,6 +270,11 @@ for f in platform/linux/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only
   显式无线 ADB `host:port` / `[IPv6]:port` 由 `src/adb_target.c` 共享启动策略先查状态，
   未在线时执行一次 `adb connect` 并核对 `get-state=device` 后才 push；平台子进程命令均有界。
   不自动 pair、不回退 USB、不 disconnect/kill-server；USB/mDNS 序列号不走自动连接。
+  音频成功启动后的断开，先对同一 ADB 目标执行 `shell cmd media_session dispatch pause`，
+  最多等待2秒再继续清理；只暂停，不使用 play-pause 切换。该路径由 MediaSessionService
+  分发，不依赖 SDK 注入的 INJECT_EVENTS 权限；命令返回成功不等于播放器已确认暂停。
+  纯音频不创建 control socket；辅助 server 使用 `power_on=false`，避免自动 SDK 电源键注入。
+  不要恢复 `adb shell input` 或 scrcpy INJECT_KEYCODE 作为暂停路径；它们仍受手机安全调试开关限制。
   HID 前以 SET_CLIPBOARD ACK 做键盘屏障，最多64条/2秒；失败松开键盘但保留指针与键鼠连接，
   切出不向下次切屏重放。后台手机复制可能覆盖当前共享剪贴板；不记录正文。
   Windows 空闲 provider 的附加功能参数固定，修改前显式停止服务，不能擅自注销 GATT。

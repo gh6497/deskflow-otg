@@ -4,9 +4,10 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 
 FAKE_ADB = r'''
-import os, pathlib, signal, socket, struct, sys, time
+import os, pathlib, select, signal, socket, struct, sys, time
 args = sys.argv[1:]
 root = pathlib.Path(os.environ['OTG_TEST_AUX_ROOT'])
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
@@ -49,10 +50,28 @@ if args[0] == 'forward':
         (root / 'port').write_text(args[1].split(':')[1])
     sys.exit(0)
 assert args[0] == 'shell'
+if args[1:] == ['cmd', 'media_session', 'dispatch', 'pause']:
+    assert (root / 'port').exists() and (root / 'stream-open').exists()
+    assert not (root / 'stream-closed').exists()
+    (root / 'pause-requested').touch()
+    pause = os.environ.get('OTG_TEST_AUX_PAUSE', '')
+    # The command must finish before the audio/control streams are closed.
+    time.sleep(.15)
+    assert not (root / 'stream-closed').exists()
+    if pause == 'timeout':
+        time.sleep(30)
+    if pause == 'fail':
+        print('fake media session failure')
+        sys.exit(1)
+    (root / 'pause').touch()
+    print('fake media session pause dispatched')
+    sys.exit(0)
 assert 'video=false' in args and 'send_device_meta=false' in args and 'send_dummy_byte=true' in args
+assert 'power_on=false' in args
 audio = 'audio=true' in args
 control = 'control=true' in args
 clipboard = os.environ.get('OTG_TEST_AUX_CLIPBOARD') == '1'
+assert control == clipboard
 deadline = time.monotonic() + 5
 while not (root / 'port').exists():
     assert time.monotonic() < deadline
@@ -62,6 +81,7 @@ listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 listener.bind(('127.0.0.1', int((root / 'port').read_text())))
 listener.listen(2)
 first, _ = listener.accept()
+(root / 'stream-open').touch()
 first.sendall(b'\0')  # Sent before accepting the second socket, like scrcpy.
 if audio and control:
     channel, _ = listener.accept()
@@ -78,38 +98,39 @@ def read(n):
             return None
         out += part
     return out
-if control:
-    if clipboard:
-        header = read(14)
-        assert header[0] == 9 and header[9] == 0
-        assert read(struct.unpack('>I', header[10:14])[0]) == b'computer'
-        channel.sendall(b'\x01' + header[1:9] + b'\x00\x00\x00\x00\x07android')
-    pause_count = 0
-    while True:
-        first = channel.recv(1)
-        if not first:
-            break
-        message = first + read(13)
-        assert message[0] == 0
-        assert message[2:6] == b'\x00\x00\x00\x7f'
-        assert message[1] in (0, 1)
-        pause_count += 1
-    if audio:
-        assert pause_count == 2
-        (root / 'pause').touch()
+if clipboard:
+    header = read(14)
+    assert header[0] == 9 and header[9] == 0
+    assert read(struct.unpack('>I', header[10:14])[0]) == b'computer'
+    channel.sendall(b'\x01' + header[1:9] + b'\x00\x00\x00\x00\x07android')
+# No INJECT_KEYCODE bytes may be written to the shared control stream.
+streams = list({first, channel})
+while streams:
+    readable, _, _ = select.select(streams, [], [], 5)
+    assert readable
+    for stream in readable:
+        assert stream.recv(1) == b''
+        (root / 'stream-closed').touch()
+        streams.remove(stream)
+if audio:
+    assert (root / 'pause-requested').exists()
+    if not os.environ.get('OTG_TEST_AUX_PAUSE'):
+        assert (root / 'pause').exists()
+(root / 'server-done').touch()
 '''
 
 helper, audio_enabled = sys.argv[1:]
 modes = ["clipboard", "fail"]
 if audio_enabled == "ON":
     modes += ["audio", "both", "audio-fail"]
-cases = [(mode, "", "FAKE_PHONE", "") for mode in modes]
+cases: list[tuple[str, str, str, str]] = [(mode, "", "FAKE_PHONE", "") for mode in modes]
 for scenario in ("online", "connect", "connect-fail", "offline", "unauthorized", "timeout"):
     cases.append(("clipboard", scenario, "192.0.2.1:40195", ""))
 cases.append(("clipboard", "connect", "[::1]:5555", ""))
 if audio_enabled == "ON":
     cases += [(mode, "connect", "phone.local:5555", "") for mode in ("audio", "both")]
-    cases += [("audio", "", "FAKE_PHONE", pause) for pause in ("fail", "timeout")]
+    cases += [(mode, "", "FAKE_PHONE", pause)
+              for mode in ("audio", "both") for pause in ("fail", "timeout")]
 for mode, scenario, target, pause in cases:
     with tempfile.TemporaryDirectory(prefix="otg-aux-") as directory:
         root = Path(directory)
@@ -120,13 +141,23 @@ for mode, scenario, target, pause in cases:
         env["OTG_TEST_AUX_TARGET"] = target
         env["OTG_TEST_AUX_WIRELESS"] = scenario
         env["OTG_TEST_AUX_CLIPBOARD"] = "1" if mode in ("clipboard", "both") else "0"
+        env["OTG_TEST_AUX_PAUSE"] = pause
         wireless_failure = scenario in ("connect-fail", "offline", "unauthorized", "timeout")
         if wireless_failure:
             env["OTG_TEST_AUX_EXPECT_FAIL"] = "1"
         if mode in ("fail", "audio-fail"):
             env["OTG_TEST_AUX_FAIL"] = "1"
+        start = time.monotonic()
         completed = subprocess.run([helper, str(adb), mode, target], env=env,
                                    check=True, timeout=15, capture_output=True, text=True)
+        elapsed = time.monotonic() - start
+        if pause:
+            assert 'media-session pause command failed or timed out' in completed.stderr, completed
+        if pause == 'timeout':
+            assert 1.8 <= elapsed < 5, elapsed
+        if pause == 'fail':
+            assert 'fake media session failure' in completed.stderr, completed
+        assert 'fake media session' not in completed.stdout, completed
         if wireless_failure:
             assert 'wireless debugging connection port' in completed.stderr, completed
         if scenario == 'connect':
@@ -147,10 +178,17 @@ for mode, scenario, target, pause in cases:
         assert sum(line.startswith("push ") for line in calls) == (not wireless_failure), calls
         started = mode not in ("fail", "audio-fail") and not wireless_failure
         paused = started and mode in ("audio", "both")
-        assert sum(line.startswith("shell ") for line in calls) == started, calls
-        assert (root / "pause").exists() == paused, calls
+        assert sum(line.startswith("shell CLASSPATH=") for line in calls) == started, calls
+        pause_command = 'shell cmd media_session dispatch pause'
+        assert calls.count(pause_command) == paused, calls
+        assert (root / "pause-requested").exists() == paused, calls
+        assert (root / "pause").exists() == (paused and not pause), calls
+        assert (root / "server-done").exists() == started, calls
         assert sum(line.startswith("forward tcp:") for line in calls) == started, calls
         assert sum(line.startswith("forward --remove ") for line in calls) == started, calls
+        if paused:
+            assert calls.index(pause_command) < next(i for i, line in enumerate(calls)
+                                                    if line.startswith('forward --remove ')), calls
         assert not any(line.startswith(('disconnect', 'pair ', 'kill-server')) for line in calls), calls
         assert not (root / "port").exists(), calls
 print("PASS: fake ADB lifecycle modes:", ", ".join(modes),

@@ -71,10 +71,10 @@ static uint64_t auxiliary_now_ms(void)
     return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
 }
 
-static int wait_child(pid_t pid)
+static int wait_child_timeout(pid_t pid, unsigned timeout_ms)
 {
     int status;
-    uint64_t deadline = auxiliary_now_ms() + 5000;
+    uint64_t deadline = auxiliary_now_ms() + timeout_ms;
     for (;;) {
         pid_t result = waitpid(pid, &status, WNOHANG);
         if (result == pid) break;
@@ -89,44 +89,30 @@ static int wait_child(pid_t pid)
     return WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : -1;
 }
 
-#ifdef OTG_HAVE_AUDIO
-static int send_full(int fd, const void *buffer, size_t size)
+static int wait_child(pid_t pid)
 {
-    const unsigned char *p = buffer;
-    while (size) {
-        int flags = 0;
-#ifdef MSG_NOSIGNAL
-        flags = MSG_NOSIGNAL;
-#endif
-        ssize_t sent = send(fd, p, size, flags);
-        if (sent < 0) {
-            if (errno == EINTR) continue;
-            return -1;
-        }
-        if (!sent) return -1;
-        p += (size_t)sent;
-        size -= (size_t)sent;
-    }
-    return 0;
+    return wait_child_timeout(pid, 5000);
 }
 
-/* scrcpy control_msg INJECT_KEYCODE: type, action, keycode, repeat, meta. */
+#ifdef OTG_HAVE_AUDIO
+/* Android MediaShellCommand dispatches to MediaSessionService, rather than
+ * InputManager (adb shell input / scrcpy INJECT_KEYCODE require INJECT_EVENTS).
+ * Explicit pause is idempotent; never use the play-pause toggle here. */
 static int pause_media(struct scrcpy_session *session)
 {
-    static const unsigned char down[14] = {
-        0, 0, 0, 0, 0, 127, 0, 0, 0, 0, 0, 0, 0, 0
-    };
-    static const unsigned char up[14] = {
-        0, 1, 0, 0, 0, 127, 0, 0, 0, 0, 0, 0, 0, 0
-    };
-    int flags = fcntl((int)session->control_fd, F_GETFL, 0);
-    if (flags >= 0) (void)fcntl((int)session->control_fd, F_SETFL, flags & ~O_NONBLOCK);
-    if (send_full((int)session->control_fd, down, sizeof(down)) ||
-        send_full((int)session->control_fd, up, sizeof(up))) return -1;
-    /* There is no reply for INJECT_KEYCODE. Let the server consume and inject
-     * both events before the owning process tears the server down. */
-    (void)poll(NULL, 0, 50);
-    return 0;
+    pid_t pid = fork();
+    if (pid < 0) return -1;
+    if (pid == 0) {
+        int null_fd = open("/dev/null", O_RDONLY);
+        if (null_fd < 0 || dup2(null_fd, STDIN_FILENO) < 0 ||
+            dup2(STDERR_FILENO, STDOUT_FILENO) < 0) _exit(127);
+        if (null_fd > STDERR_FILENO) close(null_fd);
+        execlp(session->adb_path, session->adb_path, "-s", session->adb_serial,
+               "shell", "cmd", "media_session", "dispatch", "pause", (char *)NULL);
+        _exit(127);
+    }
+    /* Leave time for the rest of GUI's bounded shutdown, even if ADB hangs. */
+    return wait_child_timeout(pid, 2000);
 }
 #endif
 
@@ -286,8 +272,8 @@ static int start_server_process(struct scrcpy_session *session, unsigned scid,
         execlp(session->adb_path, session->adb_path, "-s", session->adb_serial,
               "shell", "CLASSPATH=" SCRCPY_REMOTE_PATH, "app_process", "/",
               "com.genymobile.scrcpy.Server", server_version, audio ? "audio=true" : "audio=false", "video=false",
-               control ? "control=true" : "control=false", "clipboard_autosync=true",
-              "cleanup=true", "tunnel_forward=true",
+              control ? "control=true" : "control=false", "clipboard_autosync=true",
+              "power_on=false", "cleanup=true", "tunnel_forward=true",
               "send_device_meta=false", "send_dummy_byte=true",
               "send_stream_meta=true",
               "send_frame_meta=true", "audio_codec=raw",
@@ -348,7 +334,7 @@ int scrcpy_session_start(struct scrcpy_session *session, const char *adb_path,
     scid = (unsigned)getpid() & 0x7fffffffU;
     snprintf(remote, sizeof(remote), "localabstract:scrcpy_%08x", scid);
     snprintf(local, sizeof(local), "tcp:%d", port);
-    bool control = audio || clipboard;
+    bool control = clipboard;
     if (start_server_process(session, scid, server_version, audio, control) != 0) goto fail;
     session->forward_port = port;
     if (adb_forward(session->adb_path, session->adb_serial, local, remote) != 0) {
@@ -398,12 +384,14 @@ void scrcpy_session_stop(struct scrcpy_session *session)
 {
     if (!session || !session->initialized) return;
 #ifdef OTG_HAVE_AUDIO
-    /* Pause through scrcpy's control socket before closing the audio stream.
+    /* Dispatch media pause before closing the audio stream.
      * Failed startup and clipboard-only sessions must not affect playback. */
     if (session->started && session->player) {
         session->started = false;
         if (pause_media(session))
-            LOG_WARN("could not pause Android media before audio disconnect\n");
+            LOG_WARN("Android media-session pause command failed or timed out; continuing audio cleanup\n");
+        else
+            LOG_INFO("Android media-session pause request sent\n");
     }
 #endif
     otg_clipboard_channel_close(&session->clipboard);

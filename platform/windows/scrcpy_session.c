@@ -56,34 +56,45 @@ static int run_adb(const char *adb, const char *serial, const char *command_line
 }
 
 #ifdef OTG_HAVE_AUDIO
-static int send_full(SOCKET socket, const void *buffer, size_t size)
-{
-    const char *p = buffer;
-    while (size) {
-        int sent = send(socket, p, (int)size, 0);
-        if (sent <= 0) return -1;
-        p += sent; size -= (size_t)sent;
-    }
-    return 0;
-}
-
-/* scrcpy control_msg INJECT_KEYCODE: type, action, keycode, repeat, meta. */
+/* Android MediaShellCommand uses MediaSessionService, not InputManager's
+ * INJECT_EVENTS path. Explicit pause must never toggle paused media to play. */
 static int pause_media(struct scrcpy_session *s)
 {
-    static const unsigned char down[14] = {
-        0, 0, 0, 0, 0, 127, 0, 0, 0, 0, 0, 0, 0, 0
-    };
-    static const unsigned char up[14] = {
-        0, 1, 0, 0, 0, 127, 0, 0, 0, 0, 0, 0, 0, 0
-    };
-    SOCKET socket = (SOCKET)s->control_fd;
-    u_long blocking = 0;
-    (void)ioctlsocket(socket, FIONBIO, &blocking);
-    if (send_full(socket, down, sizeof(down)) || send_full(socket, up, sizeof(up))) return -1;
-    /* There is no reply for INJECT_KEYCODE; let the server consume both
-     * events before the owning process tears it down. */
-    Sleep(50);
-    return 0;
+    char command[2048];
+    SECURITY_ATTRIBUTES security = { sizeof(security), NULL, TRUE };
+    STARTUPINFOA si = { sizeof(si) };
+    PROCESS_INFORMATION pi = {0};
+    HANDLE null_io = INVALID_HANDLE_VALUE, log = NULL;
+    HANDLE error_output = GetStdHandle(STD_ERROR_HANDLE);
+    DWORD code = 1;
+    int result = -1;
+    int length = snprintf(command, sizeof(command),
+        "\"%s\" -s \"%s\" shell cmd media_session dispatch pause", s->adb_path, s->adb_serial);
+    if (length < 0 || (size_t)length >= sizeof(command)) return -1;
+    null_io = CreateFileA("NUL", GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, &security, OPEN_EXISTING, 0, NULL);
+    if (null_io == INVALID_HANDLE_VALUE) return -1;
+    /* Never let ADB consume GUI stdin or write non-JSON output to stdout. */
+    if (error_output && error_output != INVALID_HANDLE_VALUE &&
+        !DuplicateHandle(GetCurrentProcess(), error_output,
+            GetCurrentProcess(), &log, 0, TRUE, DUPLICATE_SAME_ACCESS)) log = NULL;
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = null_io;
+    si.hStdOutput = si.hStdError = log ? log : null_io;
+    if (!CreateProcessA(NULL, command, NULL, NULL, TRUE, CREATE_NO_WINDOW,
+                        NULL, NULL, &si, &pi)) goto done;
+    if (WaitForSingleObject(pi.hProcess, 2000) == WAIT_OBJECT_0) {
+        if (GetExitCodeProcess(pi.hProcess, &code) && code == 0) result = 0;
+    } else {
+        TerminateProcess(pi.hProcess, 1);
+        (void)WaitForSingleObject(pi.hProcess, 1000);
+    }
+done:
+    if (pi.hThread) CloseHandle(pi.hThread);
+    if (pi.hProcess) CloseHandle(pi.hProcess);
+    if (log) CloseHandle(log);
+    CloseHandle(null_io);
+    return result;
 }
 #endif
 
@@ -182,7 +193,7 @@ int scrcpy_session_start(struct scrcpy_session *s, const char *adb, const char *
       if (run_adb(adb, adb_serial, forward_cmd) != 0) goto fail; }
     s->forward_port = (intptr_t)port;
     char cmd[2048];
-    snprintf(cmd, sizeof(cmd), "\"%s\" -s \"%s\" shell CLASSPATH=%s app_process / com.genymobile.scrcpy.Server %s audio=%s video=false control=%s clipboard_autosync=true cleanup=true tunnel_forward=true send_device_meta=false send_dummy_byte=true send_stream_meta=true send_frame_meta=true audio_codec=raw audio_source=output scid=%08x", adb, adb_serial, REMOTE_PATH, version, audio ? "true" : "false", (audio || clipboard) ? "true" : "false", GetCurrentProcessId() & 0x7fffffffU);
+    snprintf(cmd, sizeof(cmd), "\"%s\" -s \"%s\" shell CLASSPATH=%s app_process / com.genymobile.scrcpy.Server %s audio=%s video=false control=%s clipboard_autosync=true power_on=false cleanup=true tunnel_forward=true send_device_meta=false send_dummy_byte=true send_stream_meta=true send_frame_meta=true audio_codec=raw audio_source=output scid=%08x", adb, adb_serial, REMOTE_PATH, version, audio ? "true" : "false", clipboard ? "true" : "false", GetCurrentProcessId() & 0x7fffffffU);
     if (!CreateProcessA(NULL, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) goto fail;
     s->server_pid = (intptr_t)pi.hProcess; CloseHandle(pi.hThread);
     sock = INVALID_SOCKET;
@@ -204,7 +215,7 @@ int scrcpy_session_start(struct scrcpy_session *s, const char *adb, const char *
     }
     if (sock == INVALID_SOCKET) goto fail;
     s->audio_fd = (intptr_t)sock;
-    if (audio || clipboard) {
+    if (clipboard) {
         if (audio) s->control_fd = (intptr_t)connect_local(port);
         else { s->control_fd = s->audio_fd; s->audio_fd = (intptr_t)INVALID_SOCKET; }
         if (s->control_fd == (intptr_t)INVALID_SOCKET) goto fail;
@@ -226,11 +237,13 @@ fail: scrcpy_session_stop(s); return -1;
 void scrcpy_session_stop(struct scrcpy_session *s) {
     if (!s || !s->initialized) return;
 #ifdef OTG_HAVE_AUDIO
-    /* Pause through scrcpy's control socket before restoring speaker routing. */
+    /* Dispatch media pause before restoring speaker routing. */
     if (s->started && s->player) {
         s->started = false;
         if (pause_media(s))
-            LOG_WARN("could not pause Android media before audio disconnect\n");
+            LOG_WARN("Android media-session pause command failed or timed out; continuing audio cleanup\n");
+        else
+            LOG_INFO("Android media-session pause request sent\n");
     }
 #endif
     otg_clipboard_channel_close(&s->clipboard);
