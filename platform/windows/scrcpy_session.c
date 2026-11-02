@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "scrcpy_session.h"
+#include "adb_target.h"
 
 #if defined(OTG_HAVE_AUDIO) || defined(OTG_HAVE_CLIPBOARD)
 #define WIN32_LEAN_AND_MEAN
@@ -54,6 +55,55 @@ static int run_adb(const char *adb, const char *serial, const char *command_line
     return code == 0 ? 0 : -1;
 }
 
+static int adb_target_command(void *ud, const char *target, bool connect) {
+    const char *adb = ud;
+    char command[2048], output[512];
+    SECURITY_ATTRIBUTES security = { sizeof(security), NULL, TRUE };
+    HANDLE reader = NULL, writer = NULL, null_input = INVALID_HANDLE_VALUE;
+    STARTUPINFOA si = { sizeof(si) };
+    PROCESS_INFORMATION pi = {0};
+    DWORD code = 1, available = 0, size = 0;
+    int result = -1;
+    int length = connect
+        ? snprintf(command, sizeof(command), "\"%s\" connect \"%s\"", adb, target)
+        : snprintf(command, sizeof(command), "\"%s\" -s \"%s\" get-state", adb, target);
+    if (length < 0 || (size_t)length >= sizeof(command)) return -1;
+    if (!CreatePipe(&reader, &writer, &security, 0)) return -1;
+    if (!SetHandleInformation(reader, HANDLE_FLAG_INHERIT, 0)) goto done;
+    null_input = CreateFileA("NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                             &security, OPEN_EXISTING, 0, NULL);
+    if (null_input == INVALID_HANDLE_VALUE) goto done;
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = null_input;
+    si.hStdOutput = si.hStdError = writer;
+    if (!CreateProcessA(NULL, command, NULL, NULL, TRUE, CREATE_NO_WINDOW,
+                        NULL, NULL, &si, &pi)) goto done;
+    CloseHandle(writer); writer = NULL;
+    if (WaitForSingleObject(pi.hProcess, 5000) == WAIT_OBJECT_0) {
+        GetExitCodeProcess(pi.hProcess, &code);
+        result = code == 0 ? 0 : -1;
+    } else {
+        TerminateProcess(pi.hProcess, 1);
+        (void)WaitForSingleObject(pi.hProcess, 1000);
+    }
+    /* Both commands have tiny replies. Bound reads even if a descendant keeps
+     * the pipe open; oversized replies cannot be mistaken for state=device. */
+    if (PeekNamedPipe(reader, NULL, 0, NULL, &available, NULL) && available) {
+        DWORD count = available < sizeof(output) - 1 ? available : (DWORD)sizeof(output) - 1;
+        if (!ReadFile(reader, output, count, &size, NULL)) size = 0;
+    }
+    if (connect) {
+        if (size) { output[size] = '\0'; LOG_INFO("adb connect: %s\n", output); }
+    } else if (!otg_adb_state_is_device(output, size)) result = -1;
+done:
+    if (pi.hThread) CloseHandle(pi.hThread);
+    if (pi.hProcess) CloseHandle(pi.hProcess);
+    if (null_input != INVALID_HANDLE_VALUE) CloseHandle(null_input);
+    if (writer) CloseHandle(writer);
+    if (reader) CloseHandle(reader);
+    return result;
+}
+
 static SOCKET connect_local(unsigned port) {
     SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     struct sockaddr_in a = {0};
@@ -91,6 +141,7 @@ int scrcpy_session_start(struct scrcpy_session *s, const char *adb, const char *
     if (!s->adb_path || !s->adb_serial || !s->server_path) goto fail;
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) goto fail;
     s->winsock_ready = true;
+    if (otg_adb_target_prepare(adb_serial, adb_target_command, s->adb_path)) goto fail;
     snprintf(push, sizeof(push), "push \"%s\" \"%s\"", server, REMOTE_PATH);
     if (run_adb(adb, adb_serial, push) != 0) goto fail;
     snprintf(remote, sizeof(remote), "localabstract:scrcpy_%08x", GetCurrentProcessId() & 0x7fffffffU);

@@ -47,6 +47,11 @@ USB 序列号；Windows 可填写已连接的无线 ADB 地址，避免 ADB 与 
 BLE 模式必须显式填写**同一台手机**的 ADB 序列号，桥接不能仅凭 BLE MAC 自动推导 ADB 身份。
 此时仍不进行 ADB/USB 设备扫描。
 
+显式填写无线 `主机:端口` 时，会在推送 server 前检查目标是否在线，必要时自动执行
+`adb connect` 并确认 `get-state` 为 `device`；Linux、Windows、macOS 行为一致。
+需先完成手机要求的无线调试配对，填写连接端口而非配对端口。不会自动配对或改用其他设备，
+会话退出不主动断开共享的无线 ADB 连接；USB 序列号保持原有流程。
+
 Windows GUI 的保留 BLE provider 固定附加功能参数。修改剪贴板开关、ADB 目标/路径或 server
 后，需先显式停止空闲蓝牙服务再连接；不会自动注销 GATT。停止服务可能影响订阅缓存连续性。
 
