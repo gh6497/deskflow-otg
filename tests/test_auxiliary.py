@@ -47,6 +47,13 @@ if args[0] == 'forward':
         assert args[2].startswith('localabstract:scrcpy_')
         (root / 'port').write_text(args[1].split(':')[1])
     sys.exit(0)
+if args == ['shell', 'input', 'keyevent', 'KEYCODE_MEDIA_PAUSE']:
+    # Stop must still target this session and precede tunnel removal.
+    assert (root / 'port').exists()
+    pause = os.environ.get('OTG_TEST_AUX_PAUSE', '')
+    if pause == 'timeout':
+        time.sleep(30)
+    sys.exit(1 if pause == 'fail' else 0)
 assert args[0] == 'shell'
 assert 'video=false' in args and 'send_device_meta=false' in args and 'send_dummy_byte=true' in args
 audio = 'audio=true' in args
@@ -88,14 +95,15 @@ while channel.recv(1):
 helper, audio_enabled = sys.argv[1:]
 modes = ["clipboard", "fail"]
 if audio_enabled == "ON":
-    modes += ["audio", "both"]
-cases = [(mode, "", "FAKE_PHONE") for mode in modes]
+    modes += ["audio", "both", "audio-fail"]
+cases = [(mode, "", "FAKE_PHONE", "") for mode in modes]
 for scenario in ("online", "connect", "connect-fail", "offline", "unauthorized", "timeout"):
-    cases.append(("clipboard", scenario, "192.0.2.1:40195"))
-cases.append(("clipboard", "connect", "[::1]:5555"))
+    cases.append(("clipboard", scenario, "192.0.2.1:40195", ""))
+cases.append(("clipboard", "connect", "[::1]:5555", ""))
 if audio_enabled == "ON":
-    cases += [(mode, "connect", "phone.local:5555") for mode in ("audio", "both")]
-for mode, scenario, target in cases:
+    cases += [(mode, "connect", "phone.local:5555", "") for mode in ("audio", "both")]
+    cases += [("audio", "", "FAKE_PHONE", pause) for pause in ("fail", "timeout")]
+for mode, scenario, target, pause in cases:
     with tempfile.TemporaryDirectory(prefix="otg-aux-") as directory:
         root = Path(directory)
         adb = root / "fake-adb"
@@ -104,10 +112,11 @@ for mode, scenario, target in cases:
         env = dict(os.environ, OTG_TEST_AUX_ROOT=directory)
         env["OTG_TEST_AUX_TARGET"] = target
         env["OTG_TEST_AUX_WIRELESS"] = scenario
+        env["OTG_TEST_AUX_PAUSE"] = pause
         wireless_failure = scenario in ("connect-fail", "offline", "unauthorized", "timeout")
         if wireless_failure:
             env["OTG_TEST_AUX_EXPECT_FAIL"] = "1"
-        if mode == "fail":
+        if mode in ("fail", "audio-fail"):
             env["OTG_TEST_AUX_FAIL"] = "1"
         completed = subprocess.run([helper, str(adb), mode, target], env=env,
                                    check=True, timeout=15, capture_output=True, text=True)
@@ -129,10 +138,19 @@ for mode, scenario, target in cases:
             assert not any(line.startswith(('get-state', 'connect ')) for line in calls), calls
         assert sum(line.startswith('connect ') for line in calls) == bool(scenario and scenario != 'online'), calls
         assert sum(line.startswith("push ") for line in calls) == (not wireless_failure), calls
-        started = mode != "fail" and not wireless_failure
-        assert sum(line.startswith("shell ") for line in calls) == started, calls
+        started = mode not in ("fail", "audio-fail") and not wireless_failure
+        paused = started and mode in ("audio", "both")
+        pause_command = 'shell input keyevent KEYCODE_MEDIA_PAUSE'
+        assert calls.count(pause_command) == paused, calls
+        assert sum(line.startswith("shell ") for line in calls) == started + paused, calls
+        if paused:
+            assert calls.index(pause_command) < next(i for i, line in enumerate(calls)
+                                                   if line.startswith('forward --remove ')), calls
+        if pause:
+            assert 'could not pause Android media' in completed.stderr, completed
         assert sum(line.startswith("forward tcp:") for line in calls) == started, calls
         assert sum(line.startswith("forward --remove ") for line in calls) == started, calls
         assert not any(line.startswith(('disconnect', 'pair ', 'kill-server')) for line in calls), calls
         assert not (root / "port").exists(), calls
-print("PASS: fake ADB lifecycle modes:", ", ".join(modes), "and wireless readiness/connect/failure/timeout")
+print("PASS: fake ADB lifecycle modes:", ", ".join(modes),
+      "wireless readiness and audio pause/cleanup/failure/timeout")

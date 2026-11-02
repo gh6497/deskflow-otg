@@ -71,10 +71,10 @@ static uint64_t auxiliary_now_ms(void)
     return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
 }
 
-static int wait_child(pid_t pid)
+static int wait_child_timeout(pid_t pid, unsigned timeout_ms)
 {
     int status;
-    uint64_t deadline = auxiliary_now_ms() + 5000;
+    uint64_t deadline = auxiliary_now_ms() + timeout_ms;
     for (;;) {
         pid_t result = waitpid(pid, &status, WNOHANG);
         if (result == pid) break;
@@ -88,6 +88,28 @@ static int wait_child(pid_t pid)
     }
     return WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : -1;
 }
+
+static int wait_child(pid_t pid)
+{
+    return wait_child_timeout(pid, 5000);
+}
+
+#ifdef OTG_HAVE_AUDIO
+/* Explicit PAUSE (127), never PLAY_PAUSE (85): an already paused player must
+ * stay paused. Use the existing target without reconnecting or selecting USB. */
+static int adb_pause_media(const struct scrcpy_session *session)
+{
+    pid_t pid = fork();
+    if (pid < 0) return -1;
+    if (pid == 0) {
+        if (dup2(STDERR_FILENO, STDOUT_FILENO) < 0) _exit(127);
+        execlp(session->adb_path, session->adb_path, "-s", session->adb_serial,
+              "shell", "input", "keyevent", "KEYCODE_MEDIA_PAUSE", (char *)NULL);
+        _exit(127);
+    }
+    return wait_child_timeout(pid, 1500);
+}
+#endif
 
 static int adb_target_command(void *ud, const char *target, bool connect)
 {
@@ -355,6 +377,15 @@ fail:
 void scrcpy_session_stop(struct scrcpy_session *session)
 {
     if (!session || !session->initialized) return;
+#ifdef OTG_HAVE_AUDIO
+    /* Pause before closing the stream restores the phone's speaker routing.
+     * Failed startup and clipboard-only sessions must not affect playback. */
+    if (session->started && session->player) {
+        session->started = false;
+        if (adb_pause_media(session))
+            LOG_WARN("could not pause Android media before audio disconnect\n");
+    }
+#endif
     otg_clipboard_channel_close(&session->clipboard);
     if (session->control_fd >= 0) {
         shutdown((int)session->control_fd, SHUT_RDWR);
