@@ -27,6 +27,9 @@ static const GUID OTG_IID_IAudioRenderClient =
 #define MAX_FRAME (1024U * 2U * 2U)
 #define CODEC_RAW UINT32_C(0x00726177)
 #define LOG_ERR(...) fprintf(stderr, "ERROR: " __VA_ARGS__)
+#define LOG_HR(operation, hr) \
+    fprintf(stderr, "ERROR: %s failed (HRESULT=0x%08lx)\n", \
+            operation, (unsigned long)(hr))
 
 struct audio_player {
     SOCKET socket_fd;
@@ -48,24 +51,31 @@ static int read_full(SOCKET s, void *out, size_t n) {
     return 1;
 }
 
-static int open_wasapi(IAudioClient **client, IAudioRenderClient **render) {
+static int open_wasapi(IAudioClient **client, IAudioRenderClient **render,
+                       UINT32 *buffer_size) {
     IMMDeviceEnumerator *enumerator = NULL; IMMDevice *device = NULL;
     WAVEFORMATEX format = { WAVE_FORMAT_PCM, 2, 48000, 192000, 4, 16, 0 };
     REFERENCE_TIME duration = 1000000;
     HRESULT hr = CoCreateInstance(&OTG_CLSID_MMDeviceEnumerator, NULL,
                                   CLSCTX_ALL, &OTG_IID_IMMDeviceEnumerator,
                                   (void **)&enumerator);
-    if (FAILED(hr)) return -1;
+    if (FAILED(hr)) { LOG_HR("CoCreateInstance", hr); return -1; }
     hr = enumerator->lpVtbl->GetDefaultAudioEndpoint(enumerator, eRender,
                                                       eConsole, &device);
     if (SUCCEEDED(hr)) hr = device->lpVtbl->Activate(device, &OTG_IID_IAudioClient,
                                                       CLSCTX_ALL, NULL,
                                                       (void **)client);
     if (SUCCEEDED(hr)) hr = (*client)->lpVtbl->Initialize(*client,
-        AUDCLNT_SHAREMODE_SHARED, 0, duration, 0, &format, NULL);
+        AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
+        duration, 0, &format, NULL);
+    if (FAILED(hr)) LOG_HR("IAudioClient::Initialize", hr);
+    if (SUCCEEDED(hr)) hr = (*client)->lpVtbl->GetBufferSize(*client, buffer_size);
+    if (FAILED(hr)) LOG_HR("IAudioClient::GetBufferSize", hr);
     if (SUCCEEDED(hr)) hr = (*client)->lpVtbl->GetService(*client,
         &OTG_IID_IAudioRenderClient, (void **)render);
+    if (FAILED(hr)) LOG_HR("IAudioClient::GetService", hr);
     if (SUCCEEDED(hr)) hr = (*client)->lpVtbl->Start(*client);
+    if (FAILED(hr)) LOG_HR("IAudioClient::Start", hr);
     if (device) device->lpVtbl->Release(device);
     if (enumerator) enumerator->lpVtbl->Release(enumerator);
     if (FAILED(hr)) {
@@ -77,18 +87,20 @@ static int open_wasapi(IAudioClient **client, IAudioRenderClient **render) {
 }
 
 static int play_pcm(IAudioClient *client, IAudioRenderClient *render,
-                    const unsigned char *data, size_t size) {
+                    UINT32 buffer_size, const unsigned char *data, size_t size) {
     size_t frames = size / 4;
     while (frames) {
         UINT32 available = 0;
         BYTE *buffer = NULL;
         if (FAILED(client->lpVtbl->GetCurrentPadding(client, &available))) return -1;
-        UINT32 capacity = 48000U - available;
+        UINT32 capacity = buffer_size > available ? buffer_size - available : 0;
         if (!capacity) { Sleep(2); continue; }
         UINT32 count = (UINT32)(frames < capacity ? frames : capacity);
-        if (FAILED(render->lpVtbl->GetBuffer(render, count, &buffer))) return -1;
+        HRESULT hr = render->lpVtbl->GetBuffer(render, count, &buffer);
+        if (FAILED(hr)) { LOG_HR("IAudioRenderClient::GetBuffer", hr); return -1; }
         memcpy(buffer, data, (size_t)count * 4);
-        if (FAILED(render->lpVtbl->ReleaseBuffer(render, count, 0))) return -1;
+        hr = render->lpVtbl->ReleaseBuffer(render, count, 0);
+        if (FAILED(hr)) { LOG_HR("IAudioRenderClient::ReleaseBuffer", hr); return -1; }
         data += (size_t)count * 4; frames -= count;
     }
     return 0;
@@ -97,20 +109,29 @@ static int play_pcm(IAudioClient *client, IAudioRenderClient *render,
 static DWORD WINAPI audio_thread(void *arg) {
     struct audio_player *player = arg; unsigned char codec[4], h[HEADER_SIZE];
     unsigned char *payload = NULL; IAudioClient *client = NULL; IAudioRenderClient *render = NULL;
-    CoInitializeEx(NULL, COINIT_MULTITHREADED);
-    if (read_full(player->socket_fd, codec, 4) != 1 || be32(codec) != CODEC_RAW) goto done;
-    if (open_wasapi(&client, &render) != 0) { LOG_ERR("could not open WASAPI playback device\n"); goto done; }
+    UINT32 buffer_size = 0; HRESULT com_hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    int com_initialized = SUCCEEDED(com_hr);
+    if (FAILED(com_hr)) { LOG_HR("CoInitializeEx", com_hr); goto done; }
+    if (read_full(player->socket_fd, codec, 4) != 1) goto done;
+    if (be32(codec) == 0) { LOG_ERR("Android did not provide an audio stream\n"); goto done; }
+    if (be32(codec) != CODEC_RAW) {
+        LOG_ERR("scrcpy audio codec is not raw PCM; use audio_codec=raw\n"); goto done;
+    }
+    if (open_wasapi(&client, &render, &buffer_size) != 0) {
+        LOG_ERR("could not open WASAPI playback device\n"); goto done;
+    }
     while (read_full(player->socket_fd, h, sizeof(h)) == 1) {
         uint32_t n = be32(h + 8);
         if (!n || n > MAX_FRAME) break;
         unsigned char *p = realloc(payload, n); if (!p) break; payload = p;
-        if (read_full(player->socket_fd, payload, n) != 1 || play_pcm(client, render, payload, n) != 0) break;
+        if (read_full(player->socket_fd, payload, n) != 1 ||
+            play_pcm(client, render, buffer_size, payload, n) != 0) break;
     }
 done:
     free(payload);
     if (client) { client->lpVtbl->Stop(client); client->lpVtbl->Release(client); }
     if (render) render->lpVtbl->Release(render);
-    CoUninitialize();
+    if (com_initialized) CoUninitialize();
     return 0;
 }
 
