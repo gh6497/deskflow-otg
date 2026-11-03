@@ -4,12 +4,14 @@
 #include "i18n.h"
 #include "build_version.h"
 #include "screen_layout_preview.h"
+#include "tls_certificate.h"
 
 #include <QCheckBox>
 #include <QAction>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDateTime>
+#include <QDir>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -22,6 +24,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QScrollArea>
 #include <QSignalBlocker>
 #include <QSpinBox>
@@ -33,6 +36,18 @@
 #include <QTabWidget>
 #include <QUuid>
 #include <algorithm>
+
+namespace {
+
+QString defaultTlsClientCertificate()
+{
+    auto directory = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    if (directory.isEmpty())
+        directory = QDir::homePath() + QStringLiteral("/.config/deskflow-otg");
+    return QDir(directory).filePath(QStringLiteral("tls/client.pem"));
+}
+
+} // namespace
 
 void MainWindow::setTranslatedProperty(QObject *object, const char *property, const char *id)
 {
@@ -411,10 +426,38 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this)
     m_tls = translated(new QCheckBox, "text", "otg.tls.enabled");
     m_tls->setObjectName("tlsEnabled");
     serverForm->addRow(m_tls);
+    auto *clientCertificateRow = new QWidget;
+    auto *clientCertificateLayout = new QHBoxLayout(clientCertificateRow);
+    clientCertificateLayout->setContentsMargins(0, 0, 0, 0);
     m_tlsCert = new QLineEdit;
     m_tlsCert->setObjectName("tlsCertificate");
     setTranslatedProperty(m_tlsCert, "placeholderText", "otg.tls.certificate_hint");
-    addTranslatedRow(serverForm, "otg.tls.certificate", m_tlsCert);
+    auto *browseClientCertificate = translated(new QPushButton, "text", "otg.action.browse");
+    browseClientCertificate->setObjectName("tlsBrowseCertificate");
+    clientCertificateLayout->addWidget(m_tlsCert, 1);
+    clientCertificateLayout->addWidget(browseClientCertificate);
+    addTranslatedRow(serverForm, "otg.tls.certificate", clientCertificateRow);
+    connect(browseClientCertificate, &QPushButton::clicked, this, [this] {
+        const auto path = QFileDialog::getSaveFileName(this, qtTrId("otg.tls.select_certificate"),
+                                                       m_tlsCert->text(),
+                                                       QStringLiteral("PEM (*.pem);;All files (*)"), nullptr,
+                                                       QFileDialog::DontConfirmOverwrite);
+        if (!path.isEmpty())
+            m_tlsCert->setText(path);
+    });
+    auto *tlsKeyRow = new QWidget;
+    auto *tlsKeyLayout = new QHBoxLayout(tlsKeyRow);
+    tlsKeyLayout->setContentsMargins(0, 0, 0, 0);
+    m_tlsKeyLength = new QComboBox;
+    m_tlsKeyLength->setObjectName("tlsKeyLength");
+    m_tlsKeyLength->addItem(QStringLiteral("2048"), 2048);
+    m_tlsKeyLength->addItem(QStringLiteral("4096"), 4096);
+    m_tlsRegenerateCertificate = translated(new QPushButton, "text", "otg.tls.regenerate");
+    m_tlsRegenerateCertificate->setObjectName("tlsRegenerateCertificate");
+    tlsKeyLayout->addWidget(m_tlsKeyLength);
+    tlsKeyLayout->addWidget(m_tlsRegenerateCertificate);
+    tlsKeyLayout->addStretch();
+    addTranslatedRow(serverForm, "otg.tls.key_length", tlsKeyRow);
     m_tlsFingerprint = new QLineEdit;
     m_tlsFingerprint->setObjectName("tlsFingerprint");
     setTranslatedProperty(m_tlsFingerprint, "placeholderText", "otg.tls.fingerprint_hint");
@@ -424,6 +467,7 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this)
     setTranslatedProperty(m_tlsFingerprintFile, "placeholderText", "otg.tls.fingerprint_file_hint");
     addTranslatedRow(serverForm, "otg.tls.fingerprint_file", m_tlsFingerprintFile);
     connect(m_tls, &QCheckBox::toggled, this, [this] { updateEnabled(); });
+    connect(m_tlsRegenerateCertificate, &QPushButton::clicked, this, &MainWindow::regenerateTlsCertificate);
     m_sharedBox = new QWidget;
     auto *sharedLayout = new QVBoxLayout(m_sharedBox);
     sharedLayout->addWidget(serverBox);
@@ -522,6 +566,7 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this)
     m_port->setValue(settings.value("port", 24800).toInt());
     m_manage->setChecked(settings.value("manageServer", true).toBool());
     m_tls->setChecked(settings.value("tls", false).toBool());
+    m_tlsKeyLength->setCurrentIndex(qMax(0, m_tlsKeyLength->findData(settings.value("tlsKeyLength", 2048))));
     m_tlsCert->setText(settings.value("tlsCertificate").toString());
     m_tlsFingerprint->setText(settings.value("tlsFingerprint").toString());
     m_tlsFingerprintFile->setText(settings.value("tlsFingerprintFile").toString());
@@ -1018,7 +1063,9 @@ void MainWindow::updateEnabled()
                           !(ble ? m_blePeer : m_serial)->text().trimmed().isEmpty());
     m_disconnect->setEnabled(!idle && m_connections.state(m_selectedId) != Session::State::Stopping);
     m_host->setEnabled(!m_manage->isChecked());
-    m_tlsCert->setEnabled(m_tls->isChecked());
+    m_tlsCert->parentWidget()->setEnabled(m_tls->isChecked());
+    m_tlsKeyLength->setEnabled(m_tls->isChecked());
+    m_tlsRegenerateCertificate->setEnabled(m_tls->isChecked());
     m_tlsFingerprint->setEnabled(m_tls->isChecked());
     m_tlsFingerprintFile->setEnabled(m_tls->isChecked());
     m_direction->setEnabled(sharedIdle && m_manage->isChecked());
@@ -1054,6 +1101,38 @@ void MainWindow::updateVirtualSize()
     const auto size = virtualScreenSize();
     m_virtualSize->setText(QString("%1 × %2%3").arg(size.width()).arg(size.height()).arg(
         absolute ? qtTrId("otg.size.absolute_note") : qtTrId("otg.size.relative_note")));
+}
+
+void MainWindow::regenerateTlsCertificate()
+{
+    if (!m_tls->isChecked() || m_closing || m_connections.busy() ||
+        m_connections.serverState() != DeskflowServer::State::Idle)
+        return;
+    QString path = m_tlsCert->text().trimmed();
+    if (path.isEmpty())
+        path = defaultTlsClientCertificate();
+
+    if (QFileInfo::exists(path) &&
+        QMessageBox::question(this, qtTrId("otg.tls.regenerate_confirm_title"),
+                              qtTrId("otg.tls.regenerate_confirm").arg(path),
+                              QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+        return;
+
+    // The confirmation runs a nested event loop; auto-connect may have started.
+    if (m_closing || m_connections.busy() || m_connections.serverState() != DeskflowServer::State::Idle)
+        return;
+    QString error;
+    if (!TlsCertificate::generate(path, m_tlsKeyLength->currentData().toInt(), &error)) {
+        QMessageBox::critical(this, qtTrId("otg.tls.generate_failed_title"),
+                              qtTrId("otg.tls.generate_failed").arg(error));
+        return;
+    }
+
+    m_tlsCert->setText(path);
+    saveSettings();
+    const auto newFingerprint = TlsCertificate::fingerprint(path);
+    QMessageBox::information(this, qtTrId("otg.tls.generated_title"),
+                             qtTrId("otg.tls.generated").arg(newFingerprint));
 }
 
 void MainWindow::refreshDevices()
@@ -1302,6 +1381,7 @@ void MainWindow::saveSettings()
     settings.setValue("port", m_port->value());
     settings.setValue("manageServer", m_manage->isChecked());
     settings.setValue("tls", m_tls->isChecked());
+    settings.setValue("tlsKeyLength", m_tlsKeyLength->currentData());
     settings.setValue("tlsCertificate", m_tlsCert->text());
     settings.setValue("tlsFingerprint", m_tlsFingerprint->text());
     settings.setValue("tlsFingerprintFile", m_tlsFingerprintFile->text());

@@ -151,6 +151,13 @@ int main(int argc, char **argv)
                 server.nextPendingConnection()->deleteLater();
         });
     } else if (args.contains("--gui")) {
+        const auto clientPem = qEnvironmentVariable("OTG_TEST_CLIENT_PEM");
+        if (!clientPem.isEmpty() &&
+            (!args.contains("--tls") || !args.contains("--tls-cert") ||
+             args.value(args.indexOf("--tls-cert") + 1) != clientPem ||
+             !args.contains("--tls-fingerprint") ||
+             args.value(args.indexOf("--tls-fingerprint") + 1) != QString(64, 'a') ||
+             args.contains("--tls-fingerprint-file"))) return 12;
         if (qEnvironmentVariableIsSet("OTG_TEST_DISPLAY_UPDATES")) {
             QTimer::singleShot(250, &app, [] {
                 output("{\"event\":\"display-size\",\"width\":1920,\"height\":1080,\"virtual-width\":960,\"virtual-height\":540}\n");

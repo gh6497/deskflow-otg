@@ -229,6 +229,9 @@ Windows 空闲 BLE provider 也保留其目标占用。Linux 常驻服务仍遵�
 安装 Qt 6.8+，`CMAKE_PREFIX_PATH` 指向 Qt 安装前缀。保留 `BUILD_GUI=OFF`（默认值）可以
 继续只构建纯 C 命令行程序。
 
+Windows GUI 使用 `x64-windows-static` 构建时，还需安装 `openssl:x64-windows-static-md`，
+供客户端证书生成器匹配 Qt 的动态 MSVC 运行库；桥接仍使用原来的静态运行库依赖。
+
 ```bash
 cmake -S . -B build-gui -DBUILD_GUI=ON -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_PREFIX_PATH=/path正式发布校验 Git 标签与版本一致。/to/Qt/6.8.3/gcc_64
@@ -732,6 +735,9 @@ scrcpy 的相关代码采用 Apache-2.0，本仓库亦采用 Apache-2.0（见 `L
 
 ## TLS 说明
 
+**状态：✅ 已完成。** 已实现 TLS 客户端连接、服务端 SHA-256 指纹校验及 GUI 客户端证书生成。
+Linux GUI 构建及全部 20 项测试通过；2026-11-03 用户使用新版 Linux DEB 实测，确认客户端证书流程可用。
+
 桥接程序支持 Deskflow 1.26+ 的原生 TLS。TLS 使用 Deskflow 兼容的 OpenSSL 客户端实现，
 协议握手和键鼠/剪贴板数据仍使用原有 Deskflow 帧格式。由于 Deskflow 默认使用自签名证书和
 SHA-256 指纹数据库，启用 TLS 时必须指定服务端信任指纹：
@@ -750,11 +756,14 @@ sudo ./build/deskflow-otg --host 127.0.0.1 --port 24800 --name android \
 
 如果服务端启用了客户端证书认证，再添加 `--tls-cert <PEM文件>`；该 PEM 文件需要同时包含
 客户端证书和私钥。`--tls-fingerprint` 与 `--tls-fingerprint-file` 二选一。GUI 的连接设置中
-也提供相同选项，并会按设备保存。
+也提供相同选项，并会按设备保存。启用 TLS 后，点击 **生成客户端证书**，即可生成包含
+2048/4096 位 RSA 私钥与自签名证书的 PEM，并自动填入客户端证书栏；连接外部 Deskflow 时同样可用。
+路径为空时默认保存到应用配置目录的 `tls/client.pem`；替换已有文件前会确认。
+连接时在 Deskflow 中信任弹窗显示的 **客户端** SHA-256 指纹；生成操作不会修改
+“信任的 **服务端** 指纹”或指纹数据库。
 
 ## 当前限制
 
-- TLS 使用 SHA-256 服务端证书指纹固定；未提供信任指纹时不会连接。
 - 键盘映射按 **US 布局**（其它布局下部分符号键可能错位）。
 - 剪贴板仅支持可选的 ADB 文本共享，不支持图片/文件剪贴板；不支持文件拖放和屏幕截图。
 - 只支持键盘 + 鼠标，不支持游戏手柄（AOA gamepad 未实现）。

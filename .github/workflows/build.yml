@@ -44,7 +44,7 @@ jobs:
         run: brew install cmake libusb openssl@3
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
-        run: vcpkg install libusb:x64-windows-static openssl:x64-windows-static
+        run: vcpkg install libusb:x64-windows-static openssl:x64-windows-static openssl:x64-windows-static-md
       - name: Download verified ADB distribution
         run: python scripts/fetch_adb.py --output adb-bundle
       - name: Configure

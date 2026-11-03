@@ -3,6 +3,7 @@
 #include "i18n.h"
 #include "build_version.h"
 #include "system_theme.h"
+#include "tls_certificate.h"
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
@@ -48,6 +49,115 @@ protected:
 class WindowTest : public QObject {
     Q_OBJECT
 private slots:
+    void generateClientCertificate()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dir.path());
+        QSettings settings;
+        settings.setValue("adb", "");
+        settings.setValue("manageServer", false);
+        settings.setValue("language", "zh_CN");
+        const auto path = dir.filePath(QString::fromUtf8("客户端/client.pem"));
+        {
+            AutoConnectTestWindow window;
+            auto *tls = window.findChild<QCheckBox *>("tlsEnabled");
+            auto *certificate = window.findChild<QLineEdit *>("tlsCertificate");
+            auto *fingerprint = window.findChild<QLineEdit *>("tlsFingerprint");
+            auto *database = window.findChild<QLineEdit *>("tlsFingerprintFile");
+            auto *generate = window.findChild<QPushButton *>("tlsRegenerateCertificate");
+            auto *browse = window.findChild<QPushButton *>("tlsBrowseCertificate");
+            QVERIFY(tls && certificate && fingerprint && database && generate && browse);
+            QVERIFY(certificate->text().isEmpty()); // Client authentication remains optional.
+            QVERIFY(!generate->isEnabled());
+            QVERIFY(!browse->isEnabled());
+            tls->setChecked(true);
+            QVERIFY(generate->isEnabled()); // External-server mode is supported.
+            QVERIFY(browse->isEnabled());
+            QCOMPARE(generate->text(), QString::fromUtf8("生成客户端证书"));
+            QVERIFY(!window.findChild<QLineEdit *>("tlsServerCertificate"));
+            QVERIFY(!window.findChild<QCheckBox *>("tlsRequireClientCertificate"));
+            certificate->setText(path);
+            database->setText("trusted-servers");
+            QString message;
+            auto answerDialog = [&](QMessageBox::StandardButton answer) {
+                QTimer::singleShot(0, &window, [&, answer] {
+                    auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+                    QVERIFY(box);
+                    message = box->text();
+                    box->done(answer);
+                });
+            };
+            answerDialog(QMessageBox::Ok);
+            generate->click();
+            QVERIFY(QFile::exists(path));
+            const auto clientFingerprint = TlsCertificate::fingerprint(path);
+            QVERIFY(!clientFingerprint.isEmpty());
+            QVERIFY(message.contains(clientFingerprint));
+            QVERIFY(fingerprint->text().isEmpty());
+            QCOMPARE(database->text(), "trusted-servers");
+            QCOMPARE(certificate->text(), path);
+            QCOMPARE(settings.value("tlsCertificate").toString(), path);
+
+            QFile pem(path);
+            QVERIFY(pem.open(QIODevice::ReadOnly));
+            const auto original = pem.readAll();
+            pem.close();
+            answerDialog(QMessageBox::No);
+            generate->click();
+            QVERIFY(pem.open(QIODevice::ReadOnly));
+            QCOMPARE(pem.readAll(), original); // Declining overwrite preserves the identity.
+            pem.close();
+            QVERIFY(message.contains(path));
+
+            database->clear();
+            fingerprint->setText(QString(64, 'a'));
+            certificate->setText(dir.filePath("second.pem"));
+            answerDialog(QMessageBox::Ok);
+            generate->click();
+            QCOMPARE(fingerprint->text(), QString(64, 'a'));
+            QVERIFY(database->text().isEmpty());
+
+            certificate->setText(path + "/impossible.pem"); // Parent is a file, save must fail.
+            answerDialog(QMessageBox::Ok);
+            generate->click();
+            QVERIFY(message.contains(qtTrId("otg.tls.generate_failed").section("%1", 0, 0)));
+            QCOMPARE(TlsCertificate::fingerprint(path), clientFingerprint);
+            QCOMPARE(fingerprint->text(), QString(64, 'a'));
+            certificate->setText(path);
+            auto *language = window.findChild<QComboBox *>("languageSelector");
+            language->setCurrentIndex(language->findData("en"));
+            QCOMPARE(generate->text(), "Generate client certificate");
+            QCOMPARE(certificate->text(), path);
+            language->setCurrentIndex(language->findData("zh_CN"));
+
+            // Exercise connection gating with a fake bridge, never USB hardware.
+            window.findChild<QLineEdit *>("usbSerial")->setText("TLS-client");
+            auto *manager = window.findChild<ConnectionManager *>();
+            window.findChild<QPushButton *>("connectButton")->click();
+            QTRY_COMPARE(manager->state("initial"), Session::State::Connected);
+            QVERIFY(!generate->isEnabled());
+            QVERIFY(!browse->isEnabled());
+            manager->stopAll();
+            QTRY_VERIFY(!manager->busy());
+            QVERIFY(generate->isEnabled());
+
+            const auto capture = qEnvironmentVariable("OTG_TEST_TLS_SCREENSHOT");
+            if (!capture.isEmpty()) {
+                window.findChild<QTabWidget *>("deviceTabs")->setCurrentIndex(2);
+                window.show();
+                QTest::qWait(50);
+                QVERIFY(window.grab().save(capture));
+            }
+            window.findChild<QAction *>("trayQuit")->trigger();
+        }
+        AutoConnectTestWindow restored;
+        QCOMPARE(restored.findChild<QLineEdit *>("tlsCertificate")->text(), path);
+        QCOMPARE(restored.findChild<QLineEdit *>("tlsFingerprint")->text(), QString(64, 'a'));
+        QVERIFY(restored.findChild<QPushButton *>("tlsRegenerateCertificate")->isEnabled());
+        restored.findChild<QAction *>("trayQuit")->trigger();
+    }
     void displayUpdatesArePerDevice()
     {
         QTemporaryDir dir;

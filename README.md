@@ -137,6 +137,8 @@ In the GUI, enable "Automatically connect this device when USB is inserted" for 
 
 Install Qt 6.8+ and set `CMAKE_PREFIX_PATH` to the Qt installation prefix. Keeping `BUILD_GUI=OFF` (the default) continues to build only the pure-C command-line program.
 
+For Windows GUI builds using `x64-windows-static`, also install `openssl:x64-windows-static-md` for the GUI's certificate generator. Qt uses the dynamic MSVC runtime; the bridge keeps its static-runtime dependencies.
+
 ```bash
 cmake -S . -B build-gui -DBUILD_GUI=ON -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_PREFIX_PATH=/path/to/Qt/6.8.3/gcc_64
@@ -507,6 +509,8 @@ The relevant scrcpy code is licensed under Apache-2.0, and this repository is al
 
 ## TLS
 
+**Status: ✅ Completed.** TLS client support, server SHA-256 fingerprint verification, and GUI client-certificate generation are implemented. The Linux GUI build and all 20 tests passed; on 2026-11-03, the user confirmed the client-certificate workflow in the updated Linux DEB works.
+
 The bridge supports native TLS from Deskflow 1.26 onward. TLS uses a Deskflow-compatible OpenSSL client implementation; protocol handshake and keyboard/mouse/clipboard data still use the existing Deskflow frame format. Because Deskflow normally uses self-signed certificates and a SHA-256 fingerprint database, a trusted server fingerprint must be provided when TLS is enabled:
 
 ```bash
@@ -523,9 +527,10 @@ The Deskflow fingerprint database (`v2:sha256:...`) can also be used directly:
 
 If the server enables client-certificate authentication, add `--tls-cert <PEM file>`; the PEM must contain both the client certificate and private key. Choose exactly one of `--tls-fingerprint` and `--tls-fingerprint-file`. The GUI connection settings provide the same options and save them per device.
 
+In the GUI's TLS section, click **Generate client certificate** to create a self-signed RSA certificate and private key (2048 or 4096 bits) and fill the client PEM path. This works with an external Deskflow server too. If the path is empty, the file is saved as `tls/client.pem` under the application's configuration directory; an existing file requires confirmation before replacement. Trust the displayed **client** SHA-256 fingerprint in Deskflow when connecting. The trusted **server** fingerprint and fingerprint database are not changed by client certificate generation.
+
 ## Current limitations
 
-- TLS pins the server certificate by SHA-256 fingerprint; without a trusted fingerprint, the program does not connect.
 - Keyboard mapping uses the **US layout**; some symbol keys may be wrong with other layouts.
 - Clipboard support is optional ADB text sharing only; image/file clipboards, file drag-and-drop, and screenshots are not supported.
 - Only keyboard and mouse are supported; gamepads (AOA gamepad) are not implemented.

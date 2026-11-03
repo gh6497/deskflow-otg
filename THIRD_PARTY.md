@@ -53,6 +53,7 @@ source and build recipe allow relinking against a modified libusb.
 ## OpenSSL
 
 The bridge uses OpenSSL libssl/libcrypto for the optional Deskflow TLS client.
+The GUI also uses libcrypto to generate self-signed client certificates and private keys.
 Linux and macOS builds normally link the system or Homebrew libraries; Windows
 builds use the vcpkg package. OpenSSL is distributed under the Apache License
 2.0.
