@@ -46,13 +46,20 @@ bool otg_ble_win_input_idle(struct otg_ble_win *b)
     return true;
 }
 void df_client_set_stop_check(int (*check)(void)) { stop_check = check; }
-df_client *df_client_connect(const char *host, uint16_t port, const char *name,
-                            int32_t w, int32_t h, const df_client_callbacks *cbs, void *ud)
+df_client *df_client_connect_ex(const char *host, uint16_t port, const char *name,
+                                int32_t w, int32_t h, const df_client_callbacks *cbs,
+                                void *ud, const df_client_tls_options *tls)
 {
+    (void)tls;
     if (stop_check && stop_check()) return NULL;
     fprintf(stderr, "FAKE session=%s,%u,%s,%d,%d\n", host, port, name, (int)w, (int)h); fflush(stderr);
     client.cbs = cbs; client.ud = ud;
     return &client;
+}
+df_client *df_client_connect(const char *host, uint16_t port, const char *name,
+                             int32_t w, int32_t h, const df_client_callbacks *cbs, void *ud)
+{
+    return df_client_connect_ex(host, port, name, w, h, cbs, ud, NULL);
 }
 int df_client_run(df_client *c, volatile sig_atomic_t *stop)
 {
