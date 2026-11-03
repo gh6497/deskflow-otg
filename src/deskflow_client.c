@@ -389,7 +389,9 @@ static int io_read_full(df_socket fd, void *buf, size_t n)
     uint8_t *p = buf;
     size_t got = 0;
     while (got < n) {
-        if (stop_check || (io_client && io_client->cbs.on_tick)) {
+        const bool tls_pending = io_client && io_client->fd == fd && io_client->tls_enabled &&
+                                 SSL_pending(io_client->tls_ssl) > 0;
+        if (!tls_pending && (stop_check || (io_client && io_client->cbs.on_tick))) {
             if (stop_check && stop_check()) {
                 return -1;
             }
