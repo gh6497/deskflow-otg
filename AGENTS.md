@@ -238,12 +238,18 @@ for f in platform/linux/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only
   详细证据和仍运行的服务/会话见 `docs/LINUX_BLE_HANDOVER.md` 第 7 节，勿擅自停止用户连接。
 
 - 支持 deskflow 的 TLS；使用 `--tls` 并配置服务端 SHA-256 指纹，服务端要求客户端认证时再提供 `--tls-cert`。
+  GUI 的「生成客户端证书」生成包含私钥的 PEM，回填客户端证书栏；外部服务模式同样可用。
+  客户端指纹供 Deskflow 信任，绝不能覆盖服务端指纹或指纹数据库。证书生成只在空闲时可用，
+  覆盖已有文件须确认，写入使用私有权限与原子替换。Windows `/MT` 桥接配合 `/MD` Qt 时，
+  GUI 单独链接 `openssl:x64-windows-static-md`，不要把 `/MT` libcrypto 直接链接到 Qt GUI。
 - 键盘 **US 布局**（其它布局符号键可能错位）。
 - 支持键盘 + 鼠标；可选 `BUILD_CLIPBOARD` 通过 ADB/scrcpy 共享纯文本，不支持游戏手柄、文件拖放、视频。
 - Linux 需要 root 或 udev 规则才能访问 USB；macOS 需允许配件连接，Deskflow 需辅助功能权限。
 
 ## 当前状态 / 待办
 
+- ✅ TLS 客户端连接、服务端 SHA-256 指纹校验及 GUI 客户端证书生成已完成。
+  Linux GUI 严格构建及全部 20 项测试通过；2026-11-03 用户通过新版 Linux DEB 确认客户端证书流程可用。
 - ✅ 协议握手 + 消息流 + HID 报告，mock 验证通过。
 - ✅ 真机环境下已连上 deskflow server（`connected ... as "android"`）。
 - ✅ 已复现相对模式加速漂移，并加入默认绝对数位板指针；主机仿真与构建通过。

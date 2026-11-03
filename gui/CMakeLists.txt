@@ -8,12 +8,28 @@ add_library(otg_gui_support STATIC
   deskflow_server.cpp deskflow_server.h
   connection_manager.cpp connection_manager.h
   usb_auto_connect.cpp usb_auto_connect.h
+  tls_certificate.cpp tls_certificate.h
   i18n.cpp i18n.h
   system_theme.cpp system_theme.h
 )
 target_include_directories(otg_gui_support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_include_directories(otg_gui_support PUBLIC "${PROJECT_BINARY_DIR}/generated")
 target_link_libraries(otg_gui_support PUBLIC Qt6::Network Qt6::Widgets)
+if(MSVC AND VCPKG_TARGET_TRIPLET MATCHES "-windows-static$")
+  # The bridge uses /MT with static libusb, while Qt uses /MD. Link the GUI
+  # against a static OpenSSL built with /MD rather than mixing both CRTs.
+  set(gui_openssl_root "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}-md")
+  find_library(OTG_GUI_CRYPTO_RELEASE NAMES libcrypto PATHS "${gui_openssl_root}/lib" NO_DEFAULT_PATH)
+  find_library(OTG_GUI_CRYPTO_DEBUG NAMES libcrypto PATHS "${gui_openssl_root}/debug/lib" NO_DEFAULT_PATH)
+  if(NOT OTG_GUI_CRYPTO_RELEASE OR NOT OTG_GUI_CRYPTO_DEBUG)
+    message(FATAL_ERROR "GUI certificate generation requires: vcpkg install openssl:${VCPKG_TARGET_TRIPLET}-md")
+  endif()
+  target_include_directories(otg_gui_support PUBLIC "${gui_openssl_root}/include")
+  target_link_libraries(otg_gui_support PUBLIC
+    optimized "${OTG_GUI_CRYPTO_RELEASE}" debug "${OTG_GUI_CRYPTO_DEBUG}" crypt32 ws2_32)
+else()
+  target_link_libraries(otg_gui_support PUBLIC OpenSSL::Crypto)
+endif()
 if(BUILD_BLE)
   target_compile_definitions(otg_gui_support PUBLIC OTG_GUI_HAVE_BLE=1)
 endif()

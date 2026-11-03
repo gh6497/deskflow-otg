@@ -3,6 +3,7 @@
 #include "process_utils.h"
 #include "session.h"
 #include "connection_manager.h"
+#include "tls_certificate.h"
 #include <QTemporaryDir>
 #include "i18n.h"
 #include <QFile>
@@ -13,6 +14,8 @@
 #include <QScopeGuard>
 #include <QXmlStreamReader>
 #include <QtTest>
+#include <openssl/pem.h>
+#include <memory>
 
 static QString peerPath()
 {
@@ -553,6 +556,67 @@ private slots:
         QVERIFY(languages.setLanguage("zh_CN"));
         QCOMPARE(session.statusMessage(), "设备序列号、屏幕名称、主机或尺寸无效。");
         QCOMPARE(qtTrId("otg.action.connect"), "连接");
+    }
+    void tlsCertificateGeneration()
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const auto path = directory.filePath("tls/client.pem");
+        QString error;
+        QVERIFY2(TlsCertificate::generate(path, 2048, &error), qPrintable(error));
+        QVERIFY(QFile::exists(path));
+        QCOMPARE(TlsCertificate::keyLength(path), 2048);
+        const auto fingerprint = TlsCertificate::fingerprint(path);
+        QCOMPARE(fingerprint.size(), 95);
+        QVERIFY(fingerprint.contains(':'));
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto pem = file.readAll();
+        file.close();
+        std::unique_ptr<BIO, decltype(&BIO_free)> input(
+            BIO_new_mem_buf(pem.constData(), int(pem.size())), BIO_free);
+        QVERIFY(input);
+        std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)> key(
+            PEM_read_bio_PrivateKey(input.get(), nullptr, nullptr, nullptr), EVP_PKEY_free);
+        QVERIFY(key);
+        std::unique_ptr<X509, decltype(&X509_free)> certificate(
+            PEM_read_bio_X509(input.get(), nullptr, nullptr, nullptr), X509_free);
+        QVERIFY(certificate);
+        QCOMPARE(X509_check_private_key(certificate.get(), key.get()), 1);
+        QCOMPARE(X509_verify(certificate.get(), key.get()), 1);
+#ifdef Q_OS_UNIX
+        QVERIFY(!(QFile::permissions(path) & (QFileDevice::ReadGroup | QFileDevice::WriteGroup |
+                                            QFileDevice::ReadOther | QFileDevice::WriteOther)));
+#endif
+        QVERIFY(!TlsCertificate::generate(path, 1024, &error));
+        QVERIFY(!error.isEmpty());
+        QCOMPARE(TlsCertificate::fingerprint(path), fingerprint);
+        QVERIFY(TlsCertificate::generate(path, 4096, &error));
+        QCOMPARE(TlsCertificate::keyLength(path), 4096);
+        QVERIFY(TlsCertificate::fingerprint(path) != fingerprint);
+    }
+    void externalClientCertificate()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const auto path = dir.filePath("client identity.pem");
+        QString error;
+        QVERIFY2(TlsCertificate::generate(path, 2048, &error), qPrintable(error));
+        qputenv("OTG_TEST_CLIENT_PEM", path.toUtf8());
+        const auto restore = qScopeGuard([] { qunsetenv("OTG_TEST_CLIENT_PEM"); });
+        ConnectionOptions options;
+        options.manageServer = false;
+        options.bridge = peerPath();
+        options.serial = "TLS-client";
+        options.tls = true;
+        options.tlsCertificate = path;
+        options.tlsFingerprint = QString(64, 'a'); // Server identity differs from the client.
+        Session session;
+        session.start(options);
+        QTRY_COMPARE(session.state(), Session::State::Connected);
+        session.stop();
+        QTRY_COMPARE(session.state(), Session::State::Idle);
+        QVERIFY(!session.hasFailure());
     }
     void catalogs()
     {

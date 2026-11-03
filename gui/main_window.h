@@ -69,6 +69,7 @@ private:
     QString layoutConfiguration() const;
     void persistDevices();
     void updateAutoConnect();
+    void regenerateTlsCertificate();
     void appendLog(const QString &text, const QString &id = {});
     void refreshLog();
     QWidget *pathField(QLineEdit *&field, const char *placeholderId);
@@ -107,6 +108,8 @@ private:
     bool m_stoppingBleService = false;
     QLineEdit *m_serial, *m_adbSerial, *m_adb, *m_deskflow, *m_host, *m_computer, *m_phone;
     QLineEdit *m_tlsCert, *m_tlsFingerprint, *m_tlsFingerprintFile;
+    QComboBox *m_tlsKeyLength;
+    QPushButton *m_tlsRegenerateCertificate;
     QCheckBox *m_tls;
     QCheckBox *m_audio;
     QCheckBox *m_clipboard;
