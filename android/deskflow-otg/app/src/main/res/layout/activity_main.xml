@@ -55,6 +55,7 @@
             android:id="@+id/autoplay_enabled"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:minHeight="48dp"
             android:text="@string/autoplay_enabled" />
 
         <TextView

@@ -107,6 +107,14 @@ class AndroidLayoutsTest(unittest.TestCase):
                 if resources["values"][key].get("translatable") != "false":
                     self.assertIn(key, resources["values-zh-rCN"])
 
+    def test_autoplay_switch_touch_target(self):
+        switch = self.view("activity_main", "autoplay_enabled")
+        # The whole row is clickable; its height must also meet the 48dp minimum.
+        self.assertEqual(switch.get(ANDROID + "layout_width"), "match_parent")
+        minimum = switch.get(ANDROID + "minHeight", "0dp")
+        self.assertTrue(minimum.endswith("dp"))
+        self.assertGreaterEqual(float(minimum[:-2]), 48)
+
     def test_theme_uses_a_known_system_font_family(self):
         resources = ET.parse(APP / "res/values/styles.xml").getroot()
         theme = next(style for style in resources.findall("style")
