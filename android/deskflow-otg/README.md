@@ -62,16 +62,37 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb shell am start -a android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
 ```
 
-在设置中启用 deskflow-otg 后，服务由 Android 自动绑定。桌面 GUI 的 USB 设备页现提供
+在通知使用权设置中启用 deskflow-otg 后，由 Android 尝试绑定服务；ROM 的自启动或省电限制
+可能阻止绑定，不能仅凭「已授权」判断生效。桌面 GUI 的 USB 设备页现提供
 「安装 / 更新 APK」「打开手机端设置」「检查授权状态」，使用当前设备的已有 ADB 连接，
 由用户点击触发，不会静默安装或授予通知使用权。USB 拔出后的暂停动作在手机本地执行，
 不再依赖拔出后的 ADB 连接仍然可用。打包与限制见
 [桌面 GUI 接入说明](../../docs/ANDROID_COMPANION.md)。
 
+## 生效条件：自启动与电池策略
+
+拔线暂停要求 **通知使用权已开启，且通知监听服务在拔线时实际运行**。请在手机上完成：
+
+1. 手动开启 deskflow-otg 的「通知使用权」，不是普通的「允许发送通知」。
+2. 如果系统提供「自启动 / 后台自启动」选项，允许 deskflow-otg 自启动及后台启动。
+3. 将应用电池 / 省电策略设为「无限制」「不限制」或同等选项，允许后台活动。
+   小米 / Redmi 等 ROM 尤其需要检查；具体菜单名称因系统而异。
+4. 安装或更新 APK 后打开应用一次，确认服务恢复。若仍未运行，关闭再开启本应用的
+   通知使用权后重试；强制停止、后台清理和手机重启后也要重新确认。
+
+应用界面和桌面 GUI 的授权检查不代表服务存活，也不会替用户修改上述设置。
+即使放宽限制，不同 ROM 仍可能结束服务；服务未运行时无法收到拔线事件，恢复后也不会
+补处理已经错过的事件。应恢复服务并重新连接 USB，再进行播放、拔线测试。
+
+已在 Redmi K20 Pro / Android 14 观察到更新后授权仍在、服务列表却为空，系统提示
+`AutStart Unable to bind notification listener service`。只读检查命令和详细限制见
+[手机端生效条件与后台限制](../../docs/ANDROID_COMPANION.md#手机端生效条件与后台限制)。
+
 ## 限制
 
 - 需要 Android 10（API 29）或更高版本。
 - 首次使用必须由用户手动授予通知使用权，应用不能通过 ADB 静默授予该权限。
+- 自启动与电池策略不得阻止通知监听服务运行；授权成功不代表后台运行条件已经满足。
 - 0.1.1 修复 0.1.0 仅监听 accessory 拔出而漏掉 AOA HID-only 断开的情况。
   Redmi K20 Pro / Android 14 的只读证据已确认拔线时发出 `USB_STATE`，旧版没有暂停调用；
   新版仍需覆盖安装后实测拔线，不能把主机状态机测试当成真机验收。
