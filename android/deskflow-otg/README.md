@@ -41,6 +41,23 @@
 新增界面文本时使用 `R.string` / `@string` 引用，并同步补齐两种语言。
 应用名称 `deskflow-otg` 标记为不可翻译，所有语言共用。
 
+## 界面布局
+
+界面使用原生 XML 布局，位于 `app/src/main/res/layout/`，可在 IDE 中预览和调整：
+
+- `activity_main.xml`：首页、连接状态、通知使用权与自动播放设置。
+- `activity_transfer.xml`：文件列表页，`item_transfer.xml` 定义动态列表项，
+  `transfer_empty.xml` 定义空状态。
+- `activity_share.xml`：系统分享确认、进度与取消。
+
+Activity 通过 `setContentView` / `LayoutInflater` 加载布局，Java 仅负责控件绑定、
+动态内容、事件和业务逻辑；不依赖 AndroidX、Compose 或第三方界面库。
+布局资源与控件绑定的主机检查（仅需 Python 3，不代表真机界面验收）：
+
+```bash
+python3 ../../tests/test_android_layouts.py
+```
+
 ## Deskflow 连接状态（0.1.4）
 
 手机首页显示「正在连接 / 已连接 / 正在断开 / 已断开 / 状态未知」，不把 USB 插线或

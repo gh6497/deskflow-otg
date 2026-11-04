@@ -4,6 +4,7 @@ package com.github.gh6497.deskflowotg;
 import android.app.*;
 import android.content.Intent;
 import android.os.*;
+import android.view.View;
 import android.widget.*;
 import java.io.*;
 import java.util.*;
@@ -19,15 +20,10 @@ public final class TransferActivity extends Activity {
     @Override protected void onCreate(Bundle saved) {
         super.onCreate(saved);
         if (saved != null) savingId = saved.getString("savingId");
-        LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
-        int p = (int) (20 * getResources().getDisplayMetrics().density); root.setPadding(p,p,p,p);
-        status = new TextView(this); status.setText(R.string.transfer_phone_help); root.addView(status);
-        Button refresh = new Button(this); refresh.setText(R.string.transfer_refresh); root.addView(refresh);
-        ScrollView scroll = new ScrollView(this);
-        rows = new LinearLayout(this); rows.setOrientation(LinearLayout.VERTICAL);
-        scroll.addView(rows); root.addView(scroll);
-        setContentView(root);
-        refresh.setOnClickListener(v -> refresh());
+        setContentView(R.layout.activity_transfer);
+        status = findViewById(R.id.transfer_status);
+        rows = findViewById(R.id.transfer_rows);
+        findViewById(R.id.transfer_refresh).setOnClickListener(v -> refresh());
         refresh();
     }
     @Override protected void onSaveInstanceState(Bundle out) {
@@ -39,14 +35,17 @@ public final class TransferActivity extends Activity {
         try {
             List<TransferStore.Entry> entries = TransferProvider.store(this).list(null);
             if (entries.isEmpty()) {
-                TextView empty = new TextView(this); empty.setText(R.string.transfer_empty); rows.addView(empty);
+                getLayoutInflater().inflate(R.layout.transfer_empty, rows, true);
             }
             for (TransferStore.Entry e : entries) {
-                TextView label = new TextView(this);
+                View row = getLayoutInflater().inflate(R.layout.item_transfer, rows, false);
+                rows.addView(row);
+                TextView label = row.findViewById(R.id.transfer_label);
                 label.setText(getString("in".equals(e.direction) ? R.string.transfer_incoming : R.string.transfer_outgoing,
-                        e.name, e.size)); rows.addView(label);
+                        e.name, e.size));
                 if ("in".equals(e.direction)) {
-                    Button save = new Button(this); save.setText(R.string.transfer_save); rows.addView(save);
+                    Button save = row.findViewById(R.id.transfer_save);
+                    save.setVisibility(View.VISIBLE);
                     save.setOnClickListener(v -> {
                         if (busy) return;
                         savingId = e.id;
@@ -56,8 +55,7 @@ public final class TransferActivity extends Activity {
                         startActivityForResult(picker, 1);
                     });
                 }
-                Button delete = new Button(this); delete.setText(R.string.transfer_delete); rows.addView(delete);
-                delete.setOnClickListener(v -> {
+                row.findViewById(R.id.transfer_delete).setOnClickListener(v -> {
                     if (busy) return;
                     new AlertDialog.Builder(this)
                         .setMessage(R.string.transfer_delete_confirm)
