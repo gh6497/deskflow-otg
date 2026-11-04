@@ -124,9 +124,19 @@ bool Session::windowsBle() const
 
 void Session::setState(State state, const char *id, const QString &detail)
 {
+    const bool transition = m_state != state;
     m_state = state;
     m_statusId = id;
     m_statusDetail = detail;
+    if (transition) {
+        // BLE has no implicit ADB identity. Never use its MAC as an ADB target.
+        const auto target = !m_options.adbSerial.isEmpty() ? m_options.adbSerial :
+            m_options.transport == "usb" ? m_options.serial : QString();
+        const auto status = state == State::Connected ? "connected" :
+            state == State::Starting ? "connecting" :
+            state == State::Stopping ? "disconnecting" : "disconnected";
+        m_companionStatus.update(m_options.adb, target, QString::fromLatin1(status));
+    }
     emit changed(state, statusMessage());
 }
 

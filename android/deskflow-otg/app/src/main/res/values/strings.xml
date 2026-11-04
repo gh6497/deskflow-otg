@@ -5,4 +5,10 @@
     <string name="status_access_enabled">Status: Media control access enabled. USB disconnect events immediately request pause.</string>
     <string name="status_access_required">Status: Please enable notification access first.</string>
     <string name="open_notification_access_settings">Open notification access settings</string>
+    <string name="connection_unknown">Deskflow: Status unknown</string>
+    <string name="connection_connecting">Deskflow: Connecting</string>
+    <string name="connection_connected">Deskflow: Connected</string>
+    <string name="connection_disconnecting">Deskflow: Disconnecting</string>
+    <string name="connection_disconnected">Deskflow: Disconnected</string>
+    <string name="connection_help">Reported by the desktop GUI via authorized ADB. Connected means the Deskflow handshake completed, not merely that USB is plugged in. Reports expire after 15 seconds without confirmation. Open this app once after installing; CLI sessions and connections without ADB cannot report status. Notification access is only needed for media pause.</string>
 </resources>

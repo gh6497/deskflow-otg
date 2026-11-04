@@ -278,6 +278,12 @@ for f in platform/linux/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only
   手机端 0.1.2 用 `PlaybackPauser` 遍历所有活动媒体会话，播放/缓冲才发 pause；
   单会话读取/暂停失败继续，不能处理第一个会话后 return。日志请求成功不等于播放器确认。
   fake ADB 测试覆盖目标、错误、国际化和退出等待，详见 `docs/ANDROID_COMPANION.md`。
+  0.1.4 新增实际 Deskflow 状态：`gui/companion_status_sync.cpp` 按 Session 真实状态转换，
+  经已有已授权 ADB 上报固定显式广播（接收器要求发送者 DUMP 权限），不自动连接/配对或启动应用。
+  优先显式 ADB 目标，仅 USB 可回退 USB serial；BLE MAC 不作 ADB 目标。每5秒续报、
+  单命令2秒、单管线在途并合并最新状态；手机以单调时钟/启动次数判定15秒租约，过期未知，
+  已断开只发一次也过期。CLI 暂无同步；不依赖通知使用权、不改变拔线暂停。
+  `companion_status` fake ADB 和 Java 状态策略回归不等于真机广播投递验收。
 
 - 剪贴板用 `--clipboard` / `-DBUILD_CLIPBOARD=ON` 独立开启，默认关闭、按设备保存。
   `src/deskflow_client.c` 实现主剪贴板 CCLP/DCLP 分块、所有权、活动时离开上传/后台立即上传，

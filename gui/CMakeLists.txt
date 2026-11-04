@@ -8,6 +8,7 @@ add_library(otg_gui_support STATIC
   deskflow_server.cpp deskflow_server.h
   connection_manager.cpp connection_manager.h
   companion_app.cpp companion_app.h
+  companion_status_sync.cpp companion_status_sync.h
   usb_auto_connect.cpp usb_auto_connect.h
   tls_certificate.cpp tls_certificate.h
   i18n.cpp i18n.h
@@ -138,6 +139,9 @@ if(BUILD_TESTING)
   qt_add_executable(test_peer ../tests/test_peer.cpp)
   target_link_libraries(test_peer PRIVATE Qt6::Network Threads::Threads)
   qt_add_executable(test_gui ../tests/test_gui.cpp)
+  qt_add_executable(test_companion_status ../tests/test_companion_status.cpp)
+  target_link_libraries(test_companion_status PRIVATE otg_gui_support Qt6::Test)
+  add_dependencies(test_companion_status test_peer)
   qt_add_executable(test_usb_auto_connect ../tests/test_usb_auto_connect.cpp)
   target_link_libraries(test_usb_auto_connect PRIVATE otg_gui_support Qt6::Test)
   add_dependencies(test_usb_auto_connect test_peer)
@@ -177,10 +181,11 @@ if(BUILD_TESTING)
   if(MSVC)
     target_compile_options(test_gui PRIVATE /utf-8)
     target_compile_options(test_window PRIVATE /utf-8)
-    set_property(TARGET test_gui test_window test_peer test_usb_auto_connect PROPERTY
+    set_property(TARGET test_gui test_window test_peer test_usb_auto_connect test_companion_status PROPERTY
       MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
   endif()
   add_test(NAME gui_logic COMMAND test_gui)
+  add_test(NAME companion_status COMMAND test_companion_status)
   add_test(NAME usb_auto_connect COMMAND test_usb_auto_connect)
   add_test(NAME gui_window COMMAND test_window)
   add_test(NAME gui_version COMMAND deskflow-otg-gui --version)

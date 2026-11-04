@@ -22,13 +22,18 @@ def main():
                         str(app / "main/java" / package / "UsbDisconnectMonitor.java"),
                         str(app / "test/java" / package / "UsbDisconnectMonitorTest.java"),
                         str(app / "main/java" / package / "PlaybackPauser.java"),
-                        str(app / "test/java" / package / "PlaybackPauserTest.java")],
+                        str(app / "test/java" / package / "PlaybackPauserTest.java"),
+                        str(app / "main/java" / package / "ConnectionStatus.java"),
+                        str(app / "test/java" / package / "ConnectionStatusTest.java")],
                        check=True, timeout=30)
         subprocess.run([java, "-cp", directory,
                         "com.github.gh6497.deskflowotg.UsbDisconnectMonitorTest"],
                        check=True, timeout=10)
         subprocess.run([java, "-cp", directory,
                         "com.github.gh6497.deskflowotg.PlaybackPauserTest"],
+                        check=True, timeout=10)
+        subprocess.run([java, "-cp", directory,
+                        "com.github.gh6497.deskflowotg.ConnectionStatusTest"],
                        check=True, timeout=10)
     return 0
 

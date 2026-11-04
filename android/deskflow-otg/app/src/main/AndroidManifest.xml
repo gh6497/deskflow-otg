@@ -15,6 +15,13 @@
             </intent-filter>
         </activity>
 
+        <!-- ADB shell has DUMP; ordinary apps cannot forge host connection state.
+             The app itself does not request DUMP or notification access here. -->
+        <receiver
+            android:name=".ConnectionStatusReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+
         <service
             android:name=".DeskflowNotificationListenerService"
             android:exported="true"
