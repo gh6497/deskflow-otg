@@ -283,6 +283,13 @@ for f in platform/linux/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only
   优先显式 ADB 目标，仅 USB 可回退 USB serial；BLE MAC 不作 ADB 目标。每5秒续报、
   单命令2秒、单管线在途并合并最新状态；手机以单调时钟/启动次数判定15秒租约，过期未知，
   已断开只发一次也过期。CLI 暂无同步；不依赖通知使用权、不改变拔线暂停。
+  0.1.5 手机增加默认关闭的连接自动播放，仅指定播放器活动会话、STATE_PAUSED + ACTION_PLAY，
+  不启动播放器、不回退、不用切换键。桌面状态 v2 每次真实连接生成 UUID，play_event 仅一次，
+  心跳不带播放请求；离线消耗不补播，排队超4秒丢弃。音频开启时须 RAW 头 + ALSA/WASAPI
+  输出就绪（audio_player_ready 原子快照，经 main 线程 audio-ready/unavailable），不等首帧 PCM。
+  手机先持久化最近64个已消耗ID，再检查开关/绑定中监听服务/目标会话；失败、重绑、重启、
+  手动暂停与租约续报不重试。v1只显示状态；旧APK不识别v2，需同时更新。macOS无音频后端仍
+  可用无音频转发的自动播放；BLE仍须显式已有ADB。主机策略/fake ADB/ALSA null不等于真机验收。
   `companion_status` fake ADB 和 Java 状态策略回归不等于真机广播投递验收。
 
 - 剪贴板用 `--clipboard` / `-DBUILD_CLIPBOARD=ON` 独立开启，默认关闭、按设备保存。

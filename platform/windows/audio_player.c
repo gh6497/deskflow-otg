@@ -34,6 +34,7 @@ static const GUID OTG_IID_IAudioRenderClient =
 struct audio_player {
     SOCKET socket_fd;
     HANDLE thread;
+    volatile LONG ready;
 };
 
 static uint32_t be32(const unsigned char *p) {
@@ -120,6 +121,7 @@ static DWORD WINAPI audio_thread(void *arg) {
     if (open_wasapi(&client, &render, &buffer_size) != 0) {
         LOG_ERR("could not open WASAPI playback device\n"); goto done;
     }
+    InterlockedExchange(&player->ready, 1);
     while (read_full(player->socket_fd, h, sizeof(h)) == 1) {
         uint32_t n = be32(h + 8);
         if (!n || n > MAX_FRAME) break;
@@ -128,6 +130,7 @@ static DWORD WINAPI audio_thread(void *arg) {
             play_pcm(client, render, buffer_size, payload, n) != 0) break;
     }
 done:
+    InterlockedExchange(&player->ready, 0);
     free(payload);
     if (client) { client->lpVtbl->Stop(client); client->lpVtbl->Release(client); }
     if (render) render->lpVtbl->Release(render);
@@ -139,9 +142,14 @@ struct audio_player *audio_player_start(intptr_t socket_fd) {
     struct audio_player *player = malloc(sizeof(*player));
     if (!player) return NULL;
     player->socket_fd = (SOCKET)socket_fd;
+    player->ready = 0;
     player->thread = CreateThread(NULL, 0, audio_thread, player, 0, NULL);
     if (!player->thread) { free(player); return NULL; }
     return player;
+}
+
+bool audio_player_ready(struct audio_player *player) {
+    return player && InterlockedCompareExchange(&player->ready, 0, 0) != 0;
 }
 
 void audio_player_stop(struct audio_player *player) {

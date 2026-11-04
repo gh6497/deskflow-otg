@@ -25,6 +25,9 @@
 #include "deskflow_client.h"
 #include "usb_scan.h"
 #include "scrcpy_session.h"
+#ifdef OTG_HAVE_AUDIO
+#include "audio_player.h"
+#endif
 #include "adb_display.h"
 #ifdef OTG_HAVE_BLE
 #include "ble_hid.h"
@@ -284,6 +287,7 @@ struct app_state {
     bool resident_session;
     bool deskflow_connected;
     bool input_ready_reported;
+    bool audio_ready_reported;
     df_client *client;
     bool clipboard_error;
     unsigned held_key_count;
@@ -500,6 +504,13 @@ static int cb_tick(void *ud)
 {
     app_state *s = ud;
     int result = s->transport_owner ? cb_idle(s) : cb_clipboard_tick(s);
+#ifdef OTG_HAVE_AUDIO
+    const bool ready = !result && audio_player_ready(s->scrcpy.player);
+    if (ready != s->audio_ready_reported) {
+        s->audio_ready_reported = ready;
+        gui_event(ready ? "audio-ready" : "audio-unavailable");
+    }
+#endif
     return result || display_poll(s);
 }
 
@@ -1008,6 +1019,7 @@ int main(int argc, char **argv)
         }
 #endif
         state.clipboard_error = false;
+        state.audio_ready_reported = false;
         if ((audio || clipboard) && scrcpy_session_start(&state.scrcpy, adb_path,
                 adb_serial ? adb_serial : serial, scrcpy_server, scrcpy_version,
                 audio != 0, clipboard != 0)) {

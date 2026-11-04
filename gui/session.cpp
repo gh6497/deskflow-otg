@@ -128,16 +128,20 @@ void Session::setState(State state, const char *id, const QString &detail)
     m_state = state;
     m_statusId = id;
     m_statusDetail = detail;
-    if (transition) {
-        // BLE has no implicit ADB identity. Never use its MAC as an ADB target.
-        const auto target = !m_options.adbSerial.isEmpty() ? m_options.adbSerial :
-            m_options.transport == "usb" ? m_options.serial : QString();
-        const auto status = state == State::Connected ? "connected" :
-            state == State::Starting ? "connecting" :
-            state == State::Stopping ? "disconnecting" : "disconnected";
-        m_companionStatus.update(m_options.adb, target, QString::fromLatin1(status));
-    }
+    if (transition) syncCompanionStatus();
     emit changed(state, statusMessage());
+}
+
+void Session::syncCompanionStatus()
+{
+    // BLE has no implicit ADB identity. Never use its MAC as an ADB target.
+    const auto target = !m_options.adbSerial.isEmpty() ? m_options.adbSerial :
+        m_options.transport == "usb" ? m_options.serial : QString();
+    const auto status = m_state == State::Connected ? "connected" :
+        m_state == State::Starting ? "connecting" :
+        m_state == State::Stopping ? "disconnecting" : "disconnected";
+    m_companionStatus.update(m_options.adb, target, QString::fromLatin1(status),
+                             !m_options.audio || m_audioReady);
 }
 
 static QStringList auxiliarySignature(const ConnectionOptions &options)
@@ -152,6 +156,7 @@ void Session::start(const ConnectionOptions &options)
         return;
     m_shutdown = false;
     m_options = options;
+    m_audioReady = false;
     m_clipboardStatusId = options.clipboard ? "otg.clipboard.waiting" : "otg.clipboard.off";
     emit clipboardChanged();
     m_failureId.clear();
@@ -382,6 +387,15 @@ void Session::readBleEvents()
 void Session::handleBridgeEvent(const QJsonObject &object)
 {
     const auto event = object.value("event").toString();
+    if (m_options.audio && (event == "audio-ready" || event == "audio-unavailable") &&
+        (m_state == State::Starting || m_state == State::Connected)) {
+        const bool ready = event == "audio-ready";
+        if (m_audioReady != ready) {
+            m_audioReady = ready;
+            syncCompanionStatus();
+        }
+        return;
+    }
     if (event == "display-size" && m_state == State::Connected && m_options.autoRotate) {
         const int width = object.value("width").toInt(), height = object.value("height").toInt();
         const int vw = object.value("virtual-width").toInt(), vh = object.value("virtual-height").toInt();
@@ -404,6 +418,7 @@ void Session::handleBridgeEvent(const QJsonObject &object)
         setState(State::Connected, "otg.status.connected");
     } else if (event == "disconnected" && m_options.transport == "ble" &&
                m_state == State::Connected) {
+        m_audioReady = false;
         setState(State::Starting, "otg.ble.reconnecting");
     } else if (event == "usb-ready") {
         const auto id = object.value("usb-id").toString();

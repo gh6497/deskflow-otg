@@ -8,6 +8,7 @@
 #include <alsa/asoundlib.h>
 #include <errno.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/socket.h>
@@ -27,6 +28,7 @@
 struct audio_player {
     int socket_fd;
     pthread_t thread;
+    atomic_bool ready;
 };
 
 static uint32_t read_be32(const unsigned char *p)
@@ -110,6 +112,7 @@ static void *audio_thread_main(void *userdata)
         LOG_ERR("could not open ALSA playback device\n");
         goto done;
     }
+    atomic_store(&player->ready, true);
     while (read_full(player->socket_fd, header, sizeof(header)) == 1) {
         /* PTS/flags are consumed with the header; RAW playback uses no clock. */
         uint32_t size = read_be32(header + 8);
@@ -124,6 +127,7 @@ static void *audio_thread_main(void *userdata)
         if (play_pcm(pcm, payload, size) < 0) break;
     }
 done:
+    atomic_store(&player->ready, false);
     free(payload);
     if (pcm) {
         snd_pcm_drop(pcm);
@@ -137,11 +141,17 @@ struct audio_player *audio_player_start(intptr_t socket_fd)
     struct audio_player *player = malloc(sizeof(*player));
     if (!player) return NULL;
     player->socket_fd = (int)socket_fd;
+    atomic_init(&player->ready, false);
     if (pthread_create(&player->thread, NULL, audio_thread_main, player) != 0) {
         free(player);
         return NULL;
     }
     return player;
+}
+
+bool audio_player_ready(struct audio_player *player)
+{
+    return player && atomic_load(&player->ready);
 }
 
 void audio_player_stop(struct audio_player *player)

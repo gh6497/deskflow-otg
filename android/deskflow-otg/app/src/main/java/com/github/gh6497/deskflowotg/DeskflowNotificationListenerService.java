@@ -23,6 +23,8 @@ import java.util.List;
 /**
  * Receives USB link/accessory removal broadcasts and requests pause for every
  * currently playing or buffering media session.
+ * Also resumes one explicitly selected paused session on an opt-in connection
+ * edge, but never starts itself or replays an event after listener rebinding.
  *
  * A notification listener is used instead of shell commands or injected media
  * key events. This keeps the operation inside Android's supported permission
@@ -30,6 +32,9 @@ import java.util.List;
  */
 public final class DeskflowNotificationListenerService extends NotificationListenerService {
     private static final String TAG = "deskflow-otg";
+    // Receiver and service lifecycle callbacks run on the application main thread.
+    // Never start/bind a service or replay a persisted request to obtain this.
+    private static DeskflowNotificationListenerService connectedListener;
     // Android broadcasts this protected sticky action for USB gadget links,
     // including AOA HID-only. Its constant is not part of the public SDK.
     private static final String ACTION_USB_STATE = "android.hardware.usb.action.USB_STATE";
@@ -63,12 +68,14 @@ public final class DeskflowNotificationListenerService extends NotificationListe
     @Override
     public void onListenerConnected() {
         super.onListenerConnected();
+        connectedListener = this;
         registerDetachReceiver();
         Log.i(TAG, "media pause listener connected");
     }
 
     @Override
     public void onListenerDisconnected() {
+        if (connectedListener == this) connectedListener = null;
         unregisterDetachReceiver();
         Log.i(TAG, "media pause listener disconnected");
         super.onListenerDisconnected();
@@ -76,6 +83,7 @@ public final class DeskflowNotificationListenerService extends NotificationListe
 
     @Override
     public void onDestroy() {
+        if (connectedListener == this) connectedListener = null;
         unregisterDetachReceiver();
         super.onDestroy();
     }
@@ -150,6 +158,52 @@ public final class DeskflowNotificationListenerService extends NotificationListe
         });
         // A request is not proof that every player has actually paused.
         Log.i(TAG, "USB disconnected; pause requests sent=" + requested);
+    }
+
+    static void playOnConnection(Context context) {
+        if (!AutoplaySettings.enabled(context)) return;
+        DeskflowNotificationListenerService listener = connectedListener;
+        if (listener == null) {
+            Log.i(TAG, "auto-play skipped: notification listener is not connected");
+            return;
+        }
+        String target = AutoplaySettings.target(context);
+        if (target.isEmpty()) return;
+        MediaSessionManager manager = (MediaSessionManager) listener.getSystemService(
+                Context.MEDIA_SESSION_SERVICE);
+        if (manager == null) return;
+        try {
+            List<MediaController> sessions = manager.getActiveSessions(
+                    new ComponentName(listener, DeskflowNotificationListenerService.class));
+            boolean requested = AutoplayPolicy.playOne(sessions, target,
+                    new AutoplayPolicy.Actions<MediaController>() {
+                @Override
+                public String packageName(MediaController controller) {
+                    return controller.getPackageName();
+                }
+
+                @Override
+                public boolean canResume(MediaController controller) {
+                    PlaybackState state = controller.getPlaybackState();
+                    return state != null && state.getState() == PlaybackState.STATE_PAUSED
+                            && (state.getActions() & PlaybackState.ACTION_PLAY) != 0;
+                }
+
+                @Override
+                public void play(MediaController controller) {
+                    controller.getTransportControls().play();
+                    Log.i(TAG, "connection auto-play requested for " + target);
+                }
+
+                @Override
+                public void failed(MediaController controller, RuntimeException exception) {
+                    Log.w(TAG, "could not inspect or resume selected player", exception);
+                }
+            });
+            if (!requested) Log.i(TAG, "auto-play skipped: no resumable selected session");
+        } catch (RuntimeException exception) {
+            Log.w(TAG, "auto-play unavailable; no retry for this connection", exception);
+        }
     }
 
 }
