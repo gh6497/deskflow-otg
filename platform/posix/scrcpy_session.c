@@ -32,6 +32,9 @@
 #include <unistd.h>
 
 #define SCRCPY_REMOTE_PATH "/data/local/tmp/deskflow-otg-scrcpy-server.jar"
+#define ADB_PUSH_RETRIES 20
+#define ADB_PUSH_RETRY_DELAY_MS 250
+#define ADB_PUSH_TIMEOUT_MS 5000
 
 #define LOG_ERR(...)  fprintf(stderr, "ERROR: " __VA_ARGS__)
 #define LOG_WARN(...) fprintf(stderr, "WARN:  " __VA_ARGS__)
@@ -158,7 +161,8 @@ static int adb_target_command(void *ud, const char *target, bool connect)
     return result;
 }
 
-static int adb_push(const char *adb, const char *serial, const char *source)
+static int adb_push(const char *adb, const char *serial, const char *source,
+                    unsigned timeout_ms)
 {
     pid_t pid = fork();
     if (pid < 0) return -1;
@@ -167,7 +171,29 @@ static int adb_push(const char *adb, const char *serial, const char *source)
               SCRCPY_REMOTE_PATH, (char *)NULL);
         _exit(127);
     }
-    return wait_child(pid);
+    return wait_child_timeout(pid, timeout_ms);
+}
+
+/* After a USB re-enumeration libusb can see the phone before adbd has
+ * recreated its transport.  HID is already usable at this point, so keep the
+ * bridge alive briefly instead of making the GUI treat a transient ADB race
+ * as a failed connection. */
+static int adb_push_retry(const char *adb, const char *serial, const char *source)
+{
+    uint64_t deadline = auxiliary_now_ms() + ADB_PUSH_TIMEOUT_MS;
+    for (int attempt = 0; attempt < ADB_PUSH_RETRIES; ++attempt) {
+        uint64_t now = auxiliary_now_ms();
+        if (now >= deadline) break;
+        if (adb_push(adb, serial, source, (unsigned)(deadline - now)) == 0) return 0;
+        now = auxiliary_now_ms();
+        if (attempt + 1 == ADB_PUSH_RETRIES || now >= deadline) break;
+        if (attempt == 0)
+            LOG_INFO("ADB server upload failed; retrying briefly while the selected transport recovers\n");
+        unsigned delay = (unsigned)(deadline - now);
+        if (delay > ADB_PUSH_RETRY_DELAY_MS) delay = ADB_PUSH_RETRY_DELAY_MS;
+        (void)poll(NULL, 0, (int)delay);
+    }
+    return -1;
 }
 
 static int adb_forward(const char *adb, const char *serial,
@@ -325,7 +351,7 @@ int scrcpy_session_start(struct scrcpy_session *session, const char *adb_path,
     session->server_path = copy_string(server_path);
     if (!session->adb_path || !session->adb_serial || !session->server_path) goto fail;
     if (otg_adb_target_prepare(session->adb_serial, adb_target_command, session->adb_path)) goto fail;
-    if (adb_push(session->adb_path, session->adb_serial, session->server_path) != 0) {
+    if (adb_push_retry(session->adb_path, session->adb_serial, session->server_path) != 0) {
         LOG_ERR("adb push of scrcpy-server failed\n");
         goto fail;
     }

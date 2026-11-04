@@ -19,6 +19,9 @@
 #include <string.h>
 
 #define REMOTE_PATH "/data/local/tmp/deskflow-otg-scrcpy-server.jar"
+#define ADB_PUSH_RETRIES 20
+#define ADB_PUSH_RETRY_DELAY_MS 250
+#define ADB_PUSH_TIMEOUT_MS 5000
 
 #define LOG_ERR(...) fprintf(stderr, "ERROR: " __VA_ARGS__)
 #define LOG_WARN(...) fprintf(stderr, "WARN:  " __VA_ARGS__)
@@ -34,7 +37,8 @@ static int read_full(SOCKET s, void *out, size_t n) {
     return 1;
 }
 
-static int run_adb(const char *adb, const char *serial, const char *command_line) {
+static int run_adb_timeout(const char *adb, const char *serial, const char *command_line,
+                           DWORD timeout_ms) {
     char command[2048];
     STARTUPINFOA si = { sizeof(si) };
     PROCESS_INFORMATION pi;
@@ -43,7 +47,7 @@ static int run_adb(const char *adb, const char *serial, const char *command_line
     memset(&pi, 0, sizeof(pi));
     if (!CreateProcessA(NULL, command, NULL, NULL, FALSE, CREATE_NO_WINDOW,
                         NULL, NULL, &si, &pi)) return -1;
-    if (WaitForSingleObject(pi.hProcess, 5000) != WAIT_OBJECT_0) {
+    if (WaitForSingleObject(pi.hProcess, timeout_ms) != WAIT_OBJECT_0) {
         TerminateProcess(pi.hProcess, 1);
         WaitForSingleObject(pi.hProcess, INFINITE);
         CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
@@ -53,6 +57,34 @@ static int run_adb(const char *adb, const char *serial, const char *command_line
     GetExitCodeProcess(pi.hProcess, &code);
     CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
     return code == 0 ? 0 : -1;
+}
+
+static int run_adb(const char *adb, const char *serial, const char *command_line) {
+    return run_adb_timeout(adb, serial, command_line, 5000);
+}
+
+/* USB HID may become visible a little before the phone's ADB transport after
+ * a re-enumeration.  Retry the server upload in the bridge so the GUI does
+ * not consume the whole USB attachment on a transient startup race. */
+static int run_adb_push_retry(const char *adb, const char *serial, const char *server) {
+    char command[512];
+    int attempt;
+    int length = snprintf(command, sizeof(command), "push \"%s\" \"%s\"", server, REMOTE_PATH);
+    if (length < 0 || (size_t)length >= sizeof(command)) return -1;
+    ULONGLONG deadline = GetTickCount64() + ADB_PUSH_TIMEOUT_MS;
+    for (attempt = 0; attempt < ADB_PUSH_RETRIES; ++attempt) {
+        ULONGLONG now = GetTickCount64();
+        if (now >= deadline) break;
+        if (run_adb_timeout(adb, serial, command, (DWORD)(deadline - now)) == 0) return 0;
+        now = GetTickCount64();
+        if (attempt + 1 == ADB_PUSH_RETRIES || now >= deadline) break;
+        if (attempt == 0)
+            LOG_INFO("ADB server upload failed; retrying briefly while the selected transport recovers\n");
+        DWORD delay = (DWORD)(deadline - now);
+        if (delay > ADB_PUSH_RETRY_DELAY_MS) delay = ADB_PUSH_RETRY_DELAY_MS;
+        Sleep(delay);
+    }
+    return -1;
 }
 
 #ifdef OTG_HAVE_AUDIO
@@ -168,7 +200,7 @@ static char *copy_text(const char *value) {
 
 int scrcpy_session_start(struct scrcpy_session *s, const char *adb, const char *adb_serial,
                         const char *server, const char *version, bool audio, bool clipboard) {
-    WSADATA wsa; char push[512], forward[128], remote[128];
+    WSADATA wsa; char forward[128], remote[128];
     STARTUPINFOA si = { sizeof(si) }; PROCESS_INFORMATION pi = {0};
     SOCKET sock; unsigned port = 27183U + (GetCurrentProcessId() % 10000U);
 #ifndef OTG_HAVE_AUDIO
@@ -185,8 +217,10 @@ int scrcpy_session_start(struct scrcpy_session *s, const char *adb, const char *
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) goto fail;
     s->winsock_ready = true;
     if (otg_adb_target_prepare(adb_serial, adb_target_command, s->adb_path)) goto fail;
-    snprintf(push, sizeof(push), "push \"%s\" \"%s\"", server, REMOTE_PATH);
-    if (run_adb(adb, adb_serial, push) != 0) goto fail;
+    if (run_adb_push_retry(adb, adb_serial, server) != 0) {
+        LOG_ERR("adb push of scrcpy-server failed\n");
+        goto fail;
+    }
     snprintf(remote, sizeof(remote), "localabstract:scrcpy_%08x", GetCurrentProcessId() & 0x7fffffffU);
     snprintf(forward, sizeof(forward), "tcp:%u %s", port, remote);
     { char forward_cmd[160]; snprintf(forward_cmd, sizeof(forward_cmd), "forward %s", forward);
