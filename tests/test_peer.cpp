@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <QCoreApplication>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QSettings>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -21,6 +23,38 @@ int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
     const auto args = app.arguments();
+    if (args.contains("get-state") || args.contains("install") ||
+        args.contains("com.github.gh6497.deskflowotg") || args.contains("enabled_notification_listeners") ||
+        args.contains("com.github.gh6497.deskflowotg/.MainActivity")) {
+        const auto logPath = qEnvironmentVariable("OTG_TEST_COMPANION_LOG");
+        if (!logPath.isEmpty()) {
+            QFile log(logPath);
+            if (log.open(QIODevice::WriteOnly | QIODevice::Append))
+                log.write(QJsonDocument(QJsonArray::fromStringList(args.mid(1))).toJson(QJsonDocument::Compact) + '\n');
+        }
+        const auto mode = qEnvironmentVariable("OTG_TEST_COMPANION");
+        if (mode == "command-failure") return 1;
+        if (mode == "pm-failure" && args.contains("pm")) return 1;
+        if (mode == "settings-failure" && args.contains("settings")) return 1;
+        const char *text = "";
+        if (args.contains("get-state")) text = mode == "offline" ? "unauthorized\n" : "device\n";
+        else if (args.contains("install")) text = mode == "install-failure" ?
+            "Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE]\n" : "Success\n";
+        else if (args.contains("pm")) text = mode == "missing" ? "" : "package:/data/app/companion/base.apk\n";
+        else if (args.contains("am")) text = mode == "open-failure" ? "Error type 3\nError: Activity does not exist\n" :
+            mode == "open-timeout" ? "Status: timeout\n" : "Status: ok\n";
+        else if (mode == "settings-error") text = "Error while accessing settings provider\n";
+        else if (mode == "granted") text = "com.github.gh6497.deskflowotg/com.github.gh6497.deskflowotg.DeskflowNotificationListenerService\n";
+        else if (mode == "short-granted") text = "other.app/.Listener:com.github.gh6497.deskflowotg/.DeskflowNotificationListenerService\n";
+        else text = "com.github.gh6497.deskflowotg.fake/.DeskflowNotificationListenerService\n";
+        const int delay = qEnvironmentVariableIntValue("OTG_TEST_COMPANION_DELAY");
+        if (delay > 0) {
+            QTimer::singleShot(delay, &app, [text, &app] { output(text); app.quit(); });
+            return app.exec();
+        }
+        output(text);
+        return 0;
+    }
     if (qEnvironmentVariableIsSet("OTG_TEST_BLE_WINDOWS") &&
         (args.contains("--ble-status") || args.contains("--ble-service"))) return 10;
     if (args.contains("--ble-status")) {

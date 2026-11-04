@@ -5,6 +5,7 @@
 #include "session.h"
 #include "connection_manager.h"
 #include "usb_auto_connect.h"
+#include "companion_app.h"
 #include <QMainWindow>
 #include <QPointer>
 #include <QVariantMap>
@@ -70,6 +71,8 @@ private:
     void persistDevices();
     void updateAutoConnect();
     void regenerateTlsCertificate();
+    void setupCompanion(CompanionApp::Action action);
+    void updateCompanionStatus();
     void appendLog(const QString &text, const QString &id = {});
     void refreshLog();
     QWidget *pathField(QLineEdit *&field, const char *placeholderId);
@@ -95,6 +98,13 @@ private:
     ScreenLayoutPreview *m_layoutCanvas;
     QPushButton *m_connectAll, *m_disconnectAll, *m_addDevice, *m_removeDevice;
     UsbAutoConnect m_autoConnect;
+    CompanionApp m_companion;
+    QString m_companionDeviceId;
+    QMap<QString, QString> m_companionStatuses;
+    QLineEdit *m_companionApk;
+    QWidget *m_companionBox;
+    QLabel *m_companionStatus;
+    QPushButton *m_companionInstall, *m_companionOpen, *m_companionCheck;
     QMap<QString, QVariantMap> m_profiles;
     QVariantMap m_pendingProfile;
     QSystemTrayIcon *m_tray = nullptr;

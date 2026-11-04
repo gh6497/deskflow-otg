@@ -88,6 +88,10 @@ The files still use the Qt TS XML format, but have an `.xml` suffix so that IDEs
 
 When there is only one ADB device, it is selected automatically; with multiple devices, select one manually. The GUI queries the ADB device path and passes the serial number to the bridge core for an exact match with the actual USB descriptor; it does not fall back to an arbitrary device. If the vendor's ADB and USB identifiers differ, manually correct the value using the candidate USB serial numbers listed in the bridge log. Without USB debugging, use manual mode to enter the serial number and dimensions. The native Windows ADB USB backend may return an `unknown` path; in that case, dimension reading continues and the bridge core verifies the USB identity.
 
+### Optional Android companion app
+
+The USB device page provides **Install / update APK**, **Open phone setup**, and **Check permission** for the [Android companion app](docs/ANDROID_COMPANION.md). Version 0.1.3 monitors USB connection state as well as accessory removal, immediately requesting pause for all playing/buffering sessions on disconnect, with no added delay. Brief re-enumeration or unplug/replug may also pause playback. This applies to all USB data connections, not only Deskflow. Setup requires authorized ADB and manual notification-access approval on the phone; no APK is installed automatically, and keyboard/mouse operation does not depend on it. Select a signed APK manually, or bundle one at desktop build time with `-DCOMPANION_APK=/path/to/signed.apk`. Permission checks do not prove service readiness or unplug-to-pause compatibility with a phone ROM. See the linked guide for target selection, packaging, and limitations.
+
 ### Multiple devices
 
 The GUI manages the device list on the left and provides three tabs on the right: "Device configuration", "Screen layout", and "Shared service".

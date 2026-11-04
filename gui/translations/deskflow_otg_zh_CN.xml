@@ -3,6 +3,25 @@
 <TS version="2.1" language="zh_CN" sourcelanguage="en">
 <context>
   <name></name>
+  <message id="otg.companion.title"><source>Android companion app (optional)</source><translation>Android 伴侣应用（可选）</translation></message>
+  <message id="otg.companion.hint"><source>Immediately request pause for all playing/buffering media sessions on USB disconnect. Brief USB re-enumeration may also pause playback; reconnecting does not resume it. Setup requires authorized ADB: use the ADB target above, or the USB serial if empty. Open the app and manually enable notification access. No notification content is read. Applies to all USB data connections, not BLE.</source><translation>收到 USB 断开事件即请求暂停所有播放/缓冲中的媒体会话。USB 重新枚举的短暂断开也可能暂停，重连不会恢复播放。设置需要已授权的 ADB：优先使用上方 ADB 目标，留空则使用 USB 序列号。打开应用后手动启用通知使用权，不读取通知正文。适用于所有 USB 数据连接，不支持 BLE 断开暂停。</translation></message>
+  <message id="otg.companion.apk_hint"><source>Select a signed companion APK, or use the bundled APK</source><translation>选择已签名的伴侣 APK，或使用随包附带的 APK</translation></message>
+  <message id="otg.companion.select_apk"><source>Select Android companion APK</source><translation>选择 Android 伴侣 APK</translation></message>
+  <message id="otg.companion.install"><source>Install / update APK</source><translation>安装 / 更新 APK</translation></message>
+  <message id="otg.companion.open"><source>Open phone setup</source><translation>打开手机端设置</translation></message>
+  <message id="otg.companion.check"><source>Check permission</source><translation>检查授权状态</translation></message>
+  <message id="otg.companion.optional"><source>Optional. No APK is installed automatically; keyboard and mouse do not require this app.</source><translation>可选功能，不会自动安装 APK；键鼠连接无需此应用。</translation></message>
+  <message id="otg.companion.working"><source>Setting up the selected phone via ADB…</source><translation>正在通过 ADB 设置当前手机…</translation></message>
+  <message id="otg.companion.target_required"><source>Enter an ADB executable and an explicit phone serial / ADB target first.</source><translation>请先配置 ADB 程序，并填写明确的手机序列号 / ADB 目标。</translation></message>
+  <message id="otg.companion.apk_required"><source>Select a readable signed .apk file first.</source><translation>请先选择可读取且已签名的 .apk 文件。</translation></message>
+  <message id="otg.companion.adb_failed"><source>The selected ADB target is unavailable. Enable and authorize USB debugging, or connect wireless ADB first. See the log.</source><translation>所选 ADB 目标不可用。请开启并授权 USB 调试，或先连接无线 ADB，详情见日志。</translation></message>
+  <message id="otg.companion.installed"><source>APK installed. Open phone setup and manually enable notification access, then check permission.</source><translation>APK 已安装。请打开手机端设置，手动开启通知使用权后检查授权状态。</translation></message>
+  <message id="otg.companion.install_failed"><source>APK installation failed. Check the log for signing, version, Android compatibility, or phone confirmation errors. The existing app was not uninstalled.</source><translation>APK 安装失败。请查看日志中的签名、版本、Android 兼容性或手机确认错误；未卸载原有应用。</translation></message>
+  <message id="otg.companion.command_failed"><source>Could not query or open the companion app. See the log.</source><translation>无法查询或打开伴侣应用，详情见日志。</translation></message>
+  <message id="otg.companion.not_installed"><source>The companion app is not installed for the current Android user. Install the APK first.</source><translation>当前 Android 用户尚未安装伴侣应用，请先安装 APK。</translation></message>
+  <message id="otg.companion.opened"><source>Phone setup opened. Tap its notification-access button and enable deskflow-otg manually.</source><translation>已打开手机端设置。请点击应用内的通知使用权按钮，手动启用 deskflow-otg。</translation></message>
+  <message id="otg.companion.access_enabled"><source>Notification access is enabled. This does not verify that the service is running or that unplug-to-pause works; test on the phone.</source><translation>通知使用权已开启。此结果不代表服务正在运行或拔出暂停已生效，仍需手机实测。</translation></message>
+  <message id="otg.companion.access_required"><source>Installed, but notification access is not enabled. Open phone setup to grant it manually.</source><translation>已安装，但尚未开启通知使用权。请打开手机端设置手动授权。</translation></message>
   <message id="otg.ble.pause_failed"><source>BLE session release timed out; the GUI-owned provider was stopped. GATT continuity was lost.</source><translation>BLE 会话释放超时，已停止此 GUI 创建的服务，GATT 连续性已丢失。</translation></message>
   <message id="otg.ble.provider_target"><source>The retained BLE provider has a different phone, bridge executable or clipboard/ADB configuration. Stop the idle Bluetooth service explicitly before changing it.</source><translation>保留的 BLE 服务使用不同的手机、桥接程序或剪贴板/ADB 配置，请先显式停止空闲蓝牙服务再切换。</translation></message>
   <message id="otg.ble.provider_retained"><source>Session disconnected; Windows GATT and phone subscriptions are retained until service stop or GUI exit.</source><translation>会话已断开，Windows GATT 与手机订阅继续保留，直到停止服务或退出 GUI。</translation></message>
@@ -56,9 +75,9 @@
   <message id="otg.action.refresh"><source>Refresh devices</source><translation>刷新设备</translation></message>
   <message id="otg.label.device"><source>Device</source><translation>设备</translation></message>
   <message id="otg.label.usb_serial"><source>USB serial number</source><translation>USB 序列号</translation></message>
-  <message id="otg.label.adb_serial"><source>ADB serial for audio/clipboard (optional for USB)</source><translation>音频/剪贴板 ADB 序列号（USB 可选）</translation></message>
+  <message id="otg.label.adb_serial"><source>ADB target (audio / clipboard / companion)</source><translation>ADB 目标（音频 / 剪贴板 / 伴侣应用）</translation></message>
   <message id="otg.adb_serial.placeholder"><source>Leave empty to use the USB serial; e.g. 192.168.1.20:5555</source><translation>留空则使用 USB 序列号；例如 192.168.1.20:5555</translation></message>
-  <message id="otg.adb_serial.tooltip"><source>Audio and clipboard share this authorized ADB transport. Wireless host:port targets connect automatically; pair first if required. Use the connection port, not the pairing port. BLE clipboard requires an explicit ADB serial for the same phone.</source><translation>音频与剪贴板共用此已授权 ADB 连接。无线地址（主机:端口）会自动连接；如需配对，请先手动配对。填写连接端口，而非配对端口。BLE 剪贴板必须明确填写同一台手机的 ADB 序列号。</translation></message>
+  <message id="otg.adb_serial.tooltip"><source>Use the same phone's authorized ADB transport for audio, clipboard and optional companion setup. Audio/clipboard can connect wireless host:port targets automatically; companion setup requires an existing connection. Pair manually first if required; use the connection port, not the pairing port. BLE clipboard requires an explicit target.</source><translation>音频、剪贴板和可选伴侣应用设置使用同一台手机的已授权 ADB 目标。音频/剪贴板可自动连接无线地址（主机:端口）；伴侣应用设置要求目标已连接。如需配对请先手动完成，填写连接端口而非配对端口。BLE 剪贴板必须明确填写目标。</translation></message>
   <message id="otg.device.debugging_required"><source>ADB screen-size detection requires USB debugging and authorization. USB auto-connect does not.</source><translation>ADB 识别尺寸需要 USB 调试及授权；USB 自动连接不需要。</translation></message>
   <message id="otg.action.swap_dimensions"><source>Swap dimensions</source><translation>交换宽高</translation></message>
   <message id="otg.label.original_size"><source>Original screen size</source><translation>原始屏幕尺寸</translation></message>
