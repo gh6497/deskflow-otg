@@ -1,9 +1,9 @@
 /*
- * deskflow-tog - Android companion application.
+ * deskflow-otg - Android companion application.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package com.github.gh6497.deskflowtog;
+package com.github.gh6497.deskflowotg;
 
 import android.app.Activity;
 import android.content.ComponentName;
@@ -50,7 +50,7 @@ public final class MainActivity extends Activity {
         root.setPadding(padding, padding, padding, padding);
 
         TextView title = new TextView(this);
-        title.setText("deskflow-tog");
+        title.setText("deskflow-otg");
         title.setTextSize(28.0f);
         title.setTextColor(0xff1565c0);
         root.addView(title, new LinearLayout.LayoutParams(
