@@ -293,6 +293,16 @@ for f in platform/linux/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only
   `companion_status` fake ADB 和 Java 状态策略回归不等于真机广播投递验收。
 
 - 剪贴板用 `--clipboard` / `-DBUILD_CLIPBOARD=ON` 独立开启，默认关闭、按设备保存。
+  Android 0.1.6 / GUI「文件与分享」是独立通道，不是图片剪贴板：`TransferProvider` 以 DUMP
+  保护读写且不授予 URI 权限；`ShareActivity` 仅用户确认后读取分享 content URI，文本暂存为
+  UTF-8 文件。`gui/companion_transfer.cpp` 固定 `adb -s`，仅 USB 回退 USB serial，BLE 需显式
+  ADB。`am get-current-user` 解析数字用户，content CLI 不支持 `--user current`。
+  v1上传含长度/EOF/SHA-256；64KiB分块、约256KiB背压，手机私有暂存32个/2GiB、单文件1GiB。
+  手机上传回执确认提交，电脑接收临时文件校验后不覆盖改名，再清手机 outbox 并重读列表确认；
+  content delete 无成功计数且错误可能退出0，不得只信退出码。手机另存走 SAF，接收不自动打开。
+  主动刷新/接收、不后台轮询、不自动连接/安装/授权/启动界面、不改剪贴板或桥接；取消只处理
+  自己子进程，退出等待其结束。`android_transfer`/`companion_transfer`/窗口测试均离线，非真机验收。
+  细节和信任边界见 `docs/FILE_SHARING.md`。
   `src/deskflow_client.c` 实现主剪贴板 CCLP/DCLP 分块、所有权、活动时离开上传/后台立即上传，
   服从 CLPS/CLSZ；不直接读 GUI 本机剪贴板，外部 Deskflow server/CLI 沿用同一协议。
   `src/clipboard.c` 是独立协议实现，负责 UTF-8/大小校验和非阻塞 scrcpy 控制通道。

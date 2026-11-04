@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "main_window.h"
+#include "transfer_dialog.h"
 #include "process_utils.h"
 #include "i18n.h"
 #include "build_version.h"
@@ -594,6 +595,22 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     m_connect->setDefault(true);
     m_disconnect = translated(new QPushButton, "text", "otg.action.disconnect");
     buttons->addWidget(m_status, 1);
+    m_transferFiles = translated(new QPushButton, "text", "otg.transfer.title");
+    m_transferFiles->setObjectName("transferFiles");
+    buttons->addWidget(m_transferFiles);
+    connect(m_transferFiles, &QPushButton::clicked, this, [this] {
+        if (m_transferDialog) { m_transferDialog->show(); m_transferDialog->raise(); return; }
+        const auto target = !m_adbSerial->text().trimmed().isEmpty() ? m_adbSerial->text().trimmed()
+            : m_transport->currentData() == "usb" ? m_serial->text().trimmed() : QString();
+        auto *dialog = new TransferDialog(m_adb->text().trimmed(), target, this);
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        m_transferDialog = dialog;
+        connect(dialog, &TransferDialog::stopped, this, [this] {
+            m_transferDialog = nullptr;
+            if (m_closing) QTimer::singleShot(0, this, &QWidget::close);
+        });
+        dialog->show();
+    });
     buttons->addWidget(m_connect);
     buttons->addWidget(m_disconnect);
     rightLayout->addLayout(buttons);
@@ -1108,7 +1125,9 @@ void MainWindow::updateEnabled()
     m_deviceForm->setRowVisible(m_stopBleService, linuxBle || (ble && m_session->hasBleProvider()));
     m_deviceForm->setRowVisible(m_devices->parentWidget(), !ble);
     m_deviceForm->setRowVisible(m_serial, !ble);
-    const bool adbFeatures = !ble || m_clipboard->isChecked();
+    // File sharing and companion status may use an explicit wireless ADB target
+    // even with BLE HID, independently of the optional clipboard build feature.
+    const bool adbFeatures = true;
     m_deviceForm->setRowVisible(m_adbSerial, adbFeatures);
     m_deviceForm->setRowVisible(m_autoConnectEnabled, !ble);
     m_programForm->setRowVisible(m_adb->parentWidget(), adbFeatures);
@@ -1175,6 +1194,9 @@ void MainWindow::updateEnabled()
     m_mouseMode->setEnabled(!ble);
     const bool companionTarget = !m_adb->text().trimmed().isEmpty() &&
         (!m_adbSerial->text().trimmed().isEmpty() || !m_serial->text().trimmed().isEmpty());
+    m_transferFiles->setEnabled(!m_closing && !m_companion.busy() &&
+        !m_adb->text().trimmed().isEmpty() &&
+        (!m_adbSerial->text().trimmed().isEmpty() || (!ble && !m_serial->text().trimmed().isEmpty())));
     m_companionInstall->setEnabled(companionTarget);
     m_companionOpen->setEnabled(companionTarget);
     m_companionCheck->setEnabled(companionTarget);
@@ -1537,12 +1559,16 @@ void MainWindow::closeEvent(QCloseEvent *event)
         hide();
         return;
     }
-    if (m_connections.settled() && !m_companion.busy()) {
+    if (m_transferDialog) m_transferDialog->reject();
+    if (m_connections.settled() && !m_companion.busy() && !m_transferDialog) {
         m_closing = true;
         m_autoConnect.setEnabled(false);
         m_tray->hide();
         event->accept();
-        emit exitReady();
+        if (!m_exitEmitted) {
+            m_exitEmitted = true;
+            emit exitReady();
+        }
         return;
     }
     m_closing = true;

@@ -9,6 +9,8 @@ add_library(otg_gui_support STATIC
   connection_manager.cpp connection_manager.h
   companion_app.cpp companion_app.h
   companion_status_sync.cpp companion_status_sync.h
+  companion_transfer.cpp companion_transfer.h
+  transfer_dialog.cpp transfer_dialog.h
   usb_auto_connect.cpp usb_auto_connect.h
   tls_certificate.cpp tls_certificate.h
   i18n.cpp i18n.h
@@ -140,6 +142,11 @@ if(BUILD_TESTING)
   target_link_libraries(test_peer PRIVATE Qt6::Network Threads::Threads)
   qt_add_executable(test_gui ../tests/test_gui.cpp)
   qt_add_executable(test_companion_status ../tests/test_companion_status.cpp)
+  qt_add_executable(test_transfer_peer ../tests/test_transfer_peer.cpp)
+  target_link_libraries(test_transfer_peer PRIVATE Qt6::Core)
+  qt_add_executable(test_companion_transfer ../tests/test_companion_transfer.cpp)
+  target_link_libraries(test_companion_transfer PRIVATE otg_gui_support Qt6::Test)
+  add_dependencies(test_companion_transfer test_transfer_peer)
   target_link_libraries(test_companion_status PRIVATE otg_gui_support Qt6::Test)
   add_dependencies(test_companion_status test_peer)
   qt_add_executable(test_usb_auto_connect ../tests/test_usb_auto_connect.cpp)
@@ -154,7 +161,7 @@ if(BUILD_TESTING)
   # Copy reference inputs as text: adding .cpp directly to a resource would mark
   # those shared sources HEADER_FILE_ONLY and remove them from other targets.
   set(i18n_test_sources)
-  foreach(name main_window.cpp session.cpp process_utils.cpp deskflow_server.cpp connection_manager.cpp companion_app.cpp)
+  foreach(name main_window.cpp session.cpp process_utils.cpp deskflow_server.cpp connection_manager.cpp companion_app.cpp companion_transfer.cpp transfer_dialog.cpp)
     set(input "${CMAKE_CURRENT_BINARY_DIR}/i18n-test/${name}.txt")
     configure_file("${name}" "${input}" COPYONLY)
     list(APPEND i18n_test_sources "${input}")
@@ -177,15 +184,19 @@ if(BUILD_TESTING)
     target_compile_definitions(test_gui PRIVATE
       OTG_TEST_NATIVE_BLE_PEER="$<TARGET_FILE:test_ble_win_control_peer>")
   endif()
-  add_dependencies(test_window test_peer)
+  add_dependencies(test_window test_peer test_transfer_peer)
   if(MSVC)
     target_compile_options(test_gui PRIVATE /utf-8)
     target_compile_options(test_window PRIVATE /utf-8)
-    set_property(TARGET test_gui test_window test_peer test_usb_auto_connect test_companion_status PROPERTY
+    target_compile_options(test_transfer_peer PRIVATE /utf-8)
+    target_compile_options(test_companion_transfer PRIVATE /utf-8)
+    set_property(TARGET test_gui test_window test_peer test_usb_auto_connect test_companion_status test_transfer_peer test_companion_transfer PROPERTY
       MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
   endif()
   add_test(NAME gui_logic COMMAND test_gui)
   add_test(NAME companion_status COMMAND test_companion_status)
+  add_test(NAME companion_transfer COMMAND test_companion_transfer)
+  set_tests_properties(companion_transfer PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
   add_test(NAME usb_auto_connect COMMAND test_usb_auto_connect)
   add_test(NAME gui_window COMMAND test_window)
   add_test(NAME gui_version COMMAND deskflow-otg-gui --version)

@@ -17,4 +17,22 @@
     <string name="autoplay_target">播放器：%1$s</string>
     <string name="autoplay_no_sessions">没有活动媒体会话。请先打开播放器播放一次，再返回选择。</string>
     <string name="autoplay_unavailable">无法读取媒体会话，请检查通知使用权及监听服务是否运行。</string>
+    <string name="share_to_computer">分享至电脑</string>
+    <string name="share_confirm">准备分享</string>
+    <string name="share_preparing">正在准备 %1$s · %2$d 字节</string>
+    <string name="share_description">将 %1$d 项内容准备为待接收文件。文本以 UTF-8 文件发送。随后在桌面端打开「文件与分享」，刷新、选择并接收。无需通知使用权。</string>
+    <string name="share_invalid">不支持的分享内容。请选择文本或最多 32 个内容文件（单文件上限 1 GiB，总暂存上限 2 GiB）。</string>
+    <string name="share_queued">已准备好。请在电脑打开「文件与分享」，刷新后选择并接收。仅已授权的 ADB 电脑可读取。未发送内容可在本应用中删除。</string>
+    <string name="transfer_title">文件与分享</string>
+    <string name="transfer_phone_help">从已授权 ADB 电脑接收的文件先保存在应用私有空间，点击「另存为」通过系统选择器保存，不自动打开。请删除已保存或不再分享的内容以释放空间（最多 32 个文件、共 2 GiB）。</string>
+    <string name="transfer_refresh">刷新</string>
+    <string name="transfer_empty">暂无待处理文件。</string>
+    <string name="transfer_incoming">已接收：%1$s（%2$d 字节）</string>
+    <string name="transfer_outgoing">待发送到电脑：%1$s（%2$d 字节）</string>
+    <string name="transfer_save">另存为…</string>
+    <string name="transfer_delete">删除私有副本</string>
+    <string name="transfer_delete_confirm">删除此私有副本？不会删除已经另存到其他位置的文件。</string>
+    <string name="transfer_saving">正在保存…</string>
+    <string name="transfer_saved">已保存，可以删除私有副本释放空间。</string>
+    <string name="transfer_failed">传输失败或已取消。请检查文件读取权限、剩余空间和单文件 1 GiB 限制。已完成的文件会保留，需手动重试。</string>
 </resources>

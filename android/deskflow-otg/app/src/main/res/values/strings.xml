@@ -18,4 +18,22 @@
     <string name="autoplay_target">Player: %1$s</string>
     <string name="autoplay_no_sessions">No active media sessions. Open your player and play something first, then return here to select it.</string>
     <string name="autoplay_unavailable">Media sessions unavailable. Check notification access and that the listener is running.</string>
+    <string name="share_to_computer">Share to computer</string>
+    <string name="share_confirm">Prepare share</string>
+    <string name="share_preparing">Preparing %1$s · %2$d B</string>
+    <string name="share_description">Items to prepare: %1$d. Text is sent as a UTF-8 file. Then open Files &amp; sharing in the desktop GUI, refresh and receive. No notification access is needed.</string>
+    <string name="share_invalid">Unsupported share. Select text or up to 32 content files (1 GiB per file, 2 GiB storage total).</string>
+    <string name="share_queued">Ready. On your computer open Files &amp; sharing, refresh, select these files and receive. Only an already-authorized ADB computer can read them. Unsent items can be deleted in this app.</string>
+    <string name="transfer_title">Files &amp; sharing</string>
+    <string name="transfer_phone_help">Files received from an authorized ADB computer remain private until you save them with the system picker. They are never opened automatically. Delete saved or unsent items to free space (32 files / 2 GiB total).</string>
+    <string name="transfer_refresh">Refresh</string>
+    <string name="transfer_empty">No pending files.</string>
+    <string name="transfer_incoming">Received: %1$s (%2$d B)</string>
+    <string name="transfer_outgoing">To computer: %1$s (%2$d B)</string>
+    <string name="transfer_save">Save as…</string>
+    <string name="transfer_delete">Delete private copy</string>
+    <string name="transfer_delete_confirm">Delete this private copy? This does not delete files already saved elsewhere.</string>
+    <string name="transfer_saving">Saving…</string>
+    <string name="transfer_saved">Saved. You can now delete the private copy.</string>
+    <string name="transfer_failed">Transfer failed or cancelled. Check file access, free space and the 1 GiB per-file limit. Already completed files are kept; retry manually.</string>
 </resources>

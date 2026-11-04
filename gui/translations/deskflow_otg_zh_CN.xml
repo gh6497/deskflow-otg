@@ -3,6 +3,19 @@
 <TS version="2.1" language="zh_CN" sourcelanguage="en">
 <context>
   <name></name>
+  <message id="otg.transfer.working"><source>Working with the selected phone…</source><translation>正在处理所选手机的文件请求…</translation></message>
+  <message id="otg.transfer.title"><source>Files &amp; sharing</source><translation>文件与分享</translation></message>
+  <message id="otg.transfer.help"><source>Requires companion app 0.1.6 and already-authorized ADB. On the phone share to computer, then refresh here and select files to receive. Sending to phone stores private copies; save them from the app. No clipboard changes or automatic opening. Limits: 32 files, 1 GiB per file, 2 GiB total.</source><translation>需要伴侣应用 0.1.6 和已有的已授权 ADB。在手机「分享至电脑」后，在此刷新并选择接收。发送到手机的文件先保存在应用私有空间，请在手机应用中另存。不修改剪贴板、不自动打开。最多 32 个文件，单文件 1 GiB，总计 2 GiB。</translation></message>
+  <message id="otg.transfer.refresh"><source>Refresh phone shares</source><translation>刷新手机分享</translation></message>
+  <message id="otg.transfer.receive"><source>Receive selected</source><translation>接收所选文件</translation></message>
+  <message id="otg.transfer.send"><source>Send files to phone</source><translation>发送文件到手机</translation></message>
+  <message id="otg.transfer.cancel"><source>Cancel transfer</source><translation>取消传输</translation></message>
+  <message id="otg.transfer.directory"><source>Choose receive folder (files are not overwritten)</source><translation>选择接收目录（不覆盖已有文件）</translation></message>
+  <message id="otg.transfer.ready"><source>Select pending phone files to receive, or send files to the phone.</source><translation>请选择待接收的手机文件，或发送文件到手机。</translation></message>
+  <message id="otg.transfer.done"><source>Transfer complete. Refresh to check for more phone shares. Received phone files can be saved from the companion app.</source><translation>传输完成。可刷新查看其他手机分享。手机接收的文件请在伴侣应用中另存。</translation></message>
+  <message id="otg.transfer.failed"><source>Transfer failed. Check the selected ADB target, app version, storage and file permissions. Completed files are kept; incomplete downloads are removed. Retry manually.</source><translation>传输失败，请检查当前 ADB 目标、应用版本、存储空间和文件权限。已完成的文件保留，不完整的电脑接收文件会删除。请手动重试。</translation></message>
+  <message id="otg.transfer.cancelled"><source>Transfer cancelled. Already completed files are kept. A file committed on the phone just before cancellation may still appear in its inbox.</source><translation>传输已取消，已完成的文件保留。取消前刚在手机完成写入的文件仍可能显示在收件箱。</translation></message>
+  <message id="otg.transfer.ack_failed"><source>The file was saved on this computer, but could not be removed from the phone outbox. Do not receive it again; delete its private copy in the app.</source><translation>文件已保存到电脑，但无法清除手机待发送记录。请勿重复接收，可在手机应用中删除对应私有副本。</translation></message>
   <message id="otg.companion.title"><source>Companion app (optional)</source><translation>伴侣应用（可选）</translation></message>
   <message id="otg.companion.hint"><source>Pause playing media when USB is re-enumerated. Requires authorized ADB; it does not install automatically or resume playback.</source><translation>用于 USB 重新枚举时暂停手机播放。需要已授权的 ADB；不会自动安装应用，也不会自动恢复播放。</translation></message>
   <message id="otg.companion.apk_hint"><source>Select a signed companion APK, or use the bundled APK</source><translation>选择已签名的伴侣 APK，或使用随包附带的 APK</translation></message>

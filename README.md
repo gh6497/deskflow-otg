@@ -96,6 +96,17 @@ The USB device page provides **Install / update APK**, **Open phone setup**, and
 
 Companion **0.1.4** also displays the actual Deskflow session state reported by the updated desktop GUI over already-authorized ADB. Only the completed Deskflow handshake counts as connected; reports expire to **Status unknown** after 15 seconds without confirmation. This optional status channel does not require notification access, does not connect/pair ADB automatically, and does not affect HID or immediate USB-disconnect pause. Open the app once after installation. CLI sessions and connections without ADB cannot report status; phone-side broadcast delivery still requires real-device validation.
 
+### Share to computer and file transfer
+
+With companion app **0.1.6+** and an already-authorized ADB connection, the desktop **Files & sharing**
+window can receive phone shares and send images/files to the phone. Share text, one image, or multiple
+files through Android's **Share to computer**, then refresh, select and receive them on the desktop.
+Text shares are UTF-8 files, not clipboard updates. Files sent to the phone remain private until saved
+through the companion app's system file picker. Transfers are explicit, cancellable and SHA-256 checked;
+files are not overwritten or opened automatically. Limits: 32 files, 1 GiB each, 2 GiB phone storage total.
+USB or already-connected wireless ADB is supported on Linux/Windows/macOS; BLE HID requires an explicit
+separate ADB target. No notification access is required. See [File sharing](docs/FILE_SHARING.md).
+
 ### Multiple devices
 
 The GUI manages the device list on the left and provides three tabs on the right: "Device configuration", "Screen layout", and "Shared service".
@@ -541,7 +552,7 @@ In the GUI's TLS section, click **Generate client certificate** to create a self
 ## Current limitations
 
 - Keyboard mapping uses the **US layout**; some symbol keys may be wrong with other layouts.
-- Clipboard support is optional ADB text sharing only; image/file clipboards, file drag-and-drop, and screenshots are not supported.
+- Clipboard support is optional ADB text sharing only; image/file clipboards, file drag-and-drop, and screenshots are not supported. Explicit image/file transfer is available separately through the [companion app](docs/FILE_SHARING.md).
 - Only keyboard and mouse are supported; gamepads (AOA gamepad) are not implemented.
 - The default absolute pointer depends on Android HID digitizer support; compatibility with specific devices requires real-device validation.
 - `--mouse-mode relative` is a compatibility mode; Android mouse acceleration may cause drift and early boundary contact.
