@@ -3,10 +3,10 @@
 <TS version="2.1" language="zh_CN" sourcelanguage="en">
 <context>
   <name></name>
-  <message id="otg.companion.title"><source>Android companion app (optional)</source><translation>Android 伴侣应用（可选）</translation></message>
-  <message id="otg.companion.hint"><source>Immediately request pause for all playing/buffering media sessions on USB disconnect. Brief USB re-enumeration may also pause playback; reconnecting does not resume it. Setup requires authorized ADB: use the ADB target above, or the USB serial if empty. Open the app and manually enable notification access. No notification content is read. Applies to all USB data connections, not BLE.</source><translation>收到 USB 断开事件即请求暂停所有播放/缓冲中的媒体会话。USB 重新枚举的短暂断开也可能暂停，重连不会恢复播放。设置需要已授权的 ADB：优先使用上方 ADB 目标，留空则使用 USB 序列号。打开应用后手动启用通知使用权，不读取通知正文。适用于所有 USB 数据连接，不支持 BLE 断开暂停。</translation></message>
+  <message id="otg.companion.title"><source>Companion app (optional)</source><translation>伴侣应用（可选）</translation></message>
+  <message id="otg.companion.hint"><source>Pause playing media when USB is re-enumerated. Requires authorized ADB; it does not install automatically or resume playback.</source><translation>用于 USB 重新枚举时暂停手机播放。需要已授权的 ADB；不会自动安装应用，也不会自动恢复播放。</translation></message>
   <message id="otg.companion.apk_hint"><source>Select a signed companion APK, or use the bundled APK</source><translation>选择已签名的伴侣 APK，或使用随包附带的 APK</translation></message>
-  <message id="otg.companion.select_apk"><source>Select Android companion APK</source><translation>选择 Android 伴侣 APK</translation></message>
+  <message id="otg.companion.select_apk"><source>Select companion APK</source><translation>选择伴侣 APK</translation></message>
   <message id="otg.companion.install"><source>Install / update APK</source><translation>安装 / 更新 APK</translation></message>
   <message id="otg.companion.open"><source>Open phone setup</source><translation>打开手机端设置</translation></message>
   <message id="otg.companion.check"><source>Check permission</source><translation>检查授权状态</translation></message>
@@ -16,9 +16,9 @@
   <message id="otg.companion.apk_required"><source>Select a readable signed .apk file first.</source><translation>请先选择可读取且已签名的 .apk 文件。</translation></message>
   <message id="otg.companion.adb_failed"><source>The selected ADB target is unavailable. Enable and authorize USB debugging, or connect wireless ADB first. See the log.</source><translation>所选 ADB 目标不可用。请开启并授权 USB 调试，或先连接无线 ADB，详情见日志。</translation></message>
   <message id="otg.companion.installed"><source>APK installed. Open phone setup and manually enable notification access, then check permission.</source><translation>APK 已安装。请打开手机端设置，手动开启通知使用权后检查授权状态。</translation></message>
-  <message id="otg.companion.install_failed"><source>APK installation failed. Check the log for signing, version, Android compatibility, or phone confirmation errors. The existing app was not uninstalled.</source><translation>APK 安装失败。请查看日志中的签名、版本、Android 兼容性或手机确认错误；未卸载原有应用。</translation></message>
+  <message id="otg.companion.install_failed"><source>APK installation failed. Check the log for signing, version, platform compatibility, or phone confirmation errors. The existing app was not uninstalled.</source><translation>APK 安装失败。请查看日志中的签名、版本、系统兼容性或手机确认错误；未卸载原有应用。</translation></message>
   <message id="otg.companion.command_failed"><source>Could not query or open the companion app. See the log.</source><translation>无法查询或打开伴侣应用，详情见日志。</translation></message>
-  <message id="otg.companion.not_installed"><source>The companion app is not installed for the current Android user. Install the APK first.</source><translation>当前 Android 用户尚未安装伴侣应用，请先安装 APK。</translation></message>
+  <message id="otg.companion.not_installed"><source>The companion app is not installed for the current user. Install the APK first.</source><translation>当前用户尚未安装伴侣应用，请先安装 APK。</translation></message>
   <message id="otg.companion.opened"><source>Phone setup opened. Tap its notification-access button and enable deskflow-otg manually.</source><translation>已打开手机端设置。请点击应用内的通知使用权按钮，手动启用 deskflow-otg。</translation></message>
   <message id="otg.companion.access_enabled"><source>Notification access is enabled. This does not verify that the service is running or that unplug-to-pause works; test on the phone.</source><translation>通知使用权已开启。此结果不代表服务正在运行或拔出暂停已生效，仍需手机实测。</translation></message>
   <message id="otg.companion.access_required"><source>Installed, but notification access is not enabled. Open phone setup to grant it manually.</source><translation>已安装，但尚未开启通知使用权。请打开手机端设置手动授权。</translation></message>
@@ -53,14 +53,14 @@
   <message id="otg.ble.service_retained"><source>Starting the resident Bluetooth service as the current user. It stays running across sessions and GUI exits to preserve phone subscriptions.</source><translation>正在以当前用户启动常驻蓝牙服务；会话断开和 GUI 退出后仍保留，以维持手机订阅。</translation></message>
   <message id="otg.auto_connect.hotplug"><source>USB auto-connect is using hotplug event notifications.</source><translation>USB 自动连接已启用热插拔事件通知。</translation></message>
   <message id="otg.auto_connect.polling"><source>USB hotplug notifications are unavailable or stopped; auto-connect is using 2-second polling.</source><translation>USB 热插拔通知不可用或监听已停止，自动连接已回退为每 2 秒轮询。</translation></message>
-  <message id="otg.auto_connect.enabled"><source>Automatically connect this device on USB insertion after its first successful connection</source><translation>USB 插入时自动连接此设备（成功连接后生效）</translation></message>
+  <message id="otg.auto_connect.enabled"><source>Automatically connect this device when USB is inserted</source><translation>USB 插入时自动连接此设备</translation></message>
   <message id="otg.auto_connect.tooltip"><source>No USB debugging required. Remembers each successfully connected phone and its settings. Keep the app running, including in the tray. After a manual disconnect or failure, unplug and reinsert USB to retry.</source><translation>无需 USB 调试。记住每台成功连接过的手机及其配置。需保持程序运行（可驻留托盘）。手动断开或连接失败后，拔插 USB 才会再次自动连接。</translation></message>
   <message id="otg.auto_connect.connecting"><source>USB phone %1 detected; connecting with remembered settings.</source><translation>检测到 USB 手机 %1，正在使用已记住的配置连接。</translation></message>
   <message id="otg.auto_connect.scan_failed"><source>USB auto-connect scan failed. Check bridge installation, USB permissions and drivers; scanning will continue.</source><translation>USB 自动连接扫描失败，请检查桥接程序、USB 权限和驱动；程序将继续检测。</translation></message>
   <message id="otg.auto_connect.restored"><source>Using remembered phone settings without ADB. Adjust dimensions manually if the screen orientation has changed.</source><translation>已恢复手机配置，无需 ADB。若屏幕方向已改变，请手动调整宽高。</translation></message>
   <message id="otg.action.about"><source>About</source><translation>关于</translation></message>
   <message id="otg.about.title"><source>About Deskflow OTG</source><translation>关于 Deskflow OTG</translation></message>
-  <message id="otg.about.text"><source>Deskflow OTG&#10;Version: %1&#10;Git commit: %2&#10;&#10;Share your keyboard and mouse with Android over USB.&#10;CLI and GUI use the same software version.&#10;License: Apache-2.0</source><translation>Deskflow OTG&#10;版本：%1&#10;Git 提交：%2&#10;&#10;通过 USB 与安卓共享键盘鼠标。&#10;命令行与 GUI 使用相同的软件版本。&#10;许可证：Apache-2.0</translation></message>
+  <message id="otg.about.text"><source>Deskflow OTG&#10;Version: %1&#10;Git commit: %2&#10;&#10;Share your keyboard and mouse over USB.&#10;CLI and GUI use the same software version.&#10;License: Apache-2.0</source><translation>Deskflow OTG&#10;版本：%1&#10;Git 提交：%2&#10;&#10;通过 USB 共享键盘鼠标。&#10;命令行与 GUI 使用相同的软件版本。&#10;许可证：Apache-2.0</translation></message>
   <message id="otg.tray.show"><source>Show window</source><translation>显示窗口</translation></message>
   <message id="otg.tray.quit"><source>Quit</source><translation>退出</translation></message>
   <message id="otg.label.language"><source>Language</source><translation>语言</translation></message>
@@ -68,22 +68,25 @@
   <message id="otg.language.english"><source>English</source><translation>English</translation></message>
   <message id="otg.action.browse"><source>Browse…</source><translation>浏览…</translation></message>
   <message id="otg.dialog.select_executable"><source>Select executable</source><translation>选择可执行程序</translation></message>
-  <message id="otg.window.title"><source>Deskflow OTG · Android keyboard and mouse bridge</source><translation>Deskflow OTG · 安卓键鼠桥接</translation></message>
-  <message id="otg.window.intro"><source>Share your computer's keyboard and mouse with Android</source><translation>将电脑键鼠共享到安卓手机</translation></message>
-  <message id="otg.section.device"><source>1  Select phone</source><translation>1  选择手机</translation></message>
+  <message id="otg.window.title"><source>Deskflow OTG · keyboard and mouse bridge</source><translation>Deskflow OTG · 键鼠桥接</translation></message>
+  <message id="otg.window.intro"><source>Share your computer's keyboard and mouse</source><translation>共享电脑键盘和鼠标</translation></message>
+  <message id="otg.section.device"><source>Connection</source><translation>连接设备</translation></message>
+  <message id="otg.section.display"><source>Screen and display</source><translation>屏幕与显示</translation></message>
+  <message id="otg.section.features"><source>Input and features</source><translation>输入与功能</translation></message>
   <message id="otg.device.manual"><source>Enter USB serial number manually</source><translation>手动填写 USB 序列号</translation></message>
   <message id="otg.action.refresh"><source>Refresh devices</source><translation>刷新设备</translation></message>
   <message id="otg.label.device"><source>Device</source><translation>设备</translation></message>
+  <message id="otg.label.connection_status"><source>Connection status</source><translation>连接状态</translation></message>
   <message id="otg.label.usb_serial"><source>USB serial number</source><translation>USB 序列号</translation></message>
-  <message id="otg.label.adb_serial"><source>ADB target (audio / clipboard / companion)</source><translation>ADB 目标（音频 / 剪贴板 / 伴侣应用）</translation></message>
+  <message id="otg.label.adb_serial"><source>ADB target (optional)</source><translation>ADB 目标（可选）</translation></message>
   <message id="otg.adb_serial.placeholder"><source>Leave empty to use the USB serial; e.g. 192.168.1.20:5555</source><translation>留空则使用 USB 序列号；例如 192.168.1.20:5555</translation></message>
   <message id="otg.adb_serial.tooltip"><source>Use the same phone's authorized ADB transport for audio, clipboard and optional companion setup. Audio/clipboard can connect wireless host:port targets automatically; companion setup requires an existing connection. Pair manually first if required; use the connection port, not the pairing port. BLE clipboard requires an explicit target.</source><translation>音频、剪贴板和可选伴侣应用设置使用同一台手机的已授权 ADB 目标。音频/剪贴板可自动连接无线地址（主机:端口）；伴侣应用设置要求目标已连接。如需配对请先手动完成，填写连接端口而非配对端口。BLE 剪贴板必须明确填写目标。</translation></message>
   <message id="otg.device.debugging_required"><source>ADB screen-size detection requires USB debugging and authorization. USB auto-connect does not.</source><translation>ADB 识别尺寸需要 USB 调试及授权；USB 自动连接不需要。</translation></message>
   <message id="otg.action.swap_dimensions"><source>Swap dimensions</source><translation>交换宽高</translation></message>
-  <message id="otg.label.original_size"><source>Original screen size</source><translation>原始屏幕尺寸</translation></message>
+  <message id="otg.label.original_size"><source>Phone screen resolution</source><translation>手机屏幕分辨率</translation></message>
   <message id="otg.sensitivity.tooltip"><source>Virtual size = original size ÷ multiplier (rounded). Higher values reduce mouse travel; 1× restores the original size. Applies only to absolute mode.</source><translation>虚拟宽高 = 原始宽高 ÷ 倍率（四舍五入）。倍率越大，移动越省力；1× 恢复原始尺寸。仅用于绝对坐标模式。</translation></message>
   <message id="otg.label.sensitivity"><source>Sensitivity multiplier</source><translation>灵敏度倍率</translation></message>
-  <message id="otg.label.virtual_size"><source>Effective virtual size</source><translation>实际虚拟尺寸</translation></message>
+  <message id="otg.label.virtual_size"><source>Bridge resolution</source><translation>桥接分辨率</translation></message>
   <message id="otg.section.connection"><source>2  Deskflow connection</source><translation>2  Deskflow 连接</translation></message>
   <message id="otg.server.manage"><source>Configure and start local Deskflow automatically</source><translation>自动配置并启动本机 Deskflow</translation></message>
   <message id="otg.position.right"><source>Right</source><translation>右侧</translation></message>
@@ -113,10 +116,10 @@
   <message id="otg.tls.fingerprint_file_hint"><source>Use this instead of entering a fingerprint above</source><translation>使用此文件即可，不必填写上面的指纹</translation></message>
   <message id="otg.section.programs"><source>Programs and mode</source><translation>程序与模式</translation></message>
   <message id="otg.path.adb_hint"><source>Use bundled ADB by default, or select an external executable</source><translation>优先使用随包提供的 ADB，也可指定外部程序</translation></message>
-  <message id="otg.audio.enabled"><source>Forward Android audio (requires ADB; Linux/Windows)</source><translation>转发安卓音频（需要 ADB；Linux/Windows）</translation></message>
-  <message id="otg.clipboard.enabled"><source>Share text clipboard through Deskflow (requires ADB)</source><translation>通过 Deskflow 共享文本剪贴板（需要 ADB）</translation></message>
-  <message id="otg.display.auto_rotate"><source>Follow screen rotation (dynamic size update)</source><translation>跟随屏幕旋转（动态更新尺寸）</translation></message>
-  <message id="otg.display.auto_rotate.tooltip"><source>When audio or clipboard uses ADB, update the Deskflow screen size after Android rotates. Disabled by default.</source><translation>音频或剪贴板使用 ADB 时，安卓旋转屏幕后动态更新 Deskflow 屏幕尺寸，默认关闭。</translation></message>
+  <message id="otg.audio.enabled"><source>Forward audio (requires ADB)</source><translation>转发音频（需要 ADB）</translation></message>
+  <message id="otg.clipboard.enabled"><source>Share text clipboard (requires ADB)</source><translation>共享文本剪贴板（需要 ADB）</translation></message>
+  <message id="otg.display.auto_rotate"><source>Follow screen rotation (requires ADB)</source><translation>跟随屏幕旋转（需要 ADB）</translation></message>
+  <message id="otg.display.auto_rotate.tooltip"><source>Requires ADB with audio or clipboard enabled; updates the Deskflow screen size after rotation. Disabled by default.</source><translation>需要启用音频或剪贴板并使用 ADB；旋转后动态更新 Deskflow 屏幕尺寸，默认关闭。</translation></message>
   <message id="otg.clipboard.tooltip"><source>Shares UTF-8 text using Deskflow ownership and screen-switch rules, including background copies. Sensitive copied text may reach other devices. Uses the same ADB/scrcpy session as audio; images and files are not shared.</source><translation>按 Deskflow 所有权和切屏规则共享文本，包含后台设备的复制。敏感文字可能传到其他设备。与音频共用 ADB/scrcpy 会话；不共享图片和文件。</translation></message>
   <message id="otg.clipboard.off"><source>Clipboard: off</source><translation>剪贴板：已关闭</translation></message>
   <message id="otg.clipboard.waiting"><source>Clipboard: waiting for ADB and Deskflow</source><translation>剪贴板：等待 ADB 与 Deskflow</translation></message>
@@ -179,6 +182,7 @@
   <message id="otg.log.usb_initializing"><source>Initializing USB HID and waiting for Deskflow to accept the screen…</source><translation>正在初始化 USB HID 并等待 Deskflow 接受屏幕…</translation></message>
   <message id="otg.error.bridge_output"><source>Invalid bridge status output.</source><translation>桥接状态输出无效。</translation></message>
   <message id="otg.status.connected"><source>Connected — move the mouse toward the phone to control it</source><translation>已连接 — 将鼠标移到手机一侧即可控制</translation></message>
+  <message id="otg.status.connected_short"><source>Connected</source><translation>已连接</translation></message>
   <message id="otg.log.usb_ready"><source>USB HID is ready.</source><translation>USB HID 已就绪。</translation></message>
   <message id="otg.status.disconnecting"><source>Releasing keyboard and mouse and disconnecting…</source><translation>正在释放键鼠并断开…</translation></message>
   <message id="otg.status.disconnected"><source>Disconnected</source><translation>已断开</translation></message>

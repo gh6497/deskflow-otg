@@ -99,6 +99,7 @@ void MainWindow::retranslateUi()
     m_language->setItemText(1, qtTrId("otg.language.english"));
     if (m_sessionStatus)
         m_status->setText(m_connections.status(m_selectedId));
+    updateConnectionStatus();
     if (m_tabs) {
         m_tabs->setTabText(0, qtTrId("otg.multi.device_tab"));
         m_tabs->setTabText(1, qtTrId("otg.multi.layout_tab"));
@@ -283,6 +284,11 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     m_deviceBox = deviceBox;
     auto *deviceForm = new QFormLayout(deviceBox);
     m_deviceForm = deviceForm;
+    deviceForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    m_connectionStatus = new QLabel;
+    m_connectionStatus->setObjectName("deviceConnectionStatus");
+    m_connectionStatus->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    deviceForm->addRow(translated(new QLabel, "text", "otg.label.connection_status"), m_connectionStatus);
     m_alias = new QLineEdit;
     m_alias->setObjectName("deviceAlias");
     addTranslatedRow(deviceForm, "otg.multi.alias", m_alias);
@@ -353,6 +359,87 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     m_autoConnectEnabled->setObjectName("autoConnectEnabled");
     setTranslatedProperty(m_autoConnectEnabled, "toolTip", "otg.auto_connect.tooltip");
     deviceForm->addRow(m_autoConnectEnabled);
+    formLayout->addWidget(deviceBox);
+
+    auto *displayBox = translated(new QGroupBox, "title", "otg.section.display");
+    auto *displayForm = new QFormLayout(displayBox);
+    m_displayForm = displayForm;
+    displayForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+
+    auto *sizeRow = new QWidget;
+    auto *sizeLayout = new QHBoxLayout(sizeRow);
+    sizeLayout->setContentsMargins(0, 0, 0, 0);
+    m_width = new QSpinBox;
+    m_height = new QSpinBox;
+    m_width->setObjectName("screenWidth");
+    m_height->setObjectName("screenHeight");
+    m_width->setRange(1, 32767);
+    m_height->setRange(1, 32767);
+    sizeLayout->addWidget(m_width);
+    sizeLayout->addWidget(new QLabel("×"));
+    sizeLayout->addWidget(m_height);
+    auto *swap = translated(new QPushButton, "text", "otg.action.swap_dimensions");
+    swap->setObjectName("swapDimensions");
+    sizeLayout->addWidget(swap);
+    sizeLayout->addStretch();
+    connect(swap, &QPushButton::clicked, this, [this] {
+        const int width = m_width->value();
+        m_width->setValue(m_height->value());
+        m_height->setValue(width);
+    });
+    addTranslatedRow(displayForm, "otg.label.original_size", sizeRow);
+
+    m_sensitivity = new QDoubleSpinBox;
+    m_sensitivity->setObjectName("sensitivityMultiplier");
+    m_sensitivity->setRange(1.0, 10.0);
+    m_sensitivity->setDecimals(2);
+    m_sensitivity->setSingleStep(0.25);
+    m_sensitivity->setSuffix(" ×");
+    setTranslatedProperty(m_sensitivity, "toolTip", "otg.sensitivity.tooltip");
+    addTranslatedRow(displayForm, "otg.label.sensitivity", m_sensitivity);
+
+    m_virtualSize = new QLabel;
+    m_virtualSize->setObjectName("virtualScreenSize");
+    m_virtualSize->setWordWrap(true);
+    addTranslatedRow(displayForm, "otg.label.virtual_size", m_virtualSize);
+
+    m_phone = new QLineEdit;
+    m_phone->setObjectName("screenName");
+    addTranslatedRow(displayForm, "otg.label.phone_name", m_phone);
+
+    m_autoRotate = translated(new QCheckBox, "text", "otg.display.auto_rotate");
+    m_autoRotate->setObjectName("autoRotate");
+    setTranslatedProperty(m_autoRotate, "toolTip", "otg.display.auto_rotate.tooltip");
+    displayForm->addRow(m_autoRotate);
+    formLayout->addWidget(displayBox);
+
+    auto *featuresBox = translated(new QGroupBox, "title", "otg.section.features");
+    auto *featuresForm = new QFormLayout(featuresBox);
+    m_featuresForm = featuresForm;
+    featuresForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+
+    m_mouseMode = new QComboBox;
+    m_mouseMode->setObjectName("mouseMode");
+    m_mouseMode->addItem(qtTrId("otg.mouse.absolute"), "absolute");
+    m_mouseMode->addItem(qtTrId("otg.mouse.relative"), "relative");
+    addTranslatedRow(featuresForm, "otg.label.mouse_mode", m_mouseMode);
+
+    m_audio = translated(new QCheckBox, "text", "otg.audio.enabled");
+    m_audio->setObjectName("audioEnabled");
+    setTranslatedProperty(m_audio, "toolTip", "otg.audio.tooltip");
+    featuresForm->addRow(m_audio);
+
+    m_clipboard = translated(new QCheckBox, "text", "otg.clipboard.enabled");
+    m_clipboard->setObjectName("clipboardEnabled");
+    setTranslatedProperty(m_clipboard, "toolTip", "otg.clipboard.tooltip");
+    featuresForm->addRow(m_clipboard);
+
+    m_clipboardStatus = new QLabel;
+    m_clipboardStatus->setObjectName("clipboardStatus");
+    m_clipboardStatus->setWordWrap(true);
+    featuresForm->addRow(m_clipboardStatus);
+    formLayout->addWidget(featuresBox);
+
     auto *companionBox = translated(new QGroupBox, "title", "otg.companion.title");
     m_companionBox = companionBox;
     auto *companionLayout = new QVBoxLayout(companionBox);
@@ -371,7 +458,7 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     apkLayout->addWidget(browseApk);
     connect(browseApk, &QPushButton::clicked, this, [this] {
         const auto path = QFileDialog::getOpenFileName(this, qtTrId("otg.companion.select_apk"),
-                                                      m_companionApk->text(), "Android APK (*.apk)");
+                                                       m_companionApk->text(), "APK (*.apk)");
         if (!path.isEmpty()) m_companionApk->setText(path);
     });
     companionLayout->addWidget(apkRow);
@@ -390,7 +477,7 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     m_companionStatus->setObjectName("companionStatus");
     m_companionStatus->setWordWrap(true);
     companionLayout->addWidget(m_companionStatus);
-    deviceForm->addRow(companionBox);
+    formLayout->addWidget(companionBox);
     connect(m_companionInstall, &QPushButton::clicked, this, [this] { setupCompanion(CompanionApp::Action::Install); });
     connect(m_companionOpen, &QPushButton::clicked, this, [this] { setupCompanion(CompanionApp::Action::Open); });
     connect(m_companionCheck, &QPushButton::clicked, this, [this] { setupCompanion(CompanionApp::Action::Check); });
@@ -400,41 +487,6 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
         updateEnabled();
         if (m_closing) QTimer::singleShot(0, this, &QWidget::close);
     });
-    auto *sizeRow = new QWidget;
-    auto *sizeLayout = new QHBoxLayout(sizeRow);
-    sizeLayout->setContentsMargins(0, 0, 0, 0);
-    m_width = new QSpinBox;
-    m_height = new QSpinBox;
-    m_width->setObjectName("screenWidth");
-    m_height->setObjectName("screenHeight");
-    m_width->setRange(1, 32767);
-    m_height->setRange(1, 32767);
-    sizeLayout->addWidget(m_width);
-    sizeLayout->addWidget(new QLabel("×"));
-    sizeLayout->addWidget(m_height);
-    auto *swap = translated(new QPushButton, "text", "otg.action.swap_dimensions");
-    swap->setObjectName("swapDimensions");
-    sizeLayout->addWidget(swap);
-    connect(swap, &QPushButton::clicked, this, [this] {
-        const int width = m_width->value();
-        m_width->setValue(m_height->value());
-        m_height->setValue(width);
-    });
-    addTranslatedRow(deviceForm, "otg.label.original_size", sizeRow);
-    m_sensitivity = new QDoubleSpinBox;
-    m_sensitivity->setObjectName("sensitivityMultiplier");
-    m_sensitivity->setRange(1.0, 10.0);
-    m_sensitivity->setDecimals(2);
-    m_sensitivity->setSingleStep(0.25);
-    m_sensitivity->setSuffix(" ×");
-    setTranslatedProperty(m_sensitivity, "toolTip", "otg.sensitivity.tooltip");
-    addTranslatedRow(deviceForm, "otg.label.sensitivity", m_sensitivity);
-    m_virtualSize = new QLabel;
-    m_virtualSize->setObjectName("virtualScreenSize");
-    m_virtualSize->setWordWrap(true);
-    addTranslatedRow(deviceForm, "otg.label.virtual_size", m_virtualSize);
-    formLayout->addWidget(deviceBox);
-
     auto *serverBox = translated(new QGroupBox, "title", "otg.section.connection");
     auto *serverForm = new QFormLayout(serverBox);
     m_manage = translated(new QCheckBox, "text", "otg.server.manage");
@@ -462,13 +514,10 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     layoutHint->setWordWrap(true);
     layoutForm->addRow(layoutHint);
     m_computer = new QLineEdit;
-    m_phone = new QLineEdit;
     m_host = new QLineEdit;
     m_port = new QSpinBox;
     m_port->setRange(1, 65535);
     addTranslatedRow(serverForm, "otg.label.computer_name", m_computer);
-    m_phone->setObjectName("screenName");
-    addTranslatedRow(deviceForm, "otg.label.phone_name", m_phone);
     addTranslatedRow(serverForm, "otg.label.server_address", m_host);
     addTranslatedRow(serverForm, "otg.label.server_port", m_port);
     m_tls = translated(new QCheckBox, "text", "otg.tls.enabled");
@@ -525,28 +574,7 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     m_programForm = advancedForm;
     advancedForm->addRow("ADB", pathField(m_adb, "otg.path.adb_hint"));
     m_adb->setObjectName("adbExecutable");
-    m_audio = translated(new QCheckBox, "text", "otg.audio.enabled");
-    m_audio->setObjectName("audioEnabled");
-    setTranslatedProperty(m_audio, "toolTip", "otg.audio.tooltip");
-    deviceForm->addRow(m_audio);
-    m_clipboard = translated(new QCheckBox, "text", "otg.clipboard.enabled");
-    m_clipboard->setObjectName("clipboardEnabled");
-    setTranslatedProperty(m_clipboard, "toolTip", "otg.clipboard.tooltip");
-    deviceForm->addRow(m_clipboard);
-    m_autoRotate = translated(new QCheckBox, "text", "otg.display.auto_rotate");
-    m_autoRotate->setObjectName("autoRotate");
-    setTranslatedProperty(m_autoRotate, "toolTip", "otg.display.auto_rotate.tooltip");
-    deviceForm->addRow(m_autoRotate);
-    m_clipboardStatus = new QLabel;
-    m_clipboardStatus->setObjectName("clipboardStatus");
-    m_clipboardStatus->setWordWrap(true);
-    deviceForm->addRow(m_clipboardStatus);
     advancedForm->addRow("Deskflow", pathField(m_deskflow, "otg.path.deskflow_hint"));
-    m_mouseMode = new QComboBox;
-    m_mouseMode->setObjectName("mouseMode");
-    m_mouseMode->addItem(qtTrId("otg.mouse.absolute"), "absolute");
-    m_mouseMode->addItem(qtTrId("otg.mouse.relative"), "relative");
-    addTranslatedRow(deviceForm, "otg.label.mouse_mode", m_mouseMode);
     sharedLayout->addWidget(advancedBox);
     sharedLayout->addStretch();
     formLayout->addStretch();
@@ -754,6 +782,7 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     connect(&m_connections, &ConnectionManager::changed, this, [this](const QString &id) {
         m_sessionStatus = true;
         m_status->setText(m_connections.status(m_selectedId));
+        updateConnectionStatus();
         if (!id.isEmpty() && m_connections.state(id) == Session::State::Connected && m_pendingProfiles.contains(id)) {
             const auto profile = m_pendingProfiles.take(id);
             if (profile.value("transport", "usb") == "usb") {
@@ -928,6 +957,7 @@ void MainWindow::selectDevice(const QString &id)
     applyDeviceProfile(m_records.value(id));
     m_sessionStatus = true;
     m_status->setText(m_connections.status(id));
+    updateConnectionStatus();
     updateDeviceList();
     updateLayoutPreview();
     updateEnabled();
@@ -1066,6 +1096,7 @@ void MainWindow::updateEnabled()
     const bool idle = m_connections.state(m_selectedId) == Session::State::Idle;
     const bool sharedIdle = !m_connections.busy() && m_connections.serverState() == DeskflowServer::State::Idle;
     const bool ble = m_transport->currentData() == "ble";
+    updateConnectionStatus();
 #ifdef Q_OS_LINUX
     const bool linuxBle = ble;
 #else
@@ -1082,22 +1113,22 @@ void MainWindow::updateEnabled()
     m_deviceForm->setRowVisible(m_autoConnectEnabled, !ble);
     m_programForm->setRowVisible(m_adb->parentWidget(), adbFeatures);
 #ifdef OTG_GUI_HAVE_CLIPBOARD
-    m_deviceForm->setRowVisible(m_clipboard, true);
-    m_deviceForm->setRowVisible(m_clipboardStatus, true);
+    m_featuresForm->setRowVisible(m_clipboard, true);
+    m_featuresForm->setRowVisible(m_clipboardStatus, true);
 #else
-    m_deviceForm->setRowVisible(m_clipboard, false);
-    m_deviceForm->setRowVisible(m_clipboardStatus, false);
+    m_featuresForm->setRowVisible(m_clipboard, false);
+    m_featuresForm->setRowVisible(m_clipboardStatus, false);
 #endif
     m_clipboardStatus->setText(idle ? qtTrId(m_clipboard->isChecked() ?
         "otg.clipboard.disconnected" : "otg.clipboard.off") : m_session->clipboardStatusMessage());
 #ifdef OTG_GUI_HAVE_AUDIO
-    m_deviceForm->setRowVisible(m_audio, !ble);
+    m_featuresForm->setRowVisible(m_audio, !ble);
 #else
-    m_deviceForm->setRowVisible(m_audio, false);
+    m_featuresForm->setRowVisible(m_audio, false);
 #endif
-    m_deviceForm->setRowVisible(m_mouseMode, !ble);
-    m_deviceForm->setRowVisible(m_autoRotate, !ble);
-    m_deviceForm->setRowVisible(m_companionBox, !ble);
+    m_featuresForm->setRowVisible(m_mouseMode, !ble);
+    m_displayForm->setRowVisible(m_autoRotate, !ble);
+    m_companionBox->setVisible(!ble);
     m_autoConnect.setReady(!m_closing && !m_companion.busy());
     if (m_closing)
         m_autoConnect.setEnabled(false);
@@ -1149,6 +1180,30 @@ void MainWindow::updateEnabled()
     m_companionCheck->setEnabled(companionTarget);
     updateCompanionStatus();
     updateTray();
+}
+
+void MainWindow::updateConnectionStatus()
+{
+    if (!m_connectionStatus)
+        return;
+    const auto state = m_connections.state(m_selectedId);
+    const bool connected = state == Session::State::Connected;
+    const bool starting = state == Session::State::Starting;
+    const auto text = connected ? qtTrId("otg.status.connected_short") : m_connections.status(m_selectedId);
+    m_connectionStatus->setText(QStringLiteral("● ") + text);
+    if (connected) {
+        m_connectionStatus->setStyleSheet(
+            "QLabel { color: #1f7a35; background: #e6f4ea; border: 1px solid #b7dfc2; "
+            "border-radius: 10px; padding: 3px 9px; }");
+    } else if (starting) {
+        m_connectionStatus->setStyleSheet(
+            "QLabel { color: #8a5a00; background: #fff4ce; border: 1px solid #e6d58b; "
+            "border-radius: 10px; padding: 3px 9px; }");
+    } else {
+        m_connectionStatus->setStyleSheet(
+            "QLabel { color: #666666; background: #eeeeee; border: 1px solid #cccccc; "
+            "border-radius: 10px; padding: 3px 9px; }");
+    }
 }
 
 void MainWindow::updateCompanionStatus()
