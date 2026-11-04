@@ -3,12 +3,12 @@ plugins {
 }
 
 android {
-    namespace "com.github.gh6497.deskflowtog"
+    namespace "com.github.gh6497.deskflowotg"
     compileSdk 36
     buildToolsVersion "36.0.0"
 
     defaultConfig {
-        applicationId "com.github.gh6497.deskflowtog"
+        applicationId "com.github.gh6497.deskflowotg"
         minSdk 29
         targetSdk 35
         versionCode 1

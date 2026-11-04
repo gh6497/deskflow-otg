@@ -1,9 +1,9 @@
 /*
- * deskflow-tog - Android companion application.
+ * deskflow-otg - Android companion application.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package com.github.gh6497.deskflowtog;
+package com.github.gh6497.deskflowotg;
 
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
@@ -29,7 +29,7 @@ import java.util.List;
  * model and works after the host-side USB connection has disappeared.
  */
 public final class DeskflowNotificationListenerService extends NotificationListenerService {
-    private static final String TAG = "deskflow-tog";
+    private static final String TAG = "deskflow-otg";
 
     private boolean detachReceiverRegistered;
     private final BroadcastReceiver detachReceiver = new BroadcastReceiver() {

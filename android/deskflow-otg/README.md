@@ -1,6 +1,6 @@
-# deskflow-tog
+# deskflow-otg
 
-`deskflow-tog` 是 deskflow-otg 的 Android companion app。当前版本只负责一件事：
+`deskflow-otg` 是 deskflow-otg 的 Android companion app。当前版本只负责一件事：
 
 > 手机收到 USB accessory 拔出事件后，暂停当前正在播放的媒体会话。
 
@@ -12,7 +12,7 @@
 普通 APK 不能直接执行 `adb shell cmd media_session dispatch pause`，也不能可靠地向其他
 应用注入媒体按键。因此应用实现了 `NotificationListenerService`：
 
-1. 用户首次安装后，在系统设置中启用 deskflow-tog 的「通知使用权」；
+1. 用户首次安装后，在系统设置中启用 deskflow-otg 的「通知使用权」；
 2. Android 绑定 `DeskflowNotificationListenerService`；通知监听服务由系统管理，不需要额外的前台服务权限；
 3. 服务动态监听 `UsbManager.ACTION_USB_ACCESSORY_DETACHED`；
 4. 拔出时获取活动媒体会话，只对优先级最高且处于播放/缓冲状态的会话调用 `pause()`。
@@ -37,7 +37,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb shell am start -a android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
 ```
 
-在设置中启用 deskflow-tog 后，服务由 Android 自动绑定。后续可由桌面端在已有 ADB
+在设置中启用 deskflow-otg 后，服务由 Android 自动绑定。后续可由桌面端在已有 ADB
 连接时自动安装/更新 APK；USB 拔出后的暂停动作在手机本地执行，不再依赖拔出后的 ADB
 连接仍然可用。
 
