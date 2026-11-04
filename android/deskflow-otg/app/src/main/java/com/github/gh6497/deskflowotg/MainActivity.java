@@ -152,6 +152,11 @@ public final class MainActivity extends Activity {
         selectPlayer.setOnClickListener(view -> selectAutoplayPlayer());
         root.addView(selectPlayer);
 
+        Button transfers = new Button(this);
+        transfers.setText(R.string.transfer_title);
+        transfers.setOnClickListener(view -> startActivity(new Intent(this, TransferActivity.class)));
+        root.addView(transfers);
+
         return root;
     }
 

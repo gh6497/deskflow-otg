@@ -24,6 +24,7 @@ class QSpinBox;
 class QListWidget;
 class QTabWidget;
 class ScreenLayoutPreview;
+class TransferDialog;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -106,6 +107,8 @@ private:
     QWidget *m_companionBox;
     QLabel *m_companionStatus;
     QPushButton *m_companionInstall, *m_companionOpen, *m_companionCheck;
+    QPushButton *m_transferFiles;
+    QPointer<TransferDialog> m_transferDialog;
     QMap<QString, QVariantMap> m_profiles;
     QVariantMap m_pendingProfile;
     QSystemTrayIcon *m_tray = nullptr;
@@ -142,5 +145,6 @@ private:
     bool m_uiReady = false;
     bool m_sessionStatus = false;
     bool m_closing = false;
+    bool m_exitEmitted = false;
     quint64 m_request = 0;
 };

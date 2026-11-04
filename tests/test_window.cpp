@@ -4,6 +4,7 @@
 #include "build_version.h"
 #include "system_theme.h"
 #include "tls_certificate.h"
+#include "transfer_dialog.h"
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
@@ -51,6 +52,51 @@ protected:
 class WindowTest : public QObject {
     Q_OBJECT
 private slots:
+    void fileSharingWindow()
+    {
+        QTemporaryDir dir;
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dir.path());
+        QSettings settings;
+        settings.setValue("adb", ""); settings.setValue("manageServer", false);
+        qputenv("OTG_TEST_TRANSFER_DIR", dir.path().toUtf8());
+        const auto cleanup = qScopeGuard([] {
+            qunsetenv("OTG_TEST_TRANSFER_DIR"); qunsetenv("OTG_TEST_TRANSFER_MODE");
+        });
+        QFile manifest(dir.filePath("manifest.json")); QVERIFY(manifest.open(QIODevice::WriteOnly));
+        manifest.write("{\"version\":1,\"files\":[]}"); manifest.close();
+        AutoConnectTestWindow window; window.show();
+        QTest::qWait(20); // Initial no-ADB device discovery.
+        auto *button = window.findChild<QPushButton *>("transferFiles"); QVERIFY(button);
+        QVERIFY(!button->isEnabled());
+        auto *adb = window.findChild<QLineEdit *>("adbExecutable");
+        auto *target = window.findChild<QLineEdit *>("adbSerial");
+        adb->setText(QCoreApplication::applicationDirPath() + "/test_transfer_peer"
+#ifdef Q_OS_WIN
+                     ".exe"
+#endif
+                     );
+        target->setText("[::1]:5555");
+        QVERIFY(button->isEnabled()); button->click();
+        auto *dialog = window.findChild<TransferDialog *>("transferDialog"); QVERIFY(dialog);
+        QPointer<CompanionTransfer> engine = dialog->findChild<CompanionTransfer *>(); QVERIFY(engine);
+        QTRY_VERIFY(!engine->busy());
+        // Changing selection/identity in the main form never retargets an open transfer window.
+        target->setText("OTHER-PHONE");
+        dialog->findChild<QPushButton *>("transferRefresh")->click();
+        QTRY_VERIFY(!engine->busy());
+        QFile log(dir.filePath("commands")); QVERIFY(log.open(QIODevice::ReadOnly));
+        for (const auto &line : log.readAll().trimmed().split('\n'))
+            QCOMPARE(QJsonDocument::fromJson(line).array()[1].toString(), "[::1]:5555");
+        qputenv("OTG_TEST_TRANSFER_MODE", "hang-online");
+        dialog->findChild<QPushButton *>("transferRefresh")->click();
+        QVERIFY(engine->busy());
+        QSignalSpy exit(&window, &MainWindow::exitReady);
+        window.findChild<QAction *>("trayQuit")->trigger();
+        QCOMPARE(exit.size(), 0); // Exit waits for cancellation of the ADB worker.
+        QTRY_COMPARE(exit.size(), 1);
+        QVERIFY(!engine || !engine->busy());
+    }
     void companionSetup()
     {
         QTemporaryDir dir;

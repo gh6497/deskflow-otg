@@ -3,6 +3,8 @@
 
     <application
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.DeskflowOtg">
@@ -14,6 +16,27 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity android:name=".TransferActivity" android:exported="false"
+            android:configChanges="orientation|screenSize" />
+        <activity android:name=".ShareActivity" android:exported="true"
+            android:label="@string/share_to_computer" android:configChanges="orientation|screenSize">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity>
+        <provider android:name=".TransferProvider"
+            android:authorities="com.github.gh6497.deskflowotg.transfer"
+            android:exported="true" android:grantUriPermissions="false"
+            android:readPermission="android.permission.DUMP"
+            android:writePermission="android.permission.DUMP" />
 
         <!-- ADB shell has DUMP; ordinary apps cannot forge host connection state.
              The app itself does not request DUMP or notification access here. -->
