@@ -2,6 +2,8 @@
 build/
 build-*/
 cmake-build-*/
+**/.gradle/
+**/local.properties
 stage/
 dist/
 squashfs-root/
