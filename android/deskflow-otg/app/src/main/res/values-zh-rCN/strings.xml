@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="setup_description">USB 拔出时暂停手机当前正在播放的媒体。\n\n首次使用需要启用通知使用权。启用后，本应用会在后台监听 USB 配件拔出事件，不会读取通知内容。</string>
+    <string name="status_access_enabled">状态：已启用媒体控制权限，等待 USB 配件拔出</string>
+    <string name="status_access_required">状态：请先启用通知使用权</string>
+    <string name="open_notification_access_settings">打开通知使用权设置</string>
+</resources>

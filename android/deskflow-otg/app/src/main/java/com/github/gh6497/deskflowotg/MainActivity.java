@@ -38,8 +38,8 @@ public final class MainActivity extends Activity {
         super.onResume();
         if (status != null) {
             status.setText(notificationListenerEnabled()
-                    ? "状态：已启用媒体控制权限，等待 USB accessory 拔出"
-                    : "状态：请先启用通知使用权");
+                    ? R.string.status_access_enabled
+                    : R.string.status_access_required);
         }
     }
 
@@ -50,16 +50,14 @@ public final class MainActivity extends Activity {
         root.setPadding(padding, padding, padding, padding);
 
         TextView title = new TextView(this);
-        title.setText("deskflow-otg");
+        title.setText(R.string.app_name);
         title.setTextSize(28.0f);
         title.setTextColor(0xff1565c0);
         root.addView(title, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView description = new TextView(this);
-        description.setText("USB 拔出时暂停手机当前正在播放的媒体。\n\n"
-                + "首次使用需要启用通知使用权。启用后，本应用会在后台监听"
-                + " USB accessory 拔出事件，不会读取通知内容。");
+        description.setText(R.string.setup_description);
         description.setTextSize(16.0f);
         LinearLayout.LayoutParams descriptionParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -74,7 +72,7 @@ public final class MainActivity extends Activity {
         root.addView(status, statusParams);
 
         Button settingsButton = new Button(this);
-        settingsButton.setText("打开通知使用权设置");
+        settingsButton.setText(R.string.open_notification_access_settings);
         settingsButton.setOnClickListener(view -> {
             startActivity(new Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"));
         });
