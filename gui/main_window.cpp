@@ -108,6 +108,7 @@ void MainWindow::retranslateUi()
     }
     updateVirtualSize();
     if (m_session) m_clipboardStatus->setText(m_session->clipboardStatusMessage());
+    updateCompanionStatus();
     updateTray();
 }
 
@@ -196,7 +197,7 @@ QWidget *MainWindow::pathField(QLineEdit *&field, const char *placeholderId)
     return row;
 }
 
-MainWindow::MainWindow() : m_connections(this), m_autoConnect(this)
+MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion(this)
 {
     QSettings settings;
     if (settings.beginReadArray("devices") > 0) {
@@ -352,6 +353,53 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this)
     m_autoConnectEnabled->setObjectName("autoConnectEnabled");
     setTranslatedProperty(m_autoConnectEnabled, "toolTip", "otg.auto_connect.tooltip");
     deviceForm->addRow(m_autoConnectEnabled);
+    auto *companionBox = translated(new QGroupBox, "title", "otg.companion.title");
+    m_companionBox = companionBox;
+    auto *companionLayout = new QVBoxLayout(companionBox);
+    auto *companionHint = translated(new QLabel, "text", "otg.companion.hint");
+    companionHint->setWordWrap(true);
+    companionLayout->addWidget(companionHint);
+    auto *apkRow = new QWidget;
+    auto *apkLayout = new QHBoxLayout(apkRow);
+    apkLayout->setContentsMargins(0, 0, 0, 0);
+    m_companionApk = new QLineEdit;
+    m_companionApk->setObjectName("companionApk");
+    setTranslatedProperty(m_companionApk, "placeholderText", "otg.companion.apk_hint");
+    m_companionApk->setText(settings.value("companionApk", CompanionApp::bundledApk()).toString());
+    auto *browseApk = translated(new QPushButton, "text", "otg.action.browse");
+    apkLayout->addWidget(m_companionApk, 1);
+    apkLayout->addWidget(browseApk);
+    connect(browseApk, &QPushButton::clicked, this, [this] {
+        const auto path = QFileDialog::getOpenFileName(this, qtTrId("otg.companion.select_apk"),
+                                                      m_companionApk->text(), "Android APK (*.apk)");
+        if (!path.isEmpty()) m_companionApk->setText(path);
+    });
+    companionLayout->addWidget(apkRow);
+    auto *companionButtons = new QHBoxLayout;
+    m_companionInstall = translated(new QPushButton, "text", "otg.companion.install");
+    m_companionOpen = translated(new QPushButton, "text", "otg.companion.open");
+    m_companionCheck = translated(new QPushButton, "text", "otg.companion.check");
+    m_companionInstall->setObjectName("companionInstall");
+    m_companionOpen->setObjectName("companionOpen");
+    m_companionCheck->setObjectName("companionCheck");
+    companionButtons->addWidget(m_companionInstall);
+    companionButtons->addWidget(m_companionOpen);
+    companionButtons->addWidget(m_companionCheck);
+    companionLayout->addLayout(companionButtons);
+    m_companionStatus = new QLabel;
+    m_companionStatus->setObjectName("companionStatus");
+    m_companionStatus->setWordWrap(true);
+    companionLayout->addWidget(m_companionStatus);
+    deviceForm->addRow(companionBox);
+    connect(m_companionInstall, &QPushButton::clicked, this, [this] { setupCompanion(CompanionApp::Action::Install); });
+    connect(m_companionOpen, &QPushButton::clicked, this, [this] { setupCompanion(CompanionApp::Action::Open); });
+    connect(m_companionCheck, &QPushButton::clicked, this, [this] { setupCompanion(CompanionApp::Action::Check); });
+    connect(&m_companion, &CompanionApp::completed, this, [this](const QString &id, const QString &detail) {
+        m_companionStatuses[m_companionDeviceId] = id;
+        appendLog(qtTrId(id.toLatin1().constData()) + (detail.isEmpty() ? QString() : "\n" + detail), m_companionDeviceId);
+        updateEnabled();
+        if (m_closing) QTimer::singleShot(0, this, &QWidget::close);
+    });
     auto *sizeRow = new QWidget;
     auto *sizeLayout = new QHBoxLayout(sizeRow);
     sizeLayout->setContentsMargins(0, 0, 0, 0);
@@ -476,6 +524,7 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this)
     auto *advancedForm = new QFormLayout(advancedBox);
     m_programForm = advancedForm;
     advancedForm->addRow("ADB", pathField(m_adb, "otg.path.adb_hint"));
+    m_adb->setObjectName("adbExecutable");
     m_audio = translated(new QCheckBox, "text", "otg.audio.enabled");
     m_audio->setObjectName("audioEnabled");
     setTranslatedProperty(m_audio, "toolTip", "otg.audio.tooltip");
@@ -656,7 +705,15 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this)
     connect(m_manage, &QCheckBox::toggled, this, &MainWindow::updateEnabled);
     connect(m_refresh, &QPushButton::clicked, this, &MainWindow::refreshDevices);
     connect(m_devices, &QComboBox::currentIndexChanged, this, &MainWindow::readDevice);
-    connect(m_serial, &QLineEdit::textChanged, this, &MainWindow::updateEnabled);
+    connect(m_serial, &QLineEdit::textChanged, this, [this] {
+        m_companionStatuses.remove(m_selectedId);
+        updateEnabled();
+    });
+    connect(m_adbSerial, &QLineEdit::textChanged, this, [this] {
+        m_companionStatuses.remove(m_selectedId);
+        updateEnabled();
+    });
+    connect(m_adb, &QLineEdit::textChanged, this, &MainWindow::updateEnabled);
     connect(m_blePeer, &QLineEdit::textChanged, this, &MainWindow::updateEnabled);
     connect(m_transport, &QComboBox::currentIndexChanged, this, [this] {
         if (m_transport->currentData() == "ble") m_mouseMode->setCurrentIndex(0);
@@ -992,7 +1049,7 @@ ConnectionOptions MainWindow::connectionOptions(const QVariantMap &profile) cons
 
 void MainWindow::connectAll()
 {
-    if (m_closing || m_scanning) return;
+    if (m_closing || m_scanning || m_companion.busy()) return;
     saveSettings();
     const auto selected = m_selectedId;
     const auto ids = m_records.keys();
@@ -1040,25 +1097,26 @@ void MainWindow::updateEnabled()
 #endif
     m_deviceForm->setRowVisible(m_mouseMode, !ble);
     m_deviceForm->setRowVisible(m_autoRotate, !ble);
-    m_autoConnect.setReady(!m_closing);
+    m_deviceForm->setRowVisible(m_companionBox, !ble);
+    m_autoConnect.setReady(!m_closing && !m_companion.busy());
     if (m_closing)
         m_autoConnect.setEnabled(false);
-    m_form->setEnabled(idle && !m_scanning && !m_closing && !m_stoppingBleService);
-    m_sharedBox->setEnabled(sharedIdle && !m_closing);
+    m_form->setEnabled(idle && !m_scanning && !m_closing && !m_stoppingBleService && !m_companion.busy());
+    m_sharedBox->setEnabled(sharedIdle && !m_closing && !m_companion.busy());
     m_layoutBox->setEnabled(!m_closing);
     m_neighbor->setEnabled(sharedIdle && m_manage->isChecked());
-    m_addDevice->setEnabled(sharedIdle && !m_closing);
-    m_removeDevice->setEnabled(sharedIdle && m_records.size() > 1 && !m_session->hasBleProvider() && !m_closing);
-    m_deviceSidebar->setEnabled(!m_closing);
+    m_addDevice->setEnabled(sharedIdle && !m_closing && !m_companion.busy());
+    m_removeDevice->setEnabled(sharedIdle && m_records.size() > 1 && !m_session->hasBleProvider() && !m_closing && !m_companion.busy());
+    m_deviceSidebar->setEnabled(!m_closing && !m_companion.busy());
     bool connectable = false;
     for (auto it = m_records.cbegin(); it != m_records.cend(); ++it) {
         const auto profile = it.key() == m_selectedId ? deviceProfile() : it.value();
         const auto identity = profile.value(profile.value("transport", "usb") == "ble" ? "blePeer" : "serial").toString();
         connectable |= m_connections.state(it.key()) == Session::State::Idle && !identity.isEmpty();
     }
-    m_connectAll->setEnabled(connectable && !m_closing && !m_scanning && m_connections.serverState() != DeskflowServer::State::Stopping);
+    m_connectAll->setEnabled(connectable && !m_closing && !m_scanning && !m_companion.busy() && m_connections.serverState() != DeskflowServer::State::Stopping);
     m_disconnectAll->setEnabled(m_connections.busy() && !m_closing);
-    m_connect->setEnabled(idle && !m_scanning && !m_closing && !m_stoppingBleService &&
+    m_connect->setEnabled(idle && !m_scanning && !m_closing && !m_stoppingBleService && !m_companion.busy() &&
                           m_connections.serverState() != DeskflowServer::State::Stopping &&
                           !(ble ? m_blePeer : m_serial)->text().trimmed().isEmpty());
     m_disconnect->setEnabled(!idle && m_connections.state(m_selectedId) != Session::State::Stopping);
@@ -1084,7 +1142,32 @@ void MainWindow::updateEnabled()
     m_bleIsolate->setEnabled(linuxBle);
     m_stopBleService->setEnabled((linuxBle || m_session->hasBleProvider()) && !m_stoppingBleService);
     m_mouseMode->setEnabled(!ble);
+    const bool companionTarget = !m_adb->text().trimmed().isEmpty() &&
+        (!m_adbSerial->text().trimmed().isEmpty() || !m_serial->text().trimmed().isEmpty());
+    m_companionInstall->setEnabled(companionTarget);
+    m_companionOpen->setEnabled(companionTarget);
+    m_companionCheck->setEnabled(companionTarget);
+    updateCompanionStatus();
     updateTray();
+}
+
+void MainWindow::updateCompanionStatus()
+{
+    const auto id = m_companion.busy() && m_companionDeviceId == m_selectedId ?
+        QString("otg.companion.working") : m_companionStatuses.value(m_selectedId, "otg.companion.optional");
+    m_companionStatus->setText(qtTrId(id.toLatin1().constData()));
+}
+
+void MainWindow::setupCompanion(CompanionApp::Action action)
+{
+    if (m_closing || m_scanning || m_companion.busy() || m_transport->currentData() != "usb" ||
+        m_connections.state(m_selectedId) != Session::State::Idle) return;
+    saveSettings();
+    m_companionDeviceId = m_selectedId;
+    const auto target = m_adbSerial->text().trimmed().isEmpty() ?
+        m_serial->text().trimmed() : m_adbSerial->text().trimmed();
+    m_companion.start(action, m_adb->text().trimmed(), target, m_companionApk->text().trimmed());
+    updateEnabled();
 }
 
 QSize MainWindow::virtualScreenSize() const
@@ -1255,7 +1338,7 @@ void MainWindow::readDevice()
 
 void MainWindow::connectDevice()
 {
-    if (m_closing || m_scanning || m_connections.state(m_selectedId) != Session::State::Idle)
+    if (m_closing || m_scanning || m_companion.busy() || m_connections.state(m_selectedId) != Session::State::Idle)
         return;
     saveSettings();
     const auto options = connectionOptions(deviceProfile());
@@ -1359,6 +1442,7 @@ void MainWindow::saveSettings()
     persistDevices();
     QSettings settings;
     settings.setValue("adb", m_adb->text());
+    settings.setValue("companionApk", m_companionApk->text());
     settings.setValue("audio", m_audio->isChecked());
     settings.setValue("clipboard", m_clipboard->isChecked());
     settings.setValue("autoRotate", m_autoRotate->isChecked());
@@ -1398,7 +1482,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
         hide();
         return;
     }
-    if (m_connections.settled()) {
+    if (m_connections.settled() && !m_companion.busy()) {
         m_closing = true;
         m_autoConnect.setEnabled(false);
         m_tray->hide();

@@ -3,11 +3,14 @@
 #include "process_utils.h"
 #include "session.h"
 #include "connection_manager.h"
+#include "companion_app.h"
 #include "tls_certificate.h"
 #include <QTemporaryDir>
 #include "i18n.h"
 #include <QFile>
 #include <QMap>
+#include <QJsonDocument>
+#include <QJsonArray>
 #include <QRegularExpression>
 #include <QSignalSpy>
 #include <QTcpServer>
@@ -93,6 +96,92 @@ static QStringList placeholders(const QString &text)
 class GuiTest : public QObject {
     Q_OBJECT
 private slots:
+    void companionActions_data()
+    {
+        QTest::addColumn<int>("action");
+        QTest::addColumn<QByteArray>("mode");
+        QTest::addColumn<QString>("status");
+        QTest::addColumn<int>("commands");
+        using A = CompanionApp::Action;
+        QTest::newRow("install") << int(A::Install) << QByteArray() << QString("otg.companion.installed") << 2;
+        QTest::newRow("signature-failure-no-uninstall") << int(A::Install) << QByteArray("install-failure") << QString("otg.companion.install_failed") << 2;
+        QTest::newRow("offline") << int(A::Install) << QByteArray("offline") << QString("otg.companion.adb_failed") << 1;
+        QTest::newRow("adb-failure") << int(A::Check) << QByteArray("command-failure") << QString("otg.companion.adb_failed") << 1;
+        QTest::newRow("open") << int(A::Open) << QByteArray() << QString("otg.companion.opened") << 3;
+        QTest::newRow("open-error-zero-exit") << int(A::Open) << QByteArray("open-failure") << QString("otg.companion.command_failed") << 3;
+        QTest::newRow("open-timeout-zero-exit") << int(A::Open) << QByteArray("open-timeout") << QString("otg.companion.command_failed") << 3;
+        QTest::newRow("query-package-failure") << int(A::Check) << QByteArray("pm-failure") << QString("otg.companion.command_failed") << 2;
+        QTest::newRow("query-permission-failure") << int(A::Check) << QByteArray("settings-failure") << QString("otg.companion.command_failed") << 3;
+        QTest::newRow("query-permission-error-zero-exit") << int(A::Check) << QByteArray("settings-error") << QString("otg.companion.command_failed") << 3;
+        QTest::newRow("missing") << int(A::Check) << QByteArray("missing") << QString("otg.companion.not_installed") << 2;
+        QTest::newRow("permission-required") << int(A::Check) << QByteArray() << QString("otg.companion.access_required") << 3;
+        QTest::newRow("granted") << int(A::Check) << QByteArray("granted") << QString("otg.companion.access_enabled") << 3;
+        QTest::newRow("short-granted") << int(A::Check) << QByteArray("short-granted") << QString("otg.companion.access_enabled") << 3;
+    }
+    void companionActions()
+    {
+        QFETCH(int, action); QFETCH(QByteArray, mode); QFETCH(QString, status); QFETCH(int, commands);
+        QTemporaryDir dir;
+        const auto apk = dir.filePath(QString::fromUtf8("伴侣 app.apk"));
+        QFile file(apk);
+        QVERIFY(file.open(QIODevice::WriteOnly)); file.write("fake apk"); file.close();
+        const auto logPath = dir.filePath("adb.jsonl");
+        qputenv("OTG_TEST_COMPANION", mode);
+        qputenv("OTG_TEST_COMPANION_LOG", logPath.toUtf8());
+        const auto cleanup = qScopeGuard([] { qunsetenv("OTG_TEST_COMPANION"); qunsetenv("OTG_TEST_COMPANION_LOG"); });
+        CompanionApp app;
+        QSignalSpy completed(&app, &CompanionApp::completed);
+        app.start(static_cast<CompanionApp::Action>(action), peerPath(), "[::1]:5555", apk);
+        QVERIFY(app.busy());
+        app.start(CompanionApp::Action::Open, peerPath(), "WRONG"); // No overlapping command or target switch.
+        QTRY_COMPARE(completed.size(), 1);
+        QVERIFY(!app.busy());
+        QCOMPARE(completed.first().first().toString(), status);
+        QFile log(logPath); QVERIFY(log.open(QIODevice::ReadOnly));
+        const auto lines = log.readAll().trimmed().split('\n');
+        QCOMPARE(lines.size(), commands);
+        for (const auto &line : lines) {
+            const auto args = QJsonDocument::fromJson(line).array();
+            QCOMPARE(args.at(0).toString(), "-s");
+            QCOMPARE(args.at(1).toString(), "[::1]:5555");
+            const auto text = QString::fromUtf8(line);
+            QVERIFY(!text.contains("uninstall")); QVERIFY(!text.contains("allow_listener"));
+            QVERIFY(!text.contains("kill-server")); QVERIFY(!text.contains("connect"));
+        }
+        const auto args = QJsonDocument::fromJson(lines.last()).array();
+        if (action == int(CompanionApp::Action::Install) && commands == 2) {
+            QCOMPARE(args.at(2).toString(), "install");
+            QCOMPARE(args.at(3).toString(), "-r");
+            QCOMPARE(args.last().toString(), apk);
+        }
+    }
+    void companionValidation()
+    {
+        CompanionApp app;
+        QSignalSpy completed(&app, &CompanionApp::completed);
+        app.start(CompanionApp::Action::Open, peerPath(), "");
+        QCOMPARE(completed.takeFirst().first().toString(), "otg.companion.target_required");
+        app.start(CompanionApp::Action::Open, peerPath(), "bad\nserial");
+        QCOMPARE(completed.takeFirst().first().toString(), "otg.companion.target_required");
+        app.start(CompanionApp::Action::Install, peerPath(), "TEST", "/missing.apk");
+        QCOMPARE(completed.takeFirst().first().toString(), "otg.companion.apk_required");
+        app.start(CompanionApp::Action::Open, "/nonexistent/adb", "TEST");
+        QTRY_COMPARE(completed.size(), 1);
+        QCOMPARE(completed.first().first().toString(), "otg.companion.adb_failed");
+        QVERIFY(!app.busy());
+    }
+    void companionCommandTimeout()
+    {
+        qputenv("OTG_TEST_COMPANION_DELAY", "500");
+        const auto cleanup = qScopeGuard([] { qunsetenv("OTG_TEST_COMPANION_DELAY"); });
+        bool done = false;
+        runCommand(this, peerPath(), {"-s", "TEST", "get-state"}, [&](bool ok, const QString &error) {
+            QVERIFY(!ok);
+            QVERIFY(error.contains(qtTrId("otg.error.command_timeout")));
+            done = true;
+        }, 40);
+        QTRY_VERIFY(done);
+    }
     void dynamicDisplay_data()
     {
         QTest::addColumn<bool>("audio"); QTest::addColumn<bool>("clipboard");
@@ -636,7 +725,7 @@ private slots:
         // Include indirect ID references in property bindings, states and arrays.
         QSet<QString> references;
         const QRegularExpression pattern("\"(otg\\.[a-z0-9_.]+)\"");
-        for (const char *name : {"main_window.cpp", "session.cpp", "process_utils.cpp", "deskflow_server.cpp", "connection_manager.cpp"}) {
+        for (const char *name : {"main_window.cpp", "session.cpp", "process_utils.cpp", "deskflow_server.cpp", "connection_manager.cpp", "companion_app.cpp"}) {
             QFile source(QString(":/i18n-test/gui/") + name + ".txt");
             QVERIFY(source.open(QIODevice::ReadOnly));
             auto matches = pattern.globalMatch(QString::fromUtf8(source.readAll()));

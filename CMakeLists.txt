@@ -312,6 +312,14 @@ if(BUILD_TESTING)
     endif()
   endif()
   add_test(NAME cli_version COMMAND deskflow-otg --version)
+  # Optional host-only Android policy regression, never an Android SDK/JDK
+  # requirement for the C11 bridge or the Linux/Windows/macOS GUI.
+  find_package(Python3 QUIET COMPONENTS Interpreter)
+  if(Python3_Interpreter_FOUND)
+    add_test(NAME android_usb_disconnect COMMAND "${Python3_EXECUTABLE}"
+      "${PROJECT_SOURCE_DIR}/tests/test_android_usb_disconnect.py")
+    set_tests_properties(android_usb_disconnect PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45)
+  endif()
   set_tests_properties(cli_version PROPERTIES
     PASS_REGULAR_EXPRESSION "deskflow-otg ${PROJECT_VERSION}")
   add_test(NAME cli_ble_validation COMMAND "${CMAKE_COMMAND}"

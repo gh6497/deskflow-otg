@@ -265,6 +265,20 @@ for f in platform/linux/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only
 
 ## 可选桌面 GUI
 
+- Android 伴侣应用通过 `gui/companion_app.cpp` 独立接入，只在 USB 页由用户主动安装/打开/检查。
+  所有 ADB 命令固定 `-s` 目标，优先设备 `adbSerial`、否则 USB serial；先核对在线，禁止自动
+  pair/connect、无目标回退、静默授予通知使用权或签名失败时卸载。`COMPANION_APK` 可选附带
+  已签名 APK，安装在 GUI 可执行文件旁；桌面构建不要求 Android SDK，不自动选择 debug/unsigned。
+  权限检查不是服务或 ROM 广播验收，AOA HID-only 路径不保证发出 accessory-detached。
+  手机端 `USB_STATE`/connected 转换由 `UsbDisconnectMonitor` 纯 Java 状态机处理。
+  0.1.3 按用户要求移除 1.5 秒去抖和定时器，广播回调内立即请求暂停；保留首次 sticky 基线、
+  重复去重及服务解绑清理。重连只重新启用检测，不撤销已发暂停请求或恢复播放。
+  监听所有 USB 数据连接，不限 Deskflow；不支持 BLE，短暂重新枚举也会触发暂停。
+  `android_usb_disconnect` 主机测试有 JDK 才运行，不得等同覆盖安装后的真机拔线验收。
+  手机端 0.1.2 用 `PlaybackPauser` 遍历所有活动媒体会话，播放/缓冲才发 pause；
+  单会话读取/暂停失败继续，不能处理第一个会话后 return。日志请求成功不等于播放器确认。
+  fake ADB 测试覆盖目标、错误、国际化和退出等待，详见 `docs/ANDROID_COMPANION.md`。
+
 - 剪贴板用 `--clipboard` / `-DBUILD_CLIPBOARD=ON` 独立开启，默认关闭、按设备保存。
   `src/deskflow_client.c` 实现主剪贴板 CCLP/DCLP 分块、所有权、活动时离开上传/后台立即上传，
   服从 CLPS/CLSZ；不直接读 GUI 本机剪贴板，外部 Deskflow server/CLI 沿用同一协议。

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name" translatable="false">deskflow-otg</string>
-    <string name="setup_description">Pause media playback on your phone when USB is disconnected.\n\nEnable notification access before first use. Once enabled, this app listens for USB accessory disconnection events in the background without reading notification content.</string>
-    <string name="status_access_enabled">Status: Media control access enabled. Waiting for USB accessory disconnection.</string>
+    <string name="setup_description">Immediately request pause for all playing or buffering media sessions when a USB disconnect event is received.\n\nEnable notification access before first use. This app monitors USB connection and accessory removal events without reading notification content. There is no added delay; even brief USB re-enumeration may pause playback, and reconnecting does not resume it. Already paused players are left unchanged; a failing player does not block others. This applies to all USB data connections, not just Deskflow sessions.</string>
+    <string name="status_access_enabled">Status: Media control access enabled. USB disconnect events immediately request pause.</string>
     <string name="status_access_required">Status: Please enable notification access first.</string>
     <string name="open_notification_access_settings">Open notification access settings</string>
 </resources>

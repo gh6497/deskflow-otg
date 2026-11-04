@@ -7,6 +7,7 @@ add_library(otg_gui_support STATIC
   session.cpp session.h
   deskflow_server.cpp deskflow_server.h
   connection_manager.cpp connection_manager.h
+  companion_app.cpp companion_app.h
   usb_auto_connect.cpp usb_auto_connect.h
   tls_certificate.cpp tls_certificate.h
   i18n.cpp i18n.h
@@ -83,6 +84,20 @@ else()
 endif()
 
 install(TARGETS deskflow-otg-gui BUNDLE DESTINATION . RUNTIME DESTINATION bin)
+# Supply an explicitly signed APK; desktop builds never require an Android SDK
+# or silently ship an unsigned release/debug APK from a developer's build tree.
+set(COMPANION_APK "" CACHE FILEPATH "Signed Android companion APK to bundle with the GUI")
+if(COMPANION_APK)
+  get_filename_component(companion_apk "${COMPANION_APK}" ABSOLUTE BASE_DIR "${PROJECT_SOURCE_DIR}")
+  if(NOT EXISTS "${companion_apk}" OR IS_DIRECTORY "${companion_apk}" OR NOT companion_apk MATCHES "\\.[aA][pP][kK]$")
+    message(FATAL_ERROR "COMPANION_APK must point to a signed .apk file")
+  endif()
+  add_custom_target(otg_companion_apk ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${companion_apk}"
+      "$<TARGET_FILE_DIR:deskflow-otg-gui>/deskflow-otg-companion.apk"
+    DEPENDS deskflow-otg-gui "${companion_apk}")
+  install(FILES "${companion_apk}" DESTINATION "${OTG_GUI_RUNTIME_DIR}" RENAME deskflow-otg-companion.apk)
+endif()
 if(APPLE)
   set(gui_deploy_path "$<TARGET_FILE_NAME:deskflow-otg-gui>.app")
   set(bridge_deploy_path "${OTG_GUI_RUNTIME_DIR}/$<TARGET_FILE_NAME:deskflow-otg>")
@@ -135,7 +150,7 @@ if(BUILD_TESTING)
   # Copy reference inputs as text: adding .cpp directly to a resource would mark
   # those shared sources HEADER_FILE_ONLY and remove them from other targets.
   set(i18n_test_sources)
-  foreach(name main_window.cpp session.cpp process_utils.cpp deskflow_server.cpp connection_manager.cpp)
+  foreach(name main_window.cpp session.cpp process_utils.cpp deskflow_server.cpp connection_manager.cpp companion_app.cpp)
     set(input "${CMAKE_CURRENT_BINARY_DIR}/i18n-test/${name}.txt")
     configure_file("${name}" "${input}" COPYONLY)
     list(APPEND i18n_test_sources "${input}")

@@ -10,6 +10,8 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFile>
+#include <QJsonDocument>
+#include <QJsonArray>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
@@ -49,6 +51,95 @@ protected:
 class WindowTest : public QObject {
     Q_OBJECT
 private slots:
+    void companionSetup()
+    {
+        QTemporaryDir dir;
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dir.path());
+        QSettings settings;
+        settings.setValue("adb", "");
+        settings.setValue("language", "zh_CN");
+        settings.setValue("manageServer", false);
+        const auto logPath = dir.filePath("adb.jsonl");
+        qputenv("OTG_TEST_COMPANION_LOG", logPath.toUtf8());
+        qputenv("OTG_TEST_COMPANION_DELAY", "80");
+        const auto cleanup = qScopeGuard([] {
+            qunsetenv("OTG_TEST_COMPANION_LOG"); qunsetenv("OTG_TEST_COMPANION_DELAY");
+        });
+        QString apk;
+        {
+            AutoConnectTestWindow window;
+            window.show();
+            QTest::qWait(20); // Let startup's no-ADB refresh finish.
+            auto *install = window.findChild<QPushButton *>("companionInstall");
+            auto *open = window.findChild<QPushButton *>("companionOpen");
+            auto *check = window.findChild<QPushButton *>("companionCheck");
+            auto *status = window.findChild<QLabel *>("companionStatus");
+            auto *serial = window.findChild<QLineEdit *>("usbSerial");
+            auto *target = window.findChild<QLineEdit *>("adbSerial");
+            auto *adb = window.findChild<QLineEdit *>("adbExecutable");
+            auto *sidebar = window.findChild<QListWidget *>("deviceSidebar");
+            auto *connectButton = window.findChild<QPushButton *>("connectButton");
+            auto *app = window.findChild<CompanionApp *>();
+            QVERIFY(install && open && check && status && serial && target && adb && sidebar && app);
+            QVERIFY(!install->isEnabled());
+            adb->setText(QCoreApplication::applicationDirPath() + "/test_peer"
+#ifdef Q_OS_WIN
+                         ".exe"
+#endif
+                         );
+            serial->setText("USB-ONLY");
+            target->setText("192.0.2.10:5555");
+            QVERIFY(install->isEnabled());
+            QVERIFY(!QFile::exists(logPath)); // No installation/query on launch or editing.
+            apk = dir.filePath(QString::fromUtf8("手机 app.apk"));
+            QFile file(apk); QVERIFY(file.open(QIODevice::WriteOnly)); file.write("fake APK"); file.close();
+            window.findChild<QLineEdit *>("companionApk")->setText(apk);
+            install->click();
+            QVERIFY(app->busy());
+            QVERIFY(!sidebar->isEnabled());
+            QVERIFY(!connectButton->isEnabled());
+            QCOMPARE(status->text(), qtTrId("otg.companion.working"));
+            QTRY_VERIFY(!app->busy());
+            QCOMPARE(status->text(), qtTrId("otg.companion.installed"));
+            QVERIFY(sidebar->isEnabled()); QVERIFY(connectButton->isEnabled());
+            auto *language = window.findChild<QComboBox *>("languageSelector");
+            language->setCurrentIndex(language->findData("en"));
+            QCOMPARE(install->text(), "Install / update APK");
+            QCOMPARE(status->text(), qtTrId("otg.companion.installed"));
+            language->setCurrentIndex(language->findData("zh_CN"));
+            check->click(); QTRY_VERIFY(!app->busy());
+            QCOMPARE(status->text(), qtTrId("otg.companion.access_required"));
+            auto *transport = window.findChild<QComboBox *>("transportSelector");
+            if (transport->findData("ble") >= 0) {
+                transport->setCurrentIndex(transport->findData("ble"));
+                QVERIFY(!install->isVisible());
+                transport->setCurrentIndex(transport->findData("usb"));
+            }
+            target->clear(); // Manual USB serial fallback, never an unqualified adb command.
+            open->click(); QTRY_VERIFY(!app->busy());
+            QCOMPARE(status->text(), qtTrId("otg.companion.opened"));
+            const auto capture = qEnvironmentVariable("OTG_TEST_COMPANION_SCREENSHOT");
+            if (!capture.isEmpty()) QVERIFY(window.grab().save(capture));
+            check->click();
+            QVERIFY(app->busy());
+            QSignalSpy exit(&window, &MainWindow::exitReady);
+            window.findChild<QAction *>("trayQuit")->trigger();
+            QCOMPARE(exit.size(), 0); // Quit waits for the bounded setup command.
+            QTRY_COMPARE(exit.size(), 1);
+            QFile log(logPath); QVERIFY(log.open(QIODevice::ReadOnly));
+            const auto lines = log.readAll().trimmed().split('\n');
+            QCOMPARE(lines.size(), 11); // install(2), check(3), open(3), check(3)
+            for (int i = 0; i < lines.size(); ++i) {
+                const auto args = QJsonDocument::fromJson(lines[i]).array();
+                QCOMPARE(args[0].toString(), "-s");
+                QCOMPARE(args[1].toString(), i < 5 ? "192.0.2.10:5555" : "USB-ONLY");
+            }
+        }
+        AutoConnectTestWindow restored;
+        QCOMPARE(restored.findChild<QLineEdit *>("companionApk")->text(), apk);
+        restored.findChild<QAction *>("trayQuit")->trigger();
+    }
     void generateClientCertificate()
     {
         QTemporaryDir dir;
