@@ -94,6 +94,8 @@ The USB device page provides **Install / update APK**, **Open phone setup**, and
 
 **Phone-side requirements:** On ROMs with auto-start/background-start controls, allow deskflow-otg to start and run in the background, and set its battery policy to **Unrestricted / No restrictions** or equivalent. Open the app once after installation or an APK update and confirm that its notification-listener service is running; if necessary, toggle its notification access off and on manually. The GUI permission check does not verify auto-start, battery settings, or service liveness. A stopped service cannot receive unplug events or replay them later. See [phone-side requirements and background restrictions](docs/ANDROID_COMPANION.md#手机端生效条件与后台限制).
 
+Companion **0.1.4** also displays the actual Deskflow session state reported by the updated desktop GUI over already-authorized ADB. Only the completed Deskflow handshake counts as connected; reports expire to **Status unknown** after 15 seconds without confirmation. This optional status channel does not require notification access, does not connect/pair ADB automatically, and does not affect HID or immediate USB-disconnect pause. Open the app once after installation. CLI sessions and connections without ADB cannot report status; phone-side broadcast delivery still requires real-device validation.
+
 ### Multiple devices
 
 The GUI manages the device list on the left and provides three tabs on the right: "Device configuration", "Screen layout", and "Shared service".

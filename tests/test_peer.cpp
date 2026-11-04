@@ -25,7 +25,8 @@ int main(int argc, char **argv)
     const auto args = app.arguments();
     if (args.contains("get-state") || args.contains("install") ||
         args.contains("com.github.gh6497.deskflowotg") || args.contains("enabled_notification_listeners") ||
-        args.contains("com.github.gh6497.deskflowotg/.MainActivity")) {
+        args.contains("com.github.gh6497.deskflowotg/.MainActivity") ||
+        args.contains("com.github.gh6497.deskflowotg/.ConnectionStatusReceiver")) {
         const auto logPath = qEnvironmentVariable("OTG_TEST_COMPANION_LOG");
         if (!logPath.isEmpty()) {
             QFile log(logPath);

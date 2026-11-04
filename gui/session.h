@@ -8,6 +8,7 @@
 #include <QTimer>
 #include <QSize>
 #include "deskflow_server.h"
+#include "companion_status_sync.h"
 class QJsonObject;
 
 struct ConnectionOptions {
@@ -88,6 +89,7 @@ private:
     ConnectionOptions m_options;
     State m_state = State::Idle;
     DeskflowServer m_server;
+    CompanionStatusSync m_companionStatus;
     QProcess m_bridge, m_bleProvider;
     QTimer m_deadline, m_killBridge, m_killBle;
     QByteArray m_events;

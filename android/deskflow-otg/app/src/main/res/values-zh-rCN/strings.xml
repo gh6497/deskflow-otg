@@ -4,4 +4,10 @@
     <string name="status_access_enabled">状态：已启用媒体控制权限，收到 USB 断开事件即请求暂停</string>
     <string name="status_access_required">状态：请先启用通知使用权</string>
     <string name="open_notification_access_settings">打开通知使用权设置</string>
+    <string name="connection_unknown">Deskflow：状态未知</string>
+    <string name="connection_connecting">Deskflow：正在连接</string>
+    <string name="connection_connected">Deskflow：已连接</string>
+    <string name="connection_disconnecting">Deskflow：正在断开</string>
+    <string name="connection_disconnected">Deskflow：已断开</string>
+    <string name="connection_help">通过已授权的 ADB 接收桌面 GUI 的状态。“已连接”表示 Deskflow 握手已完成，不是仅插入 USB。超过 15 秒未确认时显示状态未知。安装后请先打开本应用一次；CLI 会话及无 ADB 连接无法同步。通知使用权仅用于媒体暂停。</string>
 </resources>
