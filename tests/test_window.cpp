@@ -355,13 +355,13 @@ private slots:
         clipboard->setChecked(false);
         QVERIFY(!autoRotate->isEnabled());
 #endif
-        QCOMPARE(audio->text(), "转发安卓音频（需要 ADB；Linux/Windows）");
+        QCOMPARE(audio->text(), "转发音频（需要 ADB）");
         auto *language = window.findChild<QComboBox *>("languageSelector");
         QVERIFY(language);
         language->setCurrentIndex(language->findData("en"));
-        QCOMPARE(audio->text(), "Forward Android audio (requires ADB; Linux/Windows)");
+        QCOMPARE(audio->text(), "Forward audio (requires ADB)");
         language->setCurrentIndex(language->findData("zh_CN"));
-        QCOMPARE(audio->text(), "转发安卓音频（需要 ADB；Linux/Windows）");
+        QCOMPARE(audio->text(), "转发音频（需要 ADB）");
         QVERIFY(tabs->widget(0)->isAncestorOf(audio));
         QCOMPARE(audio->parentWidget(), clipboard->parentWidget());
         QVERIFY(!tabs->widget(2)->isAncestorOf(audio));

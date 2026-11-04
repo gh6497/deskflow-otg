@@ -57,6 +57,7 @@ private:
     void applyDeviceProfile(const QVariantMap &profile);
     void rememberDevice();
     void updateEnabled();
+    void updateConnectionStatus();
     QSize virtualScreenSize() const;
     void updateVirtualSize();
     void addDevice();
@@ -130,12 +131,12 @@ private:
     QCheckBox *m_manage;
     QCheckBox *m_autoConnectEnabled;
     QPushButton *m_refresh, *m_connect, *m_disconnect;
-    QLabel *m_status, *m_deviceStatus;
+    QLabel *m_status, *m_deviceStatus, *m_connectionStatus;
     QLabel *m_virtualSize;
     QPlainTextEdit *m_log;
     QComboBox *m_logFilter;
     QList<QPair<QString, QString>> m_logHistory;
-    QFormLayout *m_deviceForm, *m_programForm;
+    QFormLayout *m_deviceForm, *m_displayForm, *m_featuresForm, *m_programForm;
     QList<AndroidDevice> m_deviceList;
     bool m_scanning = false;
     bool m_uiReady = false;
