@@ -18,11 +18,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 import android.text.TextUtils;
-import android.view.ViewGroup;
-import android.widget.Button;
-import android.widget.LinearLayout;
 import android.widget.TextView;
-import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.Toast;
 import java.util.LinkedHashSet;
@@ -59,9 +55,23 @@ public final class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        ScrollView scroll = new ScrollView(this);
-        scroll.addView(createContentView());
-        setContentView(scroll);
+        setContentView(R.layout.activity_main);
+        status = findViewById(R.id.notification_status);
+        connectionStatus = findViewById(R.id.connection_status);
+        autoplayTarget = findViewById(R.id.autoplay_target);
+
+        findViewById(R.id.notification_settings).setOnClickListener(view -> {
+            startActivity(new Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"));
+        });
+
+        Switch autoplay = findViewById(R.id.autoplay_enabled);
+        autoplay.setChecked(AutoplaySettings.enabled(this));
+        autoplay.setOnCheckedChangeListener((button, checked) ->
+                AutoplaySettings.prefs(this).edit().putBoolean("enabled", checked).apply());
+        updateAutoplayTarget();
+        findViewById(R.id.autoplay_select_player).setOnClickListener(view -> selectAutoplayPlayer());
+        findViewById(R.id.open_transfers).setOnClickListener(view ->
+                startActivity(new Intent(this, TransferActivity.class)));
     }
 
     @Override
@@ -80,84 +90,6 @@ public final class MainActivity extends Activity {
     protected void onPause() {
         handler.removeCallbacks(refreshConnection);
         super.onPause();
-    }
-
-    private LinearLayout createContentView() {
-        int padding = (int) (getResources().getDisplayMetrics().density * 24.0f);
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(padding, padding, padding, padding);
-
-        TextView title = new TextView(this);
-        title.setText(R.string.app_name);
-        title.setTextSize(28.0f);
-        title.setTextColor(0xff1565c0);
-        root.addView(title, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        connectionStatus = new TextView(this);
-        connectionStatus.setText(R.string.connection_unknown);
-        connectionStatus.setTextSize(22.0f);
-        LinearLayout.LayoutParams connectionParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        connectionParams.topMargin = padding;
-        root.addView(connectionStatus, connectionParams);
-
-        TextView connectionHelp = new TextView(this);
-        connectionHelp.setText(R.string.connection_help);
-        root.addView(connectionHelp, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        TextView description = new TextView(this);
-        description.setText(R.string.setup_description);
-        description.setTextSize(16.0f);
-        LinearLayout.LayoutParams descriptionParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        descriptionParams.topMargin = padding / 2;
-        root.addView(description, descriptionParams);
-
-        status = new TextView(this);
-        status.setTextSize(15.0f);
-        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        statusParams.topMargin = padding;
-        root.addView(status, statusParams);
-
-        Button settingsButton = new Button(this);
-        settingsButton.setText(R.string.open_notification_access_settings);
-        settingsButton.setOnClickListener(view -> {
-            startActivity(new Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"));
-        });
-        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        buttonParams.topMargin = padding;
-        root.addView(settingsButton, buttonParams);
-
-        Switch autoplay = new Switch(this);
-        autoplay.setText(R.string.autoplay_enabled);
-        autoplay.setChecked(AutoplaySettings.enabled(this));
-        autoplay.setOnCheckedChangeListener((button, checked) ->
-                AutoplaySettings.prefs(this).edit().putBoolean("enabled", checked).apply());
-        root.addView(autoplay, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        TextView autoplayHelp = new TextView(this);
-        autoplayHelp.setText(R.string.autoplay_help);
-        root.addView(autoplayHelp);
-        autoplayTarget = new TextView(this);
-        updateAutoplayTarget();
-        root.addView(autoplayTarget);
-        Button selectPlayer = new Button(this);
-        selectPlayer.setText(R.string.autoplay_select_player);
-        selectPlayer.setOnClickListener(view -> selectAutoplayPlayer());
-        root.addView(selectPlayer);
-
-        Button transfers = new Button(this);
-        transfers.setText(R.string.transfer_title);
-        transfers.setOnClickListener(view -> startActivity(new Intent(this, TransferActivity.class)));
-        root.addView(transfers);
-
-        return root;
     }
 
     private String playerLabel(String target) {

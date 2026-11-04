@@ -326,6 +326,9 @@ if(BUILD_TESTING)
   # requirement for the C11 bridge or the Linux/Windows/macOS GUI.
   find_package(Python3 QUIET COMPONENTS Interpreter)
   if(Python3_Interpreter_FOUND)
+    add_test(NAME android_layouts COMMAND "${Python3_EXECUTABLE}"
+      "${PROJECT_SOURCE_DIR}/tests/test_android_layouts.py")
+    set_tests_properties(android_layouts PROPERTIES TIMEOUT 10)
     add_test(NAME android_usb_disconnect COMMAND "${Python3_EXECUTABLE}"
       "${PROJECT_SOURCE_DIR}/tests/test_android_usb_disconnect.py")
     set_tests_properties(android_usb_disconnect PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45)

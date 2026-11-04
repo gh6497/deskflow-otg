@@ -29,15 +29,11 @@ public final class ShareActivity extends Activity {
     private String text;
     @Override protected void onCreate(Bundle saved) {
         super.onCreate(saved);
-        LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
-        int p = (int) (24 * getResources().getDisplayMetrics().density); root.setPadding(p,p,p,p);
-        status = new TextView(this); root.addView(status);
-        progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-        progress.setMax(100); root.addView(progress);
-        send = new Button(this); send.setText(R.string.share_confirm); root.addView(send);
-        Button cancel = new Button(this); cancel.setText(android.R.string.cancel); root.addView(cancel);
-        cancel.setOnClickListener(v -> { cancel(); finish(); });
-        setContentView(root);
+        setContentView(R.layout.activity_share);
+        status = findViewById(R.id.share_status);
+        progress = findViewById(R.id.share_progress);
+        send = findViewById(R.id.share_confirm);
+        findViewById(R.id.share_cancel).setOnClickListener(v -> { cancel(); finish(); });
         try {
             Intent intent = getIntent();
             if (!Intent.ACTION_SEND.equals(intent.getAction())
