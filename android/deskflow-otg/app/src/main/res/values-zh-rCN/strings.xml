@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="setup_description">收到 USB 断开事件时立即请求暂停所有正在播放或缓冲的媒体会话。\n\n首次使用需要启用通知使用权。本应用在后台监听 USB 连接状态及配件拔出事件，不读取通知内容。不增加等待时间；USB 重新枚举的短暂断开也可能暂停播放，重连不会恢复播放。已暂停的播放器保持不动，单个播放器失败不影响其他会话。适用于所有 USB 数据连接，不仅限于 Deskflow 会话。</string>
+    <string name="setup_description">收到 USB 断开事件时立即请求暂停所有正在播放或缓冲的媒体会话。\n\n首次使用需要启用通知使用权。本应用在后台监听 USB 连接状态及配件拔出事件，不读取通知内容。不增加等待时间；USB 重新枚举的短暂断开也可能暂停播放。仅重新插入 USB 不会恢复播放，可选的自动播放需要真实 Deskflow 连接。已暂停的播放器保持不动，单个播放器失败不影响其他会话。适用于所有 USB 数据连接，不仅限于 Deskflow 会话。</string>
     <string name="status_access_enabled">状态：已启用媒体控制权限，收到 USB 断开事件即请求暂停</string>
     <string name="status_access_required">状态：请先启用通知使用权</string>
     <string name="open_notification_access_settings">打开通知使用权设置</string>
@@ -9,5 +9,12 @@
     <string name="connection_connected">Deskflow：已连接</string>
     <string name="connection_disconnecting">Deskflow：正在断开</string>
     <string name="connection_disconnected">Deskflow：已断开</string>
-    <string name="connection_help">通过已授权的 ADB 接收桌面 GUI 的状态。“已连接”表示 Deskflow 握手已完成，不是仅插入 USB。超过 15 秒未确认时显示状态未知。安装后请先打开本应用一次；CLI 会话及无 ADB 连接无法同步。通知使用权仅用于媒体暂停。</string>
+    <string name="connection_help">通过已授权的 ADB 接收桌面 GUI 的状态。“已连接”表示 Deskflow 握手已完成，不是仅插入 USB。超过 15 秒未确认时显示状态未知。安装后请先打开本应用一次；CLI 会话及无 ADB 连接无法同步。通知使用权用于媒体暂停及可选的自动播放。</string>
+    <string name="autoplay_enabled">连接后自动恢复所选播放器</string>
+    <string name="autoplay_help">默认关闭。需要新版桌面 GUI、已授权 ADB 和实际运行的通知监听服务。先打开播放器播放一次，再在下方选择。每次真实 Deskflow 连接仅对支持播放的已暂停会话尝试一次；启用音频转发时等待电脑音频输出就绪。不启动播放器、不切换其他播放器，心跳或服务重启不补播，连接后手动暂停不会再次恢复。发送播放请求不代表播放器已确认播放。</string>
+    <string name="autoplay_select_player">从活动媒体会话选择播放器</string>
+    <string name="autoplay_no_target">播放器：未选择</string>
+    <string name="autoplay_target">播放器：%1$s</string>
+    <string name="autoplay_no_sessions">没有活动媒体会话。请先打开播放器播放一次，再返回选择。</string>
+    <string name="autoplay_unavailable">无法读取媒体会话，请检查通知使用权及监听服务是否运行。</string>
 </resources>

@@ -6,8 +6,13 @@
 package com.github.gh6497.deskflowotg;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ComponentName;
 import android.content.Intent;
+import android.content.Context;
+import android.content.pm.PackageManager;
+import android.media.session.MediaController;
+import android.media.session.MediaSessionManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -18,6 +23,10 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.ScrollView;
+import android.widget.Switch;
+import android.widget.Toast;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 /**
  * Setup and leased Deskflow connection-status screen.
@@ -25,11 +34,13 @@ import android.widget.ScrollView;
  * The notification-listener permission is required because a normal Android
  * application cannot call the shell-only media_session command. Once the
  * permission is enabled, Android binds DeskflowNotificationListenerService
- * automatically and the service listens for USB accessory removal.
+ * automatically. The service handles USB removal and optional, user-selected
+ * player resume on a fresh Deskflow connection event.
  */
 public final class MainActivity extends Activity {
     private TextView status;
     private TextView connectionStatus;
+    private TextView autoplayTarget;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable refreshConnection = new Runnable() {
         @Override
@@ -122,7 +133,73 @@ public final class MainActivity extends Activity {
         buttonParams.topMargin = padding;
         root.addView(settingsButton, buttonParams);
 
+        Switch autoplay = new Switch(this);
+        autoplay.setText(R.string.autoplay_enabled);
+        autoplay.setChecked(AutoplaySettings.enabled(this));
+        autoplay.setOnCheckedChangeListener((button, checked) ->
+                AutoplaySettings.prefs(this).edit().putBoolean("enabled", checked).apply());
+        root.addView(autoplay, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        TextView autoplayHelp = new TextView(this);
+        autoplayHelp.setText(R.string.autoplay_help);
+        root.addView(autoplayHelp);
+        autoplayTarget = new TextView(this);
+        updateAutoplayTarget();
+        root.addView(autoplayTarget);
+        Button selectPlayer = new Button(this);
+        selectPlayer.setText(R.string.autoplay_select_player);
+        selectPlayer.setOnClickListener(view -> selectAutoplayPlayer());
+        root.addView(selectPlayer);
+
         return root;
+    }
+
+    private String playerLabel(String target) {
+        try {
+            PackageManager manager = getPackageManager();
+            return manager.getApplicationLabel(manager.getApplicationInfo(target, 0))
+                    + " (" + target + ")";
+        } catch (PackageManager.NameNotFoundException exception) {
+            return target;
+        }
+    }
+
+    private void updateAutoplayTarget() {
+        String target = AutoplaySettings.target(this);
+        autoplayTarget.setText(target.isEmpty() ? getString(R.string.autoplay_no_target)
+                : getString(R.string.autoplay_target, playerLabel(target)));
+    }
+
+    private void selectAutoplayPlayer() {
+        if (!notificationListenerEnabled()) {
+            Toast.makeText(this, R.string.status_access_required, Toast.LENGTH_LONG).show();
+            return;
+        }
+        MediaSessionManager manager = (MediaSessionManager) getSystemService(Context.MEDIA_SESSION_SERVICE);
+        if (manager == null) return;
+        Set<String> packages = new LinkedHashSet<>();
+        try {
+            for (MediaController controller : manager.getActiveSessions(
+                    new ComponentName(this, DeskflowNotificationListenerService.class))) {
+                packages.add(controller.getPackageName());
+            }
+        } catch (RuntimeException exception) {
+            Toast.makeText(this, R.string.autoplay_unavailable, Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (packages.isEmpty()) {
+            Toast.makeText(this, R.string.autoplay_no_sessions, Toast.LENGTH_LONG).show();
+            return;
+        }
+        String[] targets = packages.toArray(new String[0]);
+        String[] labels = new String[targets.length];
+        for (int i = 0; i < targets.length; ++i) labels[i] = playerLabel(targets[i]);
+        new AlertDialog.Builder(this).setTitle(R.string.autoplay_select_player)
+                .setItems(labels, (dialog, index) -> {
+                    AutoplaySettings.prefs(this).edit().putString("target", targets[index]).apply();
+                    updateAutoplayTarget();
+                }).setNegativeButton(android.R.string.cancel, null).show();
     }
 
     private boolean notificationListenerEnabled() {
@@ -132,7 +209,7 @@ public final class MainActivity extends Activity {
         ComponentName component = new ComponentName(this,
                 DeskflowNotificationListenerService.class);
         for (String value : enabled.split(":")) {
-            if (component.flattenToString().equals(value)) return true;
+            if (component.equals(ComponentName.unflattenFromString(value))) return true;
         }
         return false;
     }

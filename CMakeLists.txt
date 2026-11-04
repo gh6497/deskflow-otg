@@ -312,6 +312,16 @@ if(BUILD_TESTING)
     endif()
   endif()
   add_test(NAME cli_version COMMAND deskflow-otg --version)
+  if(BUILD_AUDIO AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(test_audio_ready tests/test_audio_ready.c platform/linux/audio_player.c)
+    target_include_directories(test_audio_ready PRIVATE src)
+    target_link_libraries(test_audio_ready PRIVATE ALSA::ALSA Threads::Threads)
+    # The assertions perform socket I/O, including in release builds.
+    target_compile_options(test_audio_ready PRIVATE -UNDEBUG)
+    add_test(NAME audio_ready COMMAND test_audio_ready)
+    set_tests_properties(audio_ready PROPERTIES TIMEOUT 10
+      ENVIRONMENT "ALSA_CONFIG_PATH=${PROJECT_SOURCE_DIR}/tests/alsa-null.conf")
+  endif()
   # Optional host-only Android policy regression, never an Android SDK/JDK
   # requirement for the C11 bridge or the Linux/Windows/macOS GUI.
   find_package(Python3 QUIET COMPONENTS Interpreter)
@@ -319,6 +329,9 @@ if(BUILD_TESTING)
     add_test(NAME android_usb_disconnect COMMAND "${Python3_EXECUTABLE}"
       "${PROJECT_SOURCE_DIR}/tests/test_android_usb_disconnect.py")
     set_tests_properties(android_usb_disconnect PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45)
+    add_test(NAME android_connection_receiver COMMAND "${Python3_EXECUTABLE}"
+      "${PROJECT_SOURCE_DIR}/tests/test_android_connection_receiver.py")
+    set_tests_properties(android_connection_receiver PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45)
   endif()
   set_tests_properties(cli_version PROPERTIES
     PASS_REGULAR_EXPRESSION "deskflow-otg ${PROJECT_VERSION}")

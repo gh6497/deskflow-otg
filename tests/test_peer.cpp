@@ -209,6 +209,17 @@ int main(int argc, char **argv)
                     "{\"event\":\"clipboard-unavailable\"}\n" : "{\"event\":\"clipboard-ready\"}\n");
             });
         }
+        if (args.contains("--audio")) {
+            const auto mode = qEnvironmentVariable("OTG_TEST_AUDIO_READY");
+            // Emit complete lines before the deliberately split connected line;
+            // never interleave another JSON event inside its two fragments.
+            if (mode == "early") output("{\"event\":\"audio-ready\"}\n");
+            else if (mode != "never") {
+                QTimer::singleShot(300, &app, [] {
+                    output("{\"event\":\"audio-ready\"}\n");
+                });
+            }
+        }
         const bool ble = args.value(args.indexOf("--transport") + 1) == "ble";
         if (ble && (!args.contains("--ble-peer") || args.contains("--serial") ||
                     args.value(args.indexOf("--mouse-mode") + 1) != "absolute")) return 9;

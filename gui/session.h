@@ -75,6 +75,7 @@ signals:
 
 private:
     void setState(State state, const char *id, const QString &detail = {});
+    void syncCompanionStatus();
     void fail(const char *id, const QString &detail = {});
     void launchBridge();
     void prepareBle(bool started = false, int attempts = 0);
@@ -97,6 +98,7 @@ private:
     QString m_bleProgram, m_blePeer;
     QStringList m_bleAuxiliary;
     bool m_bleActive = false, m_shutdown = false, m_stoppingBleProvider = false;
+    bool m_audioReady = false;
     QByteArray m_failureId, m_statusId;
     QByteArray m_clipboardStatusId = "otg.clipboard.off";
     QString m_failureDetail, m_statusDetail;

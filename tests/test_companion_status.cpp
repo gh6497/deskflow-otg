@@ -40,6 +40,21 @@ class CompanionStatusTest : public QObject {
         }
         return result;
     }
+    QList<QStringList> broadcasts() const
+    {
+        QList<QStringList> result;
+        for (const auto &args : commands()) if (args.contains("broadcast")) result << args;
+        return result;
+    }
+    QStringList playIds() const
+    {
+        QStringList result;
+        for (const auto &args : broadcasts()) {
+            if (args.value(args.indexOf("play_event") + 1) == "true")
+                result << args.value(args.indexOf("connection_id") + 1);
+        }
+        return result;
+    }
 private slots:
     void init()
     {
@@ -54,6 +69,7 @@ private slots:
         qunsetenv("OTG_TEST_COMPANION_DELAY");
         qunsetenv("OTG_TEST_COMPANION");
         qunsetenv("OTG_TEST_BLE_RECONNECT");
+        qunsetenv("OTG_TEST_AUDIO_READY");
     }
     void lifecycle()
     {
@@ -69,6 +85,13 @@ private slots:
         QTRY_VERIFY(states().contains("connected"));
         const auto count = states().count("connected");
         QTRY_VERIFY_WITH_TIMEOUT(states().count("connected") > count, 7000);
+        QCOMPARE(playIds().size(), 1);
+        QCOMPARE(playIds().first().size(), 32);
+        for (const auto &args : broadcasts()) {
+            QCOMPARE(args.value(args.indexOf("version") + 1), QString("2"));
+            if (args.value(args.indexOf("state") + 1) == "connected")
+                QCOMPARE(args.value(args.indexOf("connection_id") + 1), playIds().first());
+        }
         session.stop();
         QTRY_COMPARE(session.state(), Session::State::Idle);
         QTRY_COMPARE(states().last(), QString("disconnected"));
@@ -98,6 +121,7 @@ private slots:
         QTest::qWait(250);
         QCOMPARE(session.state(), Session::State::Starting);
         QVERIFY(!states().contains("connected"));
+        QVERIFY(playIds().isEmpty());
         session.stop();
         QTRY_COMPARE(session.state(), Session::State::Idle);
         QTRY_VERIFY(states().contains("disconnected"));
@@ -132,6 +156,90 @@ private slots:
         QTRY_COMPARE(session.state(), Session::State::Idle);
         QTest::qWait(100);
         QVERIFY(states().isEmpty());
+    }
+    void audioReadiness_data()
+    {
+        QTest::addColumn<QString>("mode");
+        QTest::newRow("after-handshake") << QString("late");
+        QTest::newRow("before-handshake") << QString("early");
+        QTest::newRow("failed-audio") << QString("never");
+    }
+    void audioReadiness()
+    {
+        QFETCH(QString, mode);
+        qputenv("OTG_TEST_AUDIO_READY", mode.toUtf8());
+        Session session;
+        ConnectionOptions options;
+        options.manageServer = false;
+        options.serial = "USB123";
+        options.adb = options.bridge = peer();
+        options.audio = true;
+        options.scrcpyServer = "fake-server";
+        options.scrcpyVersion = "5.0.1";
+        session.start(options);
+        QTRY_COMPARE(session.state(), Session::State::Connected);
+        if (mode == "late") QVERIFY(playIds().isEmpty());
+        if (mode == "never") {
+            QTest::qWait(500);
+            QVERIFY(playIds().isEmpty());
+        } else {
+            QTRY_COMPARE(playIds().size(), 1);
+        }
+        session.stop();
+        QTRY_COMPARE(session.state(), Session::State::Idle);
+        QTRY_VERIFY(states().contains("disconnected"));
+        for (const auto &args : broadcasts()) {
+            if (args.value(args.indexOf("play_event") + 1) == "true") {
+                QCOMPARE(args.value(args.indexOf("state") + 1), QString("connected"));
+                QCOMPARE(args.value(args.indexOf("playback_ready") + 1), QString("true"));
+            }
+        }
+    }
+    void readinessChangesAndReconnect()
+    {
+        CompanionStatusSync sync;
+        sync.update(peer(), "USB123", "connected", false);
+        QTRY_COMPARE(broadcasts().size(), 1);
+        const auto initial = broadcasts().first();
+        const auto id = initial.value(initial.indexOf("connection_id") + 1);
+        QVERIFY(playIds().isEmpty());
+        sync.update(peer(), "USB123", "connected", true);
+        QTRY_COMPARE(playIds(), QStringList{id});
+        sync.update(peer(), "USB123", "connected", false);
+        QTRY_COMPARE(broadcasts().size(), 3);
+        sync.update(peer(), "USB123", "connected", true);
+        QTRY_COMPARE(broadcasts().size(), 4);
+        QCOMPARE(playIds().size(), 1); // readiness bounce/manual pause cannot replay
+        sync.update(peer(), "USB123", "connecting", false);
+        QTRY_COMPARE(broadcasts().size(), 5);
+        sync.update(peer(), "USB123", "connected", true);
+        QTRY_COMPARE(playIds().size(), 2);
+        QVERIFY(playIds().last() != id);
+        QTest::qWait(100);
+    }
+    void offlineEdgeIsNotRetried()
+    {
+        qputenv("OTG_TEST_COMPANION", "offline");
+        CompanionStatusSync sync;
+        sync.update(peer(), "USB123", "connected");
+        QTRY_COMPARE(commands().size(), 1);
+        QTest::qWait(100);
+        qunsetenv("OTG_TEST_COMPANION");
+        // Updating/renewing an already-ready connection is not a new edge.
+        sync.update(peer(), "USB123", "connected");
+        QTRY_COMPARE(broadcasts().size(), 1);
+        QVERIFY(playIds().isEmpty());
+        QTest::qWait(100);
+    }
+    void stopWhileWaitingForAudio()
+    {
+        CompanionStatusSync sync;
+        sync.update(peer(), "USB123", "connected", false);
+        QTRY_COMPARE(broadcasts().size(), 1);
+        sync.update(peer(), "USB123", "disconnecting", true);
+        QTRY_COMPARE(broadcasts().size(), 2);
+        QVERIFY(playIds().isEmpty());
+        QTest::qWait(100);
     }
     void noImplicitTarget()
     {
@@ -200,6 +308,8 @@ private slots:
         options.bridge = peer();
         session.start(options);
         QTRY_VERIFY(states().count("connected") >= 2);
+        QTRY_COMPARE(playIds().size(), 2);
+        QVERIFY(playIds().first() != playIds().last());
         session.stop();
         QTRY_COMPARE(session.state(), Session::State::Idle);
         QTRY_VERIFY(states().contains("disconnected"));

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name" translatable="false">deskflow-otg</string>
-    <string name="setup_description">Immediately request pause for all playing or buffering media sessions when a USB disconnect event is received.\n\nEnable notification access before first use. This app monitors USB connection and accessory removal events without reading notification content. There is no added delay; even brief USB re-enumeration may pause playback, and reconnecting does not resume it. Already paused players are left unchanged; a failing player does not block others. This applies to all USB data connections, not just Deskflow sessions.</string>
+    <string name="setup_description">Immediately request pause for all playing or buffering media sessions when a USB disconnect event is received.\n\nEnable notification access before first use. This app monitors USB connection and accessory removal events without reading notification content. There is no added delay; even brief USB re-enumeration may pause playback. Plugging USB back in alone does not resume it; optional auto-play requires a real Deskflow connection. Already paused players are left unchanged; a failing player does not block others. This applies to all USB data connections, not just Deskflow sessions.</string>
     <string name="status_access_enabled">Status: Media control access enabled. USB disconnect events immediately request pause.</string>
     <string name="status_access_required">Status: Please enable notification access first.</string>
     <string name="open_notification_access_settings">Open notification access settings</string>
@@ -10,5 +10,12 @@
     <string name="connection_connected">Deskflow: Connected</string>
     <string name="connection_disconnecting">Deskflow: Disconnecting</string>
     <string name="connection_disconnected">Deskflow: Disconnected</string>
-    <string name="connection_help">Reported by the desktop GUI via authorized ADB. Connected means the Deskflow handshake completed, not merely that USB is plugged in. Reports expire after 15 seconds without confirmation. Open this app once after installing; CLI sessions and connections without ADB cannot report status. Notification access is only needed for media pause.</string>
+    <string name="connection_help">Reported by the desktop GUI via authorized ADB. Connected means the Deskflow handshake completed, not merely that USB is plugged in. Reports expire after 15 seconds without confirmation. Open this app once after installing; CLI sessions and connections without ADB cannot report status. Notification access is needed for media pause and optional auto-play.</string>
+    <string name="autoplay_enabled">Resume selected player after connecting</string>
+    <string name="autoplay_help">Off by default. Requires an updated desktop GUI, authorized ADB and a running notification listener. Start your player once, then select it below. Each real Deskflow connection attempts play only once for a paused session that supports play; when audio forwarding is enabled, wait for the computer audio output to be ready. No player is launched, no other player is selected, and heartbeats or service restarts never retry. Manual pauses are respected. A play request does not guarantee playback.</string>
+    <string name="autoplay_select_player">Select player from active media sessions</string>
+    <string name="autoplay_no_target">Player: Not selected</string>
+    <string name="autoplay_target">Player: %1$s</string>
+    <string name="autoplay_no_sessions">No active media sessions. Open your player and play something first, then return here to select it.</string>
+    <string name="autoplay_unavailable">Media sessions unavailable. Check notification access and that the listener is running.</string>
 </resources>
