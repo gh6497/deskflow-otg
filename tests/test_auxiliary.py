@@ -41,6 +41,17 @@ if args[0] == 'connect':
 if args[0] == 'push':
     if scenario:
         assert scenario == 'online' or (root / 'connected').exists()
+    if os.environ.get('OTG_TEST_AUX_PUSH_TIMEOUT'):
+        time.sleep(30)
+    retry_file = root / 'push-failures'
+    retry_count = int(os.environ.get('OTG_TEST_AUX_PUSH_RETRIES', '0'))
+    if retry_count and not retry_file.exists():
+        retry_file.write_text('0')
+    if retry_count:
+        count = int(retry_file.read_text())
+        if count < retry_count:
+            retry_file.write_text(str(count + 1))
+            sys.exit(1)
     sys.exit(1 if os.environ.get('OTG_TEST_AUX_FAIL') else 0)
 if args[0] == 'forward':
     if args[1] == '--remove':
@@ -120,9 +131,9 @@ if audio:
 '''
 
 helper, audio_enabled = sys.argv[1:]
-modes = ["clipboard", "fail"]
+modes = ["clipboard", "fail", "clipboard-retry", "push-timeout"]
 if audio_enabled == "ON":
-    modes += ["audio", "both", "audio-fail"]
+    modes += ["audio", "both", "audio-fail", "audio-retry", "both-retry"]
 cases: list[tuple[str, str, str, str]] = [(mode, "", "FAKE_PHONE", "") for mode in modes]
 for scenario in ("online", "connect", "connect-fail", "offline", "unauthorized", "timeout"):
     cases.append(("clipboard", scenario, "192.0.2.1:40195", ""))
@@ -140,16 +151,23 @@ for mode, scenario, target, pause in cases:
         env = dict(os.environ, OTG_TEST_AUX_ROOT=directory)
         env["OTG_TEST_AUX_TARGET"] = target
         env["OTG_TEST_AUX_WIRELESS"] = scenario
-        env["OTG_TEST_AUX_CLIPBOARD"] = "1" if mode in ("clipboard", "both") else "0"
+        base_mode = mode.removesuffix('-retry')
+        env["OTG_TEST_AUX_CLIPBOARD"] = "1" if base_mode in ("clipboard", "both", "push-timeout") else "0"
         env["OTG_TEST_AUX_PAUSE"] = pause
         wireless_failure = scenario in ("connect-fail", "offline", "unauthorized", "timeout")
         if wireless_failure:
             env["OTG_TEST_AUX_EXPECT_FAIL"] = "1"
         if mode in ("fail", "audio-fail"):
             env["OTG_TEST_AUX_FAIL"] = "1"
+        if mode.endswith('-retry'):
+            env["OTG_TEST_AUX_PUSH_RETRIES"] = "2"
+        if mode == "push-timeout":
+            env["OTG_TEST_AUX_PUSH_TIMEOUT"] = "1"
+            env["OTG_TEST_AUX_EXPECT_FAIL"] = "1"
         start = time.monotonic()
-        completed = subprocess.run([helper, str(adb), mode, target], env=env,
-                                   check=True, timeout=15, capture_output=True, text=True)
+        completed = subprocess.run([helper, str(adb), base_mode, target], env=env,
+                                   timeout=15, capture_output=True, text=True)
+        assert completed.returncode == 0, (mode, completed)
         elapsed = time.monotonic() - start
         if pause:
             assert 'media-session pause command failed or timed out' in completed.stderr, completed
@@ -175,9 +193,16 @@ for mode, scenario, target, pause in cases:
         else:
             assert not any(line.startswith(('get-state', 'connect ')) for line in calls), calls
         assert sum(line.startswith('connect ') for line in calls) == bool(scenario and scenario != 'online'), calls
-        assert sum(line.startswith("push ") for line in calls) == (not wireless_failure), calls
-        started = mode not in ("fail", "audio-fail") and not wireless_failure
-        paused = started and mode in ("audio", "both")
+        pushes = sum(line.startswith("push ") for line in calls)
+        if mode in ("fail", "audio-fail"):
+            assert 1 < pushes <= 20 and elapsed < 7, (calls, elapsed)
+        else:
+            expected_pushes = 3 if mode.endswith('-retry') else 1
+            assert pushes == (expected_pushes if not wireless_failure else 0), calls
+        if mode == "push-timeout":
+            assert 4.8 <= elapsed < 7, elapsed
+        started = mode not in ("fail", "audio-fail", "push-timeout") and not wireless_failure
+        paused = started and base_mode in ("audio", "both")
         assert sum(line.startswith("shell CLASSPATH=") for line in calls) == started, calls
         pause_command = 'shell cmd media_session dispatch pause'
         assert calls.count(pause_command) == paused, calls
@@ -192,4 +217,4 @@ for mode, scenario, target, pause in cases:
         assert not any(line.startswith(('disconnect', 'pair ', 'kill-server')) for line in calls), calls
         assert not (root / "port").exists(), calls
 print("PASS: fake ADB lifecycle modes:", ", ".join(modes),
-      "wireless readiness and audio pause/cleanup/failure/timeout")
+      "upload recovery/deadline, wireless readiness and audio pause/cleanup/failure/timeout")
