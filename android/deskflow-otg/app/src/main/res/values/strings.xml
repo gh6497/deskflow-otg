@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">deskflow-otg</string>
+    <string name="app_name" translatable="false">deskflow-otg</string>
+    <string name="setup_description">Pause media playback on your phone when USB is disconnected.\n\nEnable notification access before first use. Once enabled, this app listens for USB accessory disconnection events in the background without reading notification content.</string>
+    <string name="status_access_enabled">Status: Media control access enabled. Waiting for USB accessory disconnection.</string>
+    <string name="status_access_required">Status: Please enable notification access first.</string>
+    <string name="open_notification_access_settings">Open notification access settings</string>
 </resources>

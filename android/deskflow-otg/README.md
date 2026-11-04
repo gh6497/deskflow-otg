@@ -19,6 +19,17 @@
 
 应用不读取通知正文，也不会暂停已经处于暂停状态的播放器。
 
+## 界面语言
+
+界面支持简体中文和英文，跟随手机系统语言；其他语言使用英文回退。
+所有界面文本通过 Android 字符串资源引用：
+
+- `app/src/main/res/values/strings.xml`：完整的英文默认文本。
+- `app/src/main/res/values-zh-rCN/strings.xml`：简体中文翻译。
+
+新增界面文本时使用 `R.string` / `@string` 引用，并同步补齐两种语言。
+应用名称 `deskflow-otg` 标记为不可翻译，所有语言共用。
+
 ## 构建
 
 需要 JDK 17、Android SDK platform 36 和 build-tools。使用 Gradle wrapper：
