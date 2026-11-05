@@ -60,6 +60,39 @@ class DebPackageTest(unittest.TestCase):
             icon = extracted / "usr/share/icons/hicolor/scalable/apps/deskflow-otg.svg"
             self.assertEqual(icon.read_bytes(), (repository / "packaging/deskflow-otg.svg").read_bytes())
 
+    def test_optional_system_theme(self):
+        repository = pathlib.Path(__file__).resolve().parent.parent
+        for gtk in (True, False):
+            with self.subTest(gtk=gtk), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                stage = root / "stage"
+                (stage / "bin").mkdir(parents=True)
+                for name in ("deskflow-otg-gui", "deskflow-otg"):
+                    (stage / "bin" / name).write_text("mock binary\n")
+                themes = stage / "plugins/platformthemes"
+                themes.mkdir(parents=True)
+                (themes / "libqxdgdesktopportal.so").write_bytes(b"mock portal plugin")
+                if gtk:
+                    (themes / "libqgtk3.so").write_bytes(b"mock gtk plugin")
+                package = root / "test.deb"
+                subprocess.run([sys.executable, str(repository / "scripts/package_deb.py"),
+                                "--stage", str(stage), "--version", "0.1.2+test1",
+                                "--output", str(package)], check=True)
+                deps = subprocess.check_output(["dpkg-deb", "--field", str(package), "Depends"], text=True)
+                self.assertNotIn("libgtk", deps)
+                recommends = subprocess.check_output(
+                    ["dpkg-deb", "--field", str(package), "Recommends"], text=True)
+                self.assertEqual("libgtk-3-0t64 | libgtk-3-0" in recommends, gtk)
+                extracted = root / "extracted"
+                subprocess.run(["dpkg-deb", "--extract", str(package), str(extracted)], check=True)
+                installed = extracted / "opt/deskflow-otg/plugins/platformthemes"
+                self.assertTrue((installed / "libqxdgdesktopportal.so").is_file())
+                self.assertEqual((installed / "libqgtk3.so").is_file(), gtk)
+                desktop = (extracted / "usr/share/applications/deskflow-otg.desktop").read_text()
+                self.assertNotIn("QT_QPA_PLATFORMTHEME", desktop)
+                self.assertNotIn("QT_PLUGIN_PATH", desktop)
+                self.assertNotIn("QT_STYLE_OVERRIDE", desktop)
+
 
 if __name__ == "__main__":
     unittest.main()

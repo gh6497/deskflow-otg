@@ -89,10 +89,17 @@ def main():
             dependencies += ", libasound2"
         if not bundled_adb:
             dependencies += ", adb"
+        # GTK integration is optional: normal apt installs can follow GTK
+        # desktops, while minimal/KDE installations may use Qt's default theme.
+        # Do not require GTK when the Qt build did not ship this plugin.
+        recommendations = ""
+        if (stage / "plugins/platformthemes/libqgtk3.so").is_file():
+            recommendations = "Recommends: libgtk-3-0t64 | libgtk-3-0\n"
         (control / "control").write_text(
             f"Package: deskflow-otg-gui\nVersion: {version}\nArchitecture: {arch}\n"
             "Maintainer: deskflow-otg contributors <noreply@github.com>\n"
             f"Depends: {dependencies}\n"
+            f"{recommendations}"
             "Section: utils\nPriority: optional\n"
             "Homepage: https://github.com/gh6497/deskflow-otg\n"
             "Description: Deskflow to Android HID bridge\n"
