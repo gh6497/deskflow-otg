@@ -151,6 +151,17 @@ static QStringList auxiliarySignature(const ConnectionOptions &options)
     return {options.adb, options.adbSerial, options.scrcpyServer, options.scrcpyVersion};
 }
 
+static bool isWirelessAdbTarget(const QString &target)
+{
+    static const QRegularExpression pattern("^(?:\\[[^\\]]+\\]|[^:]+):[0-9]+$");
+    return pattern.match(target).hasMatch();
+}
+
+static bool adbDeviceState(const QString &output)
+{
+    return output.trimmed() == QStringLiteral("device");
+}
+
 void Session::start(const ConnectionOptions &options)
 {
     if (m_state != State::Idle)
@@ -159,6 +170,7 @@ void Session::start(const ConnectionOptions &options)
     m_options = options;
     m_audioReady = false;
     m_adbServerStarted = false;
+    m_adbTargetPrepared = false;
     m_clipboardStatusId = options.clipboard ? "otg.clipboard.waiting" : "otg.clipboard.off";
     emit clipboardChanged();
     m_failureId.clear();
@@ -190,6 +202,21 @@ void Session::start(const ConnectionOptions &options)
         options.width < 1 || options.width > 32767 || options.height < 1 || options.height > 32767) {
         fail("otg.error.invalid_options");
         return;
+    }
+    if (options.unlockAdb && options.transport == "ble" && options.bleIsolate) {
+        /* pkexec deliberately drops arbitrary environment variables. Keep
+         * the PIN out of argv and hand it to the unprivileged child through
+         * a private temporary file whose path survives the supervisor. */
+        m_unlockPinFile.remove();
+        m_unlockPinFile.setFileTemplate(QDir::tempPath() + "/deskflow-otg-unlock-XXXXXX");
+        const auto pin = options.unlockPin.toUtf8();
+        if (!m_unlockPinFile.open() || m_unlockPinFile.write(pin) != pin.size() ||
+            !m_unlockPinFile.flush() ||
+            !m_unlockPinFile.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner)) {
+            fail("otg.error.bridge_start", m_unlockPinFile.errorString());
+            return;
+        }
+        m_unlockPinFile.close();
     }
 #if defined(Q_OS_LINUX)
     static const QRegularExpression adapterPattern("^hci[0-9]{1,5}$");
@@ -284,6 +311,39 @@ void Session::startConnection()
         });
         return;
     }
+    const auto adbTarget = m_options.adbSerial.trimmed();
+    if (m_options.unlockAdb && !m_adbTargetPrepared && isWirelessAdbTarget(adbTarget)) {
+        m_adbTargetPrepared = true;
+        const auto generation = m_generation;
+        runCommand(this, m_options.adb, {"-s", adbTarget, "get-state"},
+                   [this, generation, adbTarget](bool ok, const QString &output) {
+            if (generation != m_generation || m_state != State::Starting) return;
+            if (ok && adbDeviceState(output)) {
+                startConnection();
+                return;
+            }
+            emit log(QStringLiteral("[ADB] wireless target not ready; connecting %1").arg(adbTarget));
+            runCommand(this, m_options.adb, {"connect", adbTarget},
+                       [this, generation, adbTarget](bool connected, const QString &connectOutput) {
+                if (generation != m_generation || m_state != State::Starting) return;
+                if (!connected) {
+                    fail("otg.error.bridge_start", connectOutput.trimmed());
+                    return;
+                }
+                runCommand(this, m_options.adb, {"-s", adbTarget, "get-state"},
+                           [this, generation, adbTarget](bool ready, const QString &stateOutput) {
+                    if (generation != m_generation || m_state != State::Starting) return;
+                    if (!ready || !adbDeviceState(stateOutput)) {
+                        fail("otg.error.bridge_start",
+                             QStringLiteral("ADB target %1 is not ready").arg(adbTarget));
+                        return;
+                    }
+                    startConnection();
+                });
+            });
+        });
+        return;
+    }
     m_deadline.start(30000);
     if (!m_options.manageServer) {
         launchBridge();
@@ -330,6 +390,14 @@ void Session::launchBridge()
         args << "--adb" << m_options.adb << "--adb-serial"
              << (!m_options.adbSerial.isEmpty() ? m_options.adbSerial : m_options.serial);
     }
+    if (ble && m_options.bleIsolate && m_options.unlockAdb)
+        args << "--unlock-pin-file" << m_unlockPinFile.fileName();
+    if (m_options.tls) {
+        args << "--tls";
+        if (!m_options.tlsCertificate.isEmpty()) args << "--tls-cert" << m_options.tlsCertificate;
+        if (!m_options.tlsFingerprint.isEmpty()) args << "--tls-fingerprint" << m_options.tlsFingerprint;
+        else args << "--tls-fingerprint-file" << m_options.tlsFingerprintFile;
+    }
     if (ble) {
         m_deadline.stop(); // Pairing and desktop authentication are user paced.
         args << "--transport" << "ble" << "--ble-peer" << m_options.blePeer;
@@ -345,12 +413,6 @@ void Session::launchBridge()
 #endif
     } else {
         args << "--serial" << m_options.serial;
-    }
-    if (m_options.tls) {
-        args << "--tls";
-        if (!m_options.tlsCertificate.isEmpty()) args << "--tls-cert" << m_options.tlsCertificate;
-        if (!m_options.tlsFingerprint.isEmpty()) args << "--tls-fingerprint" << m_options.tlsFingerprint;
-        else args << "--tls-fingerprint-file" << m_options.tlsFingerprintFile;
     }
     if (windowsBle()) {
         m_bleProvider.setProcessEnvironment(environment);
@@ -543,6 +605,7 @@ void Session::finishStop()
         return;
     m_killBridge.stop();
     m_stoppingBleProvider = false;
+    m_unlockPinFile.remove();
     m_clipboardStatusId = m_options.clipboard ? "otg.clipboard.disconnected" : "otg.clipboard.off";
     emit clipboardChanged();
     setState(State::Idle, m_failureId.isEmpty() ? "otg.status.disconnected" : m_failureId.constData(), m_failureDetail);
