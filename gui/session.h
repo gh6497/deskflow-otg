@@ -25,6 +25,7 @@ struct ConnectionOptions {
     QString direction = "right";
     QString mouseMode = "absolute";
     QString middleButtonAction = "normal";
+    QString rightButtonAction = "normal";
     QString tlsCertificate;
     QString tlsFingerprint;
     QString tlsFingerprintFile;

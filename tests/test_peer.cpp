@@ -186,6 +186,10 @@ int main(int argc, char **argv)
                 server.nextPendingConnection()->deleteLater();
         });
     } else if (args.contains("--gui")) {
+        const auto expectedRight = qEnvironmentVariable("OTG_TEST_RIGHT_ACTION");
+        if (!expectedRight.isEmpty() &&
+            (!args.contains("--right-button-action") ||
+             args.value(args.indexOf("--right-button-action") + 1) != expectedRight)) return 13;
         const auto clientPem = qEnvironmentVariable("OTG_TEST_CLIENT_PEM");
         if (!clientPem.isEmpty() &&
             (!args.contains("--tls") || !args.contains("--tls-cert") ||

@@ -265,6 +265,17 @@ for f in platform/linux/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only
 
 ## 可选桌面 GUI
 
+- 鼠标中键 Home 与右键 Back 为独立、默认 normal 的按设备配置，CLI 分别为
+  `--middle-button-action normal|home`、`--right-button-action normal|back`。
+  `bridge.c` 用 F13/F14 HID 快捷键替代对应鼠标按钮，Android 伴侣 0.1.7 的同一无障碍服务
+  执行 GLOBAL_ACTION_HOME/BACK，只在非重复按下触发并消费松开；无需 ADB，需手动启用无障碍。
+  切出、重置、键盘屏障取消、关闭须清除映射按键状态。Windows BLE resume 同步两项映射，
+  旧七字段命令将右键重置为 normal，不注销 provider。离线 fake 回归不代表真机 ROM 兼容性。
+  Android F13/F14 KeyCode 是 API 36 新增，不能只按新 KeyCode 判断：0.1.8 对
+  KEYCODE_UNKNOWN + Linux evdev 扫描码183/184兼容 Home/Back，已知其他 KeyCode 不回退。
+  Android14 真机已确认 HID 键盘能力包含 F13/F14，但 Generic.kl 对183/184的映射为注释；
+  0.1.8新增旧系统回归和仅快捷键诊断日志，不记录普通键盘输入；实际返回仍需安装后验证。
+
 - Android 伴侣应用通过 `gui/companion_app.cpp` 独立接入，只在 USB 页由用户主动安装/打开/检查。
   所有 ADB 命令固定 `-s` 目标，优先设备 `adbSerial`、否则 USB serial；先核对在线，禁止自动
   pair/connect、无目标回退、静默授予通知使用权或签名失败时卸载。`COMPANION_APK` 可选附带

@@ -22,11 +22,27 @@ int main(void)
     assert(c.phase == OTG_BLE_ACTIVE && c.port == 24801 && c.width == 540 && c.height == 1170);
     assert(!strcmp(c.host, "127.0.0.2") && !strcmp(c.name, "phone-2"));
     assert(c.middle_button_home);
+    assert(!c.right_button_back); /* Legacy resume defaults to a normal right button. */
+    c.phase = OTG_BLE_IDLE;
+    assert(feed(&c, "resume\tlocalhost\t24800\tandroid\t1080\t1920\thome\tback\n"));
+    assert(c.middle_button_home && c.right_button_back);
+    c.phase = OTG_BLE_IDLE;
+    assert(feed(&c, "resume\tlocalhost\t24800\tandroid\t1080\t1920\tnormal\tnormal\n"));
+    assert(!c.middle_button_home && !c.right_button_back);
+    c.phase = OTG_BLE_IDLE;
+    assert(feed(&c, "resume\tlocalhost\t24800\tandroid\t1080\t1920\tnormal\tback\n"));
+    assert(!c.middle_button_home && c.right_button_back);
+    c.phase = OTG_BLE_IDLE;
+    assert(feed(&c, resume));
+    assert(c.middle_button_home && !c.right_button_back); /* Legacy resume also clears an old Back setting. */
     const char *invalid[] = {
         "resume\tx\t0\tphone\t10\t20\tnormal\n", "resume\tx\t65536\tphone\t10\t20\tnormal\n",
         "resume\tx\t24800\tphone\t32768\t20\tnormal\n", "resume\tx\t+12\tphone\t10\t20\tnormal\n",
         "resume\tx\t12\tbad name\t10\t20\tnormal\n", "resume\t\t12\tp\t10\t20\tnormal\n",
         "resume\tx\t12\tp\t10\t20\textra\n", "resume\tx\t12\tp\t10\t20\tbad\n",
+        "resume\tx\t12\tp\t10\t20\tnormal\thome\n",
+        "resume\tx\t12\tp\t10\t20\tnormal\t\n",
+        "resume\tx\t12\tp\t10\t20\thome\tback\textra\n",
         "wat\n", "pause\r\n"
     };
     for (unsigned i = 0; i < sizeof(invalid)/sizeof(invalid[0]); ++i) {

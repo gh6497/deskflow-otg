@@ -5,12 +5,12 @@
     <string name="status_access_enabled">Status: Media control access enabled. USB disconnect events immediately request pause.</string>
     <string name="status_access_required">Status: Please enable notification access first.</string>
     <string name="open_notification_access_settings">Open notification access settings</string>
-    <string name="accessibility_service_name">Deskflow OTG Home shortcut</string>
-    <string name="home_accessibility_description">Returns to the Android home screen when the desktop middle-button shortcut is pressed.</string>
-    <string name="home_access_enabled">Status: Android Home shortcut is enabled.</string>
-    <string name="home_access_required">Status: Enable the accessibility service to use the desktop Home shortcut.</string>
+    <string name="accessibility_service_name">Deskflow OTG Home / Back shortcuts</string>
+    <string name="home_accessibility_description">Returns to Android home or goes back when the configured desktop middle/right-button shortcut is pressed.</string>
+    <string name="home_access_enabled">Status: Android Home / Back shortcuts are enabled.</string>
+    <string name="home_access_required">Status: Enable the accessibility service to use the desktop Home / Back shortcuts.</string>
     <string name="open_accessibility_settings">Open accessibility settings</string>
-    <string name="home_accessibility_help">When the desktop GUI is set to “Return to Android home”, the mouse wheel button sends a private F13 shortcut over HID. This service consumes that shortcut and returns to the Android home screen. No ADB connection is required.</string>
+    <string name="home_accessibility_help">Configure the middle button as “Return to Android home” or the right button as “Android Back” in the desktop GUI. They send private F13 / F14 shortcuts over HID; this service consumes them and performs Home / Back. Both mappings are optional and independent. No ADB connection is required.</string>
     <string name="connection_unknown">Deskflow: Status unknown</string>
     <string name="connection_connecting">Deskflow: Connecting</string>
     <string name="connection_connected">Deskflow: Connected</string>

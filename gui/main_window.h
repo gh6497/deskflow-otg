@@ -114,7 +114,7 @@ private:
     QSystemTrayIcon *m_tray = nullptr;
     QAction *m_trayDisconnect = nullptr;
     QWidget *m_form;
-    QComboBox *m_devices, *m_direction, *m_mouseMode, *m_middleButtonAction;
+    QComboBox *m_devices, *m_direction, *m_mouseMode, *m_middleButtonAction, *m_rightButtonAction;
     QComboBox *m_transport;
     QLineEdit *m_adapter, *m_blePeer;
     QCheckBox *m_bleIsolate;

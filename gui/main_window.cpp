@@ -103,6 +103,8 @@ void MainWindow::retranslateUi()
     m_mouseMode->setItemText(1, qtTrId("otg.mouse.relative"));
     m_middleButtonAction->setItemText(0, qtTrId("otg.middle_button.normal"));
     m_middleButtonAction->setItemText(1, qtTrId("otg.middle_button.home"));
+    m_rightButtonAction->setItemText(0, qtTrId("otg.right_button.normal"));
+    m_rightButtonAction->setItemText(1, qtTrId("otg.right_button.back"));
     m_transport->setItemText(0, qtTrId("otg.transport.usb"));
     if (m_transport->count() > 1)
 #ifdef Q_OS_WIN
@@ -447,6 +449,13 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     setTranslatedProperty(m_middleButtonAction, "toolTip", "otg.middle_button.tooltip");
     addTranslatedRow(featuresForm, "otg.label.middle_button_action", m_middleButtonAction);
 
+    m_rightButtonAction = new QComboBox;
+    m_rightButtonAction->setObjectName("rightButtonAction");
+    m_rightButtonAction->addItem(qtTrId("otg.right_button.normal"), "normal");
+    m_rightButtonAction->addItem(qtTrId("otg.right_button.back"), "back");
+    setTranslatedProperty(m_rightButtonAction, "toolTip", "otg.right_button.tooltip");
+    addTranslatedRow(featuresForm, "otg.label.right_button_action", m_rightButtonAction);
+
     m_audio = translated(new QCheckBox, "text", "otg.audio.enabled");
     m_audio->setObjectName("audioEnabled");
     setTranslatedProperty(m_audio, "toolTip", "otg.audio.tooltip");
@@ -691,6 +700,8 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     m_mouseMode->setCurrentIndex(qMax(0, m_mouseMode->findData(settings.value("mouseMode", "absolute"))));
     m_middleButtonAction->setCurrentIndex(qMax(0, m_middleButtonAction->findData(
         settings.value("middleButtonAction", "normal"))));
+    m_rightButtonAction->setCurrentIndex(qMax(0, m_rightButtonAction->findData(
+        settings.value("rightButtonAction", "normal"))));
     if (m_transport->currentData() == "ble") m_mouseMode->setCurrentIndex(0);
     const int profileCount = settings.beginReadArray("rememberedDevices");
     for (int i = 0; i < profileCount; ++i) {
@@ -1107,6 +1118,7 @@ ConnectionOptions MainWindow::connectionOptions(const QVariantMap &profile) cons
         (options.audio || options.clipboard) && profile.value("autoRotate", false).toBool();
     options.mouseMode = options.transport == "ble" ? "absolute" : profile.value("mouseMode", "absolute").toString();
     options.middleButtonAction = profile.value("middleButtonAction", "normal").toString();
+    options.rightButtonAction = profile.value("rightButtonAction", "normal").toString();
     options.blePeer = profile.value("blePeer").toString();
 #ifdef Q_OS_LINUX
     options.adapter = profile.value("bleAdapter", "hci0").toString();
@@ -1480,6 +1492,7 @@ QVariantMap MainWindow::deviceProfile() const
                {"direction", m_direction->currentData()},
               {"mouseMode", m_mouseMode->currentData()}, {"audio", m_audio->isChecked()},
                 {"middleButtonAction", m_middleButtonAction->currentData()},
+                {"rightButtonAction", m_rightButtonAction->currentData()},
                 {"clipboard", m_clipboard->isChecked()}, {"autoRotate", m_autoRotate->isChecked()}};
 }
 
@@ -1516,6 +1529,8 @@ void MainWindow::applyDeviceProfile(const QVariantMap &profile)
     m_mouseMode->setCurrentIndex(qMax(0, m_mouseMode->findData(profile.value("mouseMode", "absolute"))));
     m_middleButtonAction->setCurrentIndex(qMax(0, m_middleButtonAction->findData(
         profile.value("middleButtonAction", "normal"))));
+    m_rightButtonAction->setCurrentIndex(qMax(0, m_rightButtonAction->findData(
+        profile.value("rightButtonAction", "normal"))));
     if (m_transport->currentData() == "ble") m_mouseMode->setCurrentIndex(0);
     const auto neighbor = profile.value("neighbor", m_computer->text()).toString();
     if (m_neighbor->findData(neighbor) < 0) m_neighbor->addItem(neighbor, neighbor);
@@ -1578,6 +1593,7 @@ void MainWindow::saveSettings()
     settings.setValue("direction", m_direction->currentData());
     settings.setValue("mouseMode", m_mouseMode->currentData());
     settings.setValue("middleButtonAction", m_middleButtonAction->currentData());
+    settings.setValue("rightButtonAction", m_rightButtonAction->currentData());
     settings.setValue("autoConnect", m_autoConnectEnabled->isChecked());
 }
 

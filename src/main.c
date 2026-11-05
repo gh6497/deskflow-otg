@@ -239,6 +239,7 @@ static void usage(const char *prog)
              "      --height H        Virtual screen height, 1..32767 (default %d)\n"
              "      --mouse-mode MODE absolute (default) or relative (compatibility)\n"
               "      --middle-button-action MODE normal (default) or home (Android Home via companion app)\n"
+              "      --right-button-action MODE normal (default) or back (Android Back via companion app)\n"
              "      --audio             Forward Android output audio through ADB (Linux/Windows)\n"
               "      --clipboard         Share Deskflow text clipboard through ADB/scrcpy\n"
               "      --tls               Use Deskflow TLS for the server connection\n"
@@ -629,6 +630,7 @@ int main(int argc, char **argv)
     int height = DEFAULT_HEIGHT;
     enum otg_mouse_mode mouse_mode = OTG_MOUSE_ABSOLUTE;
     enum otg_middle_button_action middle_button_action = OTG_MIDDLE_BUTTON_NORMAL;
+    enum otg_right_button_action right_button_action = OTG_RIGHT_BUTTON_NORMAL;
     int audio = 0;
     int clipboard = 0;
     int tls = 0;
@@ -714,6 +716,16 @@ int main(int argc, char **argv)
                 mouse_mode = OTG_MOUSE_RELATIVE;
             } else {
                 fprintf(stderr, "invalid mouse mode: %s (use absolute or relative)\n", mode);
+                return 2;
+            }
+        } else if (strcmp(a, "--right-button-action") == 0 && i + 1 < argc) {
+            const char *action = argv[++i];
+            if (strcmp(action, "normal") == 0) {
+                right_button_action = OTG_RIGHT_BUTTON_NORMAL;
+            } else if (strcmp(action, "back") == 0) {
+                right_button_action = OTG_RIGHT_BUTTON_BACK;
+            } else {
+                fprintf(stderr, "invalid right button action: %s (use normal or back)\n", action);
                 return 2;
             }
         } else if (strcmp(a, "--middle-button-action") == 0 && i + 1 < argc) {
@@ -868,6 +880,7 @@ int main(int argc, char **argv)
         strcpy(g_control.host, host); strcpy(g_control.name, name);
         g_control.port = port; g_control.width = (unsigned)width; g_control.height = (unsigned)height;
         g_control.middle_button_home = middle_button_action == OTG_MIDDLE_BUTTON_HOME;
+        g_control.right_button_back = right_button_action == OTG_RIGHT_BUTTON_BACK;
     }
     if (!strcmp(transport, "ble") && !ble_service && !ble_status && !ble_stop_service && !ble_restore &&
         (ble_session || ble_isolate || serial || (adb_serial && !clipboard) || adapter_explicit || mouse_mode != OTG_MOUSE_ABSOLUTE)) {
@@ -940,6 +953,7 @@ int main(int argc, char **argv)
             return 1;
         }
         otg_bridge_set_middle_button_action(&state.bridge, middle_button_action);
+        otg_bridge_set_right_button_action(&state.bridge, right_button_action);
         fprintf(stderr, "INFO:  AOA HID keyboard + %s pointer ready (screen %dx%d)\n",
                 mouse_mode == OTG_MOUSE_ABSOLUTE ? "absolute" : "relative", width, height);
     } else if (strcmp(transport, "ble") == 0) {
@@ -960,6 +974,7 @@ int main(int argc, char **argv)
             return 1;
         }
         otg_bridge_set_middle_button_action(&state.bridge, middle_button_action);
+        otg_bridge_set_right_button_action(&state.bridge, right_button_action);
         fprintf(stderr, "INFO:  BLE HID advertisement started on %s; waiting for phone subscriptions\n", adapter);
 #elif defined(OTG_HAVE_BLE_WIN)
         state.transport_owner = otg_ble_win_create(ble_peer);
@@ -969,6 +984,7 @@ int main(int argc, char **argv)
             return 1;
         }
         otg_bridge_set_middle_button_action(&state.bridge, middle_button_action);
+        otg_bridge_set_right_button_action(&state.bridge, right_button_action);
         fprintf(stderr, "INFO: Windows BLE target %s; starting GATT worker, waiting for paired phone subscriptions\n", ble_peer);
 #else
         fprintf(stderr, "ERROR: BLE HID requires Linux with BUILD_BLE=ON (adapter %s)\n", adapter);
@@ -1025,6 +1041,8 @@ int main(int argc, char **argv)
             state.bridge.screen_w = width; state.bridge.screen_h = height;
             otg_bridge_set_middle_button_action(&state.bridge,
                 g_control.middle_button_home ? OTG_MIDDLE_BUTTON_HOME : OTG_MIDDLE_BUTTON_NORMAL);
+            otg_bridge_set_right_button_action(&state.bridge,
+                g_control.right_button_back ? OTG_RIGHT_BUTTON_BACK : OTG_RIGHT_BUTTON_NORMAL);
         }
 #endif
 #if defined(OTG_HAVE_BLE) || defined(OTG_HAVE_BLE_WIN)

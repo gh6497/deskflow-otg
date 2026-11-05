@@ -96,6 +96,35 @@ static QStringList placeholders(const QString &text)
 class GuiTest : public QObject {
     Q_OBJECT
 private slots:
+    void rightButtonAction_data()
+    {
+        QTest::addColumn<QString>("action");
+        QTest::newRow("normal") << QString("normal");
+        QTest::newRow("back") << QString("back");
+        QTest::newRow("invalid") << QString("home");
+    }
+    void rightButtonAction()
+    {
+        QFETCH(QString, action);
+        qputenv("OTG_TEST_RIGHT_ACTION", action.toUtf8());
+        const auto cleanup = qScopeGuard([] { qunsetenv("OTG_TEST_RIGHT_ACTION"); });
+        ConnectionOptions options;
+        options.serial = "TEST123";
+        options.bridge = peerPath();
+        options.manageServer = false;
+        options.rightButtonAction = action;
+        Session session;
+        session.start(options);
+        if (action == "home") {
+            QCOMPARE(session.state(), Session::State::Idle);
+            QVERIFY(session.hasFailure());
+        } else {
+            QTRY_COMPARE(session.state(), Session::State::Connected);
+            session.stop();
+            QTRY_COMPARE(session.state(), Session::State::Idle);
+            QVERIFY(!session.hasFailure());
+        }
+    }
     void companionActions_data()
     {
         QTest::addColumn<int>("action");
@@ -420,6 +449,7 @@ private slots:
             options.phone = QString("phone-%1").arg(i);
             options.width = 540 + i;
             options.height = 1170 + i;
+            options.rightButtonAction = i % 2 ? "back" : "normal";
             session.start(options);
             QTRY_COMPARE(session.state(), Session::State::Connected);
             QTRY_VERIFY(logs.contains(QString("session=%1,%2,%3,%4,%5")
@@ -429,6 +459,8 @@ private slots:
             QTRY_COMPARE(session.state(), Session::State::Idle);
             QVERIFY(session.hasBleProvider());
             QTRY_COMPARE(logs.count("input-released"), i + 1);
+            QCOMPARE(logs.count("back-shortcut"), (i + 1) / 2);
+            QCOMPARE(logs.count("right-click"), i / 2 + 1);
             QCOMPARE(logs.count("provider-created"), 1);
             QVERIFY(!logs.contains("provider-closed"));
             const int sessions = logs.count("FAKE session=");

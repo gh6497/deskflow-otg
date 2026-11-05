@@ -505,6 +505,20 @@ void otg_bridge_set_middle_button_action(struct otg_bridge *b,
     b->middle_button_action = action;
 }
 
+void otg_bridge_set_right_button_action(struct otg_bridge *b,
+                                       enum otg_right_button_action action)
+{
+    if (action != OTG_RIGHT_BUTTON_BACK) {
+        action = OTG_RIGHT_BUTTON_NORMAL;
+    }
+    if (b->right_button_back_down && action != OTG_RIGHT_BUTTON_BACK) {
+        b->keys[HID_KEY_F14] = false;
+        b->right_button_back_down = false;
+        send_keyboard_report(b);
+    }
+    b->right_button_action = action;
+}
+
 bool otg_bridge_check(struct otg_bridge *b)
 {
     return b->transport_ops && b->transport_ops->poll(b->transport_ctx);
@@ -520,6 +534,7 @@ void otg_bridge_reset_input(struct otg_bridge *b)
     b->hid_mods = 0;
     memset(b->keys, 0, sizeof(b->keys));
     b->middle_button_home_down = false;
+    b->right_button_back_down = false;
     b->mouse_buttons = 0;
     b->mouse_x = b->mouse_y = 0;
     b->active = b->have_mouse_pos = false;
@@ -567,9 +582,10 @@ void otg_bridge_enter(struct otg_bridge *b, int16_t x, int16_t y, uint16_t mask)
 
 void otg_bridge_leave(struct otg_bridge *b)
 {
-    if (b->middle_button_home_down) {
-        b->keys[HID_KEY_F13] = false;
-        b->middle_button_home_down = false;
+    if (b->middle_button_home_down || b->right_button_back_down) {
+        if (b->middle_button_home_down) b->keys[HID_KEY_F13] = false;
+        if (b->right_button_back_down) b->keys[HID_KEY_F14] = false;
+        b->middle_button_home_down = b->right_button_back_down = false;
         send_keyboard_report(b);
     }
     if (b->mouse_buttons) {
@@ -601,6 +617,7 @@ void otg_bridge_release_keyboard(struct otg_bridge *b)
     b->hid_mods = 0;
     memset(b->keys, 0, sizeof(b->keys));
     b->middle_button_home_down = false;
+    b->right_button_back_down = false;
     send_keyboard_report(b);
 }
 
@@ -637,6 +654,14 @@ void otg_bridge_mouse_button(struct otg_bridge *b, uint8_t button, bool press)
         if (b->middle_button_home_down != press) {
             b->middle_button_home_down = press;
             b->keys[HID_KEY_F13] = press;
+            send_keyboard_report(b);
+        }
+        return;
+    }
+    if (button == 3 && b->right_button_action == OTG_RIGHT_BUTTON_BACK) {
+        if (b->right_button_back_down != press) {
+            b->right_button_back_down = press;
+            b->keys[HID_KEY_F14] = press;
             send_keyboard_report(b);
         }
         return;

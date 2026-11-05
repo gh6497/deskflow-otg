@@ -4,12 +4,12 @@
     <string name="status_access_enabled">状态：已启用媒体控制权限，收到 USB 断开事件即请求暂停</string>
     <string name="status_access_required">状态：请先启用通知使用权</string>
     <string name="open_notification_access_settings">打开通知使用权设置</string>
-    <string name="accessibility_service_name">Deskflow OTG 返回桌面</string>
-    <string name="home_accessibility_description">按下桌面端配置的鼠标中键时返回安卓桌面。</string>
-    <string name="home_access_enabled">状态：已启用返回安卓桌面的无障碍服务。</string>
-    <string name="home_access_required">状态：请启用无障碍服务后使用桌面端的返回桌面功能。</string>
+    <string name="accessibility_service_name">Deskflow OTG 返回桌面 / 返回上一级</string>
+    <string name="home_accessibility_description">按下桌面端配置的鼠标中键返回安卓桌面，或按右键返回上一级。</string>
+    <string name="home_access_enabled">状态：已启用返回桌面 / 返回上一级的无障碍服务。</string>
+    <string name="home_access_required">状态：请启用无障碍服务后使用桌面端的返回桌面 / 返回上一级功能。</string>
     <string name="open_accessibility_settings">打开无障碍设置</string>
-    <string name="home_accessibility_help">桌面 GUI 选择“返回安卓桌面”后，鼠标滚轮键会通过 HID 发送专用 F13 快捷键。本服务拦截该快捷键并返回安卓桌面，不需要 ADB 连接。</string>
+    <string name="home_accessibility_help">在桌面 GUI 中可将中键设为“返回安卓桌面”，将右键设为“安卓返回键”。两者分别通过 HID 发送专用 F13 / F14 快捷键，由本服务拦截并执行 Home / Back。两个选项可独立开启或关闭，不需要 ADB 连接。</string>
     <string name="connection_unknown">Deskflow：状态未知</string>
     <string name="connection_connecting">Deskflow：正在连接</string>
     <string name="connection_connected">Deskflow：已连接</string>
