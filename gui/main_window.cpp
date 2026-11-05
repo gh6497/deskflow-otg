@@ -36,9 +36,22 @@
 #include <QListWidget>
 #include <QTabWidget>
 #include <QUuid>
+#include <QWheelEvent>
 #include <algorithm>
 
 namespace {
+
+template <typename SpinBox>
+class NoWheelSpinBox : public SpinBox {
+public:
+    using SpinBox::SpinBox;
+
+protected:
+    void wheelEvent(QWheelEvent *event) override
+    {
+        event->ignore();
+    }
+};
 
 QString defaultTlsClientCertificate()
 {
@@ -372,8 +385,8 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     auto *sizeRow = new QWidget;
     auto *sizeLayout = new QHBoxLayout(sizeRow);
     sizeLayout->setContentsMargins(0, 0, 0, 0);
-    m_width = new QSpinBox;
-    m_height = new QSpinBox;
+    m_width = new NoWheelSpinBox<QSpinBox>;
+    m_height = new NoWheelSpinBox<QSpinBox>;
     m_width->setObjectName("screenWidth");
     m_height->setObjectName("screenHeight");
     m_width->setRange(1, 32767);
@@ -392,7 +405,7 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     });
     addTranslatedRow(displayForm, "otg.label.original_size", sizeRow);
 
-    m_sensitivity = new QDoubleSpinBox;
+    m_sensitivity = new NoWheelSpinBox<QDoubleSpinBox>;
     m_sensitivity->setObjectName("sensitivityMultiplier");
     m_sensitivity->setRange(1.0, 10.0);
     m_sensitivity->setDecimals(2);
@@ -525,7 +538,8 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     layoutForm->addRow(layoutHint);
     m_computer = new QLineEdit;
     m_host = new QLineEdit;
-    m_port = new QSpinBox;
+    m_port = new NoWheelSpinBox<QSpinBox>;
+    m_port->setObjectName("serverPort");
     m_port->setRange(1, 65535);
     addTranslatedRow(serverForm, "otg.label.computer_name", m_computer);
     addTranslatedRow(serverForm, "otg.label.server_address", m_host);

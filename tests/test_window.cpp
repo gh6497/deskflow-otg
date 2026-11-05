@@ -27,6 +27,7 @@
 #include <QStyleHints>
 #include <QListWidget>
 #include <QTabWidget>
+#include <QWheelEvent>
 #include <QTcpServer>
 #include <QtTest>
 
@@ -96,6 +97,38 @@ private slots:
         QCOMPARE(exit.size(), 0); // Exit waits for cancellation of the ADB worker.
         QTRY_COMPARE(exit.size(), 1);
         QVERIFY(!engine || !engine->busy());
+    }
+
+    void numericFieldsIgnoreMouseWheel()
+    {
+        MainWindow window;
+        auto *width = window.findChild<QSpinBox *>("screenWidth");
+        auto *height = window.findChild<QSpinBox *>("screenHeight");
+        auto *sensitivity = window.findChild<QDoubleSpinBox *>("sensitivityMultiplier");
+        auto *port = window.findChild<QSpinBox *>("serverPort");
+        QVERIFY(width && height && sensitivity && port);
+
+        width->setValue(1080);
+        height->setValue(2340);
+        sensitivity->setValue(2.0);
+        port->setValue(24800);
+
+        const auto sendWheel = [](QWidget *widget) {
+            const QPointF position(widget->rect().center());
+            const QPointF globalPosition(widget->mapToGlobal(widget->rect().center()));
+            QWheelEvent event(position, globalPosition, QPoint(), QPoint(0, 120),
+                              Qt::NoButton, Qt::NoModifier, Qt::ScrollUpdate, false);
+            QApplication::sendEvent(widget, &event);
+        };
+        sendWheel(width);
+        sendWheel(height);
+        sendWheel(sensitivity);
+        sendWheel(port);
+
+        QCOMPARE(width->value(), 1080);
+        QCOMPARE(height->value(), 2340);
+        QCOMPARE(sensitivity->value(), 2.0);
+        QCOMPARE(port->value(), 24800);
     }
     void companionSetup()
     {
