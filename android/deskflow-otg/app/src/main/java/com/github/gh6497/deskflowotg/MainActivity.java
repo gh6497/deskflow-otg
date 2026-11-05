@@ -36,7 +36,6 @@ import java.util.Set;
 public final class MainActivity extends Activity {
     private TextView status;
     private TextView connectionStatus;
-    private TextView homeAccessibilityStatus;
     private TextView autoplayTarget;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable refreshConnection = new Runnable() {
@@ -59,15 +58,11 @@ public final class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
         status = findViewById(R.id.notification_status);
         connectionStatus = findViewById(R.id.connection_status);
-        homeAccessibilityStatus = findViewById(R.id.home_accessibility_status);
         autoplayTarget = findViewById(R.id.autoplay_target);
 
         findViewById(R.id.notification_settings).setOnClickListener(view -> {
             startActivity(new Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"));
         });
-        findViewById(R.id.home_accessibility_settings).setOnClickListener(view ->
-                startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
-
         Switch autoplay = findViewById(R.id.autoplay_enabled);
         autoplay.setChecked(AutoplaySettings.enabled(this));
         autoplay.setOnCheckedChangeListener((button, checked) ->
@@ -87,11 +82,6 @@ public final class MainActivity extends Activity {
             status.setText(notificationListenerEnabled()
                     ? R.string.status_access_enabled
                     : R.string.status_access_required);
-        }
-        if (homeAccessibilityStatus != null) {
-            homeAccessibilityStatus.setText(homeAccessibilityEnabled()
-                    ? R.string.home_access_enabled
-                    : R.string.home_access_required);
         }
     }
 
@@ -160,14 +150,4 @@ public final class MainActivity extends Activity {
         return false;
     }
 
-    private boolean homeAccessibilityEnabled() {
-        String enabled = Settings.Secure.getString(
-                getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-        if (TextUtils.isEmpty(enabled)) return false;
-        ComponentName component = new ComponentName(this, DeskflowAccessibilityService.class);
-        for (String value : enabled.split(":")) {
-            if (component.equals(ComponentName.unflattenFromString(value))) return true;
-        }
-        return false;
-    }
 }
