@@ -3,7 +3,7 @@
 
 #include <QObject>
 #include <QProcess>
-#include <QTcpSocket>
+#include <QSslSocket>
 #include <QTemporaryDir>
 #include <QTimer>
 
@@ -40,7 +40,7 @@ private:
     ServerOptions m_options;
     State m_state = State::Idle;
     QProcess m_process;
-    QTcpSocket m_probe;
+    QSslSocket m_probe;
     QTemporaryDir m_directory;
     QTimer m_retry, m_deadline, m_kill;
     quint64 m_generation = 0;

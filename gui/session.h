@@ -7,6 +7,7 @@
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QSize>
+#include <QTemporaryFile>
 #include "deskflow_server.h"
 #include "companion_status_sync.h"
 class QJsonObject;
@@ -97,13 +98,14 @@ private:
     CompanionStatusSync m_companionStatus;
     QProcess m_bridge, m_bleProvider;
     QTimer m_deadline, m_killBridge, m_killBle;
+    QTemporaryFile m_unlockPinFile;
     QByteArray m_events;
     QByteArray m_bleEvents;
     QString m_bleProgram, m_blePeer;
     QStringList m_bleAuxiliary;
     bool m_bleActive = false, m_shutdown = false, m_stoppingBleProvider = false;
     bool m_audioReady = false;
-    bool m_adbServerStarted = false;
+    bool m_adbServerStarted = false, m_adbTargetPrepared = false;
     QByteArray m_failureId, m_statusId;
     QByteArray m_clipboardStatusId = "otg.clipboard.off";
     QString m_failureDetail, m_statusDetail;

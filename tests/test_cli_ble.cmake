@@ -8,6 +8,14 @@ function(reject)
 endfunction()
 reject(--transport ble --ble-session)
 reject(--adb-serial 192.168.1.20:5555)
+# The internal PIN-file hand-off authorizes a BLE bridge to use an explicit
+# ADB target; standalone BLE service operations must still reject it.
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/unlock-pin.txt" "1234")
+execute_process(COMMAND "${CLI}" --unlock-pin-file "${CMAKE_CURRENT_BINARY_DIR}/unlock-pin.txt"
+  --adb-serial fake --ble-service RESULT_VARIABLE code OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 5)
+if(NOT code STREQUAL "2" OR err MATCHES "requires --audio or --clipboard")
+  message(FATAL_ERROR "PIN-file ADB gate was not parsed correctly: ${code} ${out} ${err}")
+endif()
 reject(--clipboard)
 reject(--clipboard --serial fake)
 reject(--clipboard --adb-serial fake --scrcpy-server fake --scrcpy-version 5.0.1 --ble-service)

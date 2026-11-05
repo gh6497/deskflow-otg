@@ -662,7 +662,9 @@ int main(int argc, char **argv)
     const char *tls_fingerprint_file = NULL;
     int auto_rotate = 0;
     const char *unlock_pin = NULL;
+    const char *unlock_pin_file = NULL;
     int unlock_adb_gate = 0;
+    char unlock_pin_file_data[64] = {0};
 
     if (argc == 2 && strcmp(argv[1], "--usb-scan") == 0) {
         return otg_usb_scan();
@@ -781,6 +783,10 @@ int main(int argc, char **argv)
             adb_path = argv[++i];
         } else if (strcmp(a, "--adb-serial") == 0 && i + 1 < argc) {
             adb_serial = argv[++i];
+        } else if (strcmp(a, "--unlock-pin-file") == 0 && i + 1 < argc) {
+            /* Internal GUI hand-off for pkexec: the PIN must not be put in
+             * argv, while the file path survives the privilege boundary. */
+            unlock_pin_file = argv[++i];
         } else if (strcmp(a, "--scrcpy-server") == 0 && i + 1 < argc) {
             scrcpy_server = argv[++i];
         } else if (strcmp(a, "--scrcpy-version") == 0 && i + 1 < argc) {
@@ -799,6 +805,29 @@ int main(int argc, char **argv)
     unlock_pin = getenv("OTG_UNLOCK_PIN");
     unlock_adb_gate = getenv("OTG_UNLOCK_ADB_GATE") &&
                       strcmp(getenv("OTG_UNLOCK_ADB_GATE"), "1") == 0;
+    if (unlock_pin_file) {
+        FILE *file = fopen(unlock_pin_file, "rb");
+        if (!file) {
+            fprintf(stderr, "ERROR: cannot read unlock PIN file: %s\n", unlock_pin_file);
+            return 2;
+        }
+        const size_t length = fread(unlock_pin_file_data, 1,
+                                    sizeof(unlock_pin_file_data) - 1, file);
+        const bool read_error = ferror(file) != 0;
+        const bool too_long = !feof(file);
+        fclose(file);
+        if (read_error || too_long) {
+            fprintf(stderr, "ERROR: invalid unlock PIN file\n");
+            return 2;
+        }
+        unlock_pin_file_data[length] = '\0';
+        if (!unlock_pin_file_data[0]) {
+            fprintf(stderr, "ERROR: unlock PIN file is empty\n");
+            return 2;
+        }
+        unlock_pin = unlock_pin_file_data;
+        unlock_adb_gate = 1;
+    }
     if (unlock_pin && *unlock_pin &&
         (strlen(unlock_pin) < 4 || strlen(unlock_pin) > 32)) {
         fprintf(stderr, "ERROR: OTG_UNLOCK_PIN must contain 4..32 digits\n");

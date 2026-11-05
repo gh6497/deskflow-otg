@@ -14,10 +14,30 @@ DeskflowServer::DeskflowServer(QObject *parent) : QObject(parent)
     connect(&m_deadline, &QTimer::timeout, this, [this] { fail("otg.error.connection_timeout"); });
     connect(&m_kill, &QTimer::timeout, &m_process, &QProcess::kill);
     connect(&m_retry, &QTimer::timeout, this, [this] {
-        if (m_state == State::Starting && m_probe.state() == QAbstractSocket::UnconnectedState)
+        if (m_state != State::Starting || m_probe.state() != QAbstractSocket::UnconnectedState)
+            return;
+        if (m_options.tls) {
+            if (!m_options.tlsCertificate.isEmpty()) {
+                m_probe.setLocalCertificate(m_options.tlsCertificate);
+                m_probe.setPrivateKey(m_options.tlsCertificate);
+            }
+            m_probe.connectToHostEncrypted("127.0.0.1", quint16(m_options.port));
+        } else {
             m_probe.connectToHost("127.0.0.1", quint16(m_options.port));
+        }
     });
+    connect(&m_probe, &QSslSocket::encrypted, this, [this] {
+        m_probe.abort();
+        if (m_state != State::Starting || m_process.state() != QProcess::Running) return;
+        m_retry.stop();
+        m_deadline.stop();
+        setState(State::Running);
+        emit ready();
+    });
+    connect(&m_probe, &QSslSocket::sslErrors, this,
+            [this](const QList<QSslError> &) { m_probe.ignoreSslErrors(); });
     connect(&m_probe, &QTcpSocket::connected, this, [this] {
+        if (m_options.tls) return; // Wait for QSslSocket::encrypted above.
         m_probe.abort();
         if (m_state != State::Starting || m_process.state() != QProcess::Running) return;
         m_retry.stop();
