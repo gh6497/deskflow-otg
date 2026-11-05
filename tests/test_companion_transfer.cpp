@@ -9,6 +9,7 @@
 #include <QTemporaryDir>
 #include <QListWidget>
 #include <QPushButton>
+#include <QProgressBar>
 #include <QtTest>
 
 class TransferTest : public QObject {
@@ -113,7 +114,40 @@ private slots:
         for (const auto &args : commands()) {
             QVERIFY(!args.contains(m_dir.filePath("你好 '$; image.png")));
             QVERIFY(!args.contains("你好 '$; image.png"));
+            if (args.contains("write"))
+                QCOMPARE(args.mid(2, 4), (QStringList{"shell", "-T", "content", "write"}));
         }
+    }
+    void sendBeyondPipeCapacity()
+    {
+        const QByteArray large = content.repeated(128);
+        write("large-binary", large);
+        CompanionTransfer transfer(peer(), "[::1]:5555");
+        QSignalSpy spy(&transfer, &CompanionTransfer::completed);
+        transfer.send({m_dir.filePath("large-binary")});
+        QTRY_COMPARE(spy.size(), 1); QVERIFY(spy.first().first().toBool());
+        const auto sent = QDir(m_dir.path()).entryList({"*.wire"}, QDir::Files);
+        QCOMPARE(sent.size(), 1);
+        QFile file(m_dir.filePath(sent.first())); QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto wire = file.readAll();
+        QVERIFY(wire.endsWith(QCryptographicHash::hash(large, QCryptographicHash::Sha256)));
+        QCOMPARE(wire.mid(20 + QByteArray("large-binary").size(), large.size()), large);
+    }
+    void progressWaitsForReceipt()
+    {
+        TransferDialog dialog(peer(), "[::1]:5555");
+        auto *bar = dialog.findChild<QProgressBar *>(); QVERIFY(bar);
+        auto *transfer = dialog.findChild<CompanionTransfer *>(); QVERIFY(transfer);
+        QSignalSpy initial(transfer, &CompanionTransfer::completed);
+        QTRY_COMPARE(initial.size(), 1);
+        transfer->progress("file", 100, 100);
+        QCOMPARE(bar->value(), 99);
+        transfer->completed(false, "otg.transfer.failed", {});
+        QCOMPARE(bar->value(), 99);
+        transfer->completed(true, "otg.transfer.done", {});
+        QCOMPARE(bar->value(), 100);
+        transfer->progress("empty", 0, 0);
+        QCOMPARE(bar->value(), 99);
     }
     void rejectedDownloads_data()
     {

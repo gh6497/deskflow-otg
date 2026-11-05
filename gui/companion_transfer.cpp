@@ -329,7 +329,10 @@ void CompanionTransfer::nextSend()
     m_uploadId = QUuid::createUuid().toString(QUuid::Id128);
     m_bytes = 0; m_hash.reset(); m_trailer = false;
     emit progress(m_name, 0, m_size);
-    command({"exec-in", "content", "write", "--user", m_user, "--uri", uri("in/" + m_uploadId)},
+    // The raw exec service cannot half-close stdin: exec-in can terminate the
+    // remote writer before it drains the upload. Shell v2 forwards stdin EOF
+    // independently and waits for the remote command. -T keeps binary data raw.
+    command({"shell", "-T", "content", "write", "--user", m_user, "--uri", uri("in/" + m_uploadId)},
             Stream::Upload, [this](bool ok) {
         m_input.close();
         if (!ok || !m_trailer) { finish(false, "otg.transfer.failed"); return; }

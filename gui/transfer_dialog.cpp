@@ -55,11 +55,15 @@ TransferDialog::TransferDialog(const QString &adb, const QString &target, QWidge
     });
     connect(&m_transfer, &CompanionTransfer::progress, this, [this](const QString &name, qint64 bytes, qint64 total) {
         m_current->setText(QString("%1 · %2 / %3 B").arg(name).arg(bytes).arg(total));
-        m_progress->setValue(total ? int(bytes * 100 / total) : 100);
+        // Stream progress is not a persistence receipt (uploads may be buffered).
+        m_progress->setValue(total ? qMin(99, int(bytes * 100 / total)) : 99);
     });
     connect(&m_transfer, &CompanionTransfer::completed, this, [this](bool ok, const QString &id, const QString &) {
         m_statusId = id; translate(); enabled();
-        if (ok && id == "otg.transfer.done") m_files->clear();
+        if (ok && id == "otg.transfer.done") {
+            m_progress->setValue(100);
+            m_files->clear();
+        }
         if (m_rejecting) {
             QDialog::reject();
             emit stopped();

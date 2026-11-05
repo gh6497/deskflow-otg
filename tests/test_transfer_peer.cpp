@@ -78,6 +78,10 @@ int main(int argc, char **argv)
         output(data); return 0;
     }
     if (path.startsWith("in/")) {
+        // Raw exec-in has no independent stdin EOF. Reproduce an exit-0 upload
+        // that never commits, instead of treating it like an ordinary pipe.
+        if (args.value(2) == "exec-in") return 0;
+        if (args.mid(2, 4) != QStringList{"shell", "-T", "content", "write"}) return 89;
         if (mode == "hold") return app.exec();
         QFile input;
         if (!input.open(stdin, QIODevice::ReadOnly)) return 95;
@@ -99,7 +103,8 @@ int main(int argc, char **argv)
     }
     if (path.startsWith("receipt/")) {
         if (mode == "bad-receipt") { output("{\"version\":1,\"file\":{}}"); return 0; }
-        output(load(dir.filePath(path.mid(8) + ".receipt"))); return 0;
+        const auto receipt = load(dir.filePath(path.mid(8) + ".receipt"));
+        output(receipt.isEmpty() ? QByteArray("{\"version\":1,\"pending\":true}") : receipt); return 0;
     }
     return 90;
 }
