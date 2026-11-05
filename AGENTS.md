@@ -377,5 +377,8 @@ for f in platform/linux/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only
 - `scripts/fetch_adb.py` 下载固定 ADB 36.0.2，核验 SHA-256，只保留 adb、Windows DLL 与 notices。
   `ADB_BUNDLE_DIR` 是提取后的 platform-tools 目录；不提供时开发版使用系统 ADB。
 - 发布包提供 Qt 动态库、桥接与 ADB，不包含 Deskflow。`qt_deploy_runtime_dependencies` 同时检查桥接依赖。
+  Linux 通过 `qt_import_plugins` 显式纳入构建所用 Qt 的 GTK/桌面门户主题插件（目标存在时），
+  由 Qt 自动选择，不全局强制 `gtk3`、不修改 `QT_PLUGIN_PATH/QT_STYLE_OVERRIDE`。
+  DEB 含 GTK 插件时仅 Recommends GTK 3，缺少插件/可选运行库保留默认外观；不跨 Qt 版本混用系统插件。
 - Qt 测试：`tests/test_gui.cpp` + `test_peer.cpp` 测试模拟子进程生命周期；`test_window.cpp` 测试模拟 ADB 完整识别。
   `OTG_TEST_SCREENSHOT=/path/image.png ctest ...` 可保存窗口截图（测试设备为模拟数据）。

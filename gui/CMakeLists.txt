@@ -57,6 +57,16 @@ qt_add_executable(deskflow-otg-gui WIN32 MACOSX_BUNDLE
   main.cpp main_window.cpp main_window.h
 )
 target_link_libraries(deskflow-otg-gui PRIVATE otg_gui_support Qt6::Widgets)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  # Platform themes are not imported by default. Deploy plugins from this Qt
+  # installation (never from an unrelated system Qt), but let Qt/the desktop
+  # select the theme at runtime. Missing optional plugins retain Qt's fallback.
+  foreach(theme_plugin QGtk3ThemePlugin QXdgDesktopPortalThemePlugin)
+    if(TARGET Qt6::${theme_plugin})
+      qt_import_plugins(deskflow-otg-gui INCLUDE Qt6::${theme_plugin})
+    endif()
+  endforeach()
+endif()
 set_target_properties(deskflow-otg-gui PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
   MACOSX_BUNDLE_GUI_IDENTIFIER "io.github.gh6497.deskflow-otg"

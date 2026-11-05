@@ -38,7 +38,7 @@ jobs:
           cache: true
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0-dev libssl-dev libasound2-dev libglib2.0-dev bluez dbus
+        run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0-dev libssl-dev libasound2-dev libglib2.0-dev libgtk-3-0t64 bluez dbus
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: brew install cmake libusb openssl@3
@@ -83,6 +83,11 @@ jobs:
         run: cmake --install build --config Release --prefix "${{ github.workspace }}/stage"
       - name: Include dependency licenses
         run: python scripts/fetch_licenses.py --output stage/share/deskflow-otg/licenses
+      - name: Check Linux theme deployment
+        if: runner.os == 'Linux'
+        run: |
+          test -f stage/plugins/platformthemes/libqgtk3.so
+          test -f stage/plugins/platformthemes/libqxdgdesktopportal.so
       - name: Test DMG packaging layout
         run: python -m unittest discover -s tests -p test_package_dmg.py
       - name: Test Windows installer layout
