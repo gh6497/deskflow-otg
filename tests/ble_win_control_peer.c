@@ -30,7 +30,7 @@ static bool send_report(void *ctx, uint16_t id, const uint8_t *data, uint16_t si
     if (size != 8) return false;
     if (id == AOA_HID_ID_KEYBOARD) {
         for (unsigned i = 2; i < size; ++i)
-            if (data[i] == HID_KEY_F14) { trace("back-shortcut"); break; }
+            if ((data[0] & HID_MOD_LGUI) && data[i] == HID_KEY_BACKSPACE) { trace("back-shortcut"); break; }
     } else if (id == AOA_HID_ID_MOUSE && (data[1] & 2)) trace("right-click");
     return true;
 }

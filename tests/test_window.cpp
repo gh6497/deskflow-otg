@@ -73,9 +73,9 @@ private slots:
             QCOMPARE(right->currentData().toString(), "normal");
             right->setCurrentIndex(right->findData("back"));
             QCOMPARE(middle->currentData().toString(), "normal");
-            QCOMPARE(right->currentText(), "安卓返回键（需要伴侣应用）");
+            QCOMPARE(right->currentText(), "安卓返回键（Win+Backspace）");
             language->setCurrentIndex(language->findData("en"));
-            QCOMPARE(right->currentText(), "Android Back (companion app)");
+            QCOMPARE(right->currentText(), "Android Back (Win+Backspace)");
             QCOMPARE(right->currentData().toString(), "back");
             window.findChild<QPushButton *>("addDeviceButton")->click();
             QCOMPARE(list->count(), 2);

@@ -64,7 +64,8 @@ static const struct otg_hid_transport_ops USB_TRANSPORT = {
 };
 
 /* scrcpy SC_HID_KEYBOARD_REPORT_DESC (8-byte report: 1 modifier + 1 reserved
- * + 6 key slots). F13..F24 are included for companion-app shortcuts. */
+ * + 6 key slots). Keep the F13..F24 range for keyboard compatibility and
+ * existing BLE descriptor caches; navigation uses standard Meta shortcuts. */
 static const uint8_t KEYBOARD_REPORT_DESC_FULL[] = {
     0x05, 0x01,       /* Usage Page (Generic Desktop) */
     0x09, 0x06,       /* Usage (Keyboard) */
@@ -232,21 +233,22 @@ static int8_t clamp_i8(int32_t v)
 
 /* Build and send the full keyboard report (mirrors
  * sc_hid_keyboard_generate_input_from_key). */
-static void send_keyboard_report(struct otg_bridge *b)
+static bool send_keyboard_report_with_shortcut(struct otg_bridge *b,
+                                               uint8_t mods, int usage)
 {
     if (!b->transport_ops->ready(b->transport_ctx)) {
-        return;
+        return false;
     }
     uint8_t report[AOA_KEYBOARD_REPORT_SIZE];
     memset(report, 0, sizeof(report));
 
-    report[0] = b->hid_mods;
+    report[0] = b->hid_mods | mods;
     report[1] = 0; /* reserved */
 
     int n = 0;
     bool phantom = false;
     for (size_t i = 0; i < sizeof(b->keys); ++i) {
-        if (b->keys[i]) {
+        if (b->keys[i] || (int)i == usage) {
             if (n >= HID_KEYBOARD_MAX_KEYS) {
                 phantom = true;
                 break;
@@ -265,7 +267,33 @@ static void send_keyboard_report(struct otg_bridge *b)
     if (!b->transport_ops->send(b->transport_ctx, AOA_HID_ID_KEYBOARD, report,
                                 sizeof(report))) {
         LOG_WARN("failed to send keyboard report\n");
+        return false;
     }
+    return true;
+}
+
+static void send_keyboard_report(struct otg_bridge *b)
+{
+    (void)send_keyboard_report_with_shortcut(b, 0, -1);
+}
+
+/* One click produces one complete system shortcut, never a held/repeating
+ * Enter/Backspace or a Meta modifier applied to later typing. Compose reports
+ * without changing physical keyboard state, including a physically held Meta.
+ * Release the shortcut key before synthetic Meta, even after a send failure. */
+static void send_navigation_shortcut(struct otg_bridge *b, uint8_t usage)
+{
+    unsigned count = 0;
+    for (size_t i = 0; i < sizeof(b->keys); ++i) count += b->keys[i];
+    if (b->keys[usage] || count >= HID_KEYBOARD_MAX_KEYS) {
+        LOG_WARN("navigation shortcut skipped: key already held or keyboard full\n");
+        return;
+    }
+    if (send_keyboard_report_with_shortcut(b, HID_MOD_LGUI, -1)) {
+        (void)send_keyboard_report_with_shortcut(b, HID_MOD_LGUI, usage);
+    }
+    (void)send_keyboard_report_with_shortcut(b, HID_MOD_LGUI, -1);
+    send_keyboard_report(b);
 }
 
 static void send_relative_mouse_report(struct otg_bridge *b, uint8_t buttons,
@@ -498,9 +526,7 @@ void otg_bridge_set_middle_button_action(struct otg_bridge *b,
         action = OTG_MIDDLE_BUTTON_NORMAL;
     }
     if (b->middle_button_home_down && action != OTG_MIDDLE_BUTTON_HOME) {
-        b->keys[HID_KEY_F13] = false;
         b->middle_button_home_down = false;
-        send_keyboard_report(b);
     }
     b->middle_button_action = action;
 }
@@ -512,9 +538,7 @@ void otg_bridge_set_right_button_action(struct otg_bridge *b,
         action = OTG_RIGHT_BUTTON_NORMAL;
     }
     if (b->right_button_back_down && action != OTG_RIGHT_BUTTON_BACK) {
-        b->keys[HID_KEY_F14] = false;
         b->right_button_back_down = false;
-        send_keyboard_report(b);
     }
     b->right_button_action = action;
 }
@@ -583,10 +607,7 @@ void otg_bridge_enter(struct otg_bridge *b, int16_t x, int16_t y, uint16_t mask)
 void otg_bridge_leave(struct otg_bridge *b)
 {
     if (b->middle_button_home_down || b->right_button_back_down) {
-        if (b->middle_button_home_down) b->keys[HID_KEY_F13] = false;
-        if (b->right_button_back_down) b->keys[HID_KEY_F14] = false;
         b->middle_button_home_down = b->right_button_back_down = false;
-        send_keyboard_report(b);
     }
     if (b->mouse_buttons) {
         /* Never leave a button stuck down on the device. */
@@ -653,16 +674,14 @@ void otg_bridge_mouse_button(struct otg_bridge *b, uint8_t button, bool press)
     if (button == 2 && b->middle_button_action == OTG_MIDDLE_BUTTON_HOME) {
         if (b->middle_button_home_down != press) {
             b->middle_button_home_down = press;
-            b->keys[HID_KEY_F13] = press;
-            send_keyboard_report(b);
+            if (press) send_navigation_shortcut(b, HID_KEY_ENTER);
         }
         return;
     }
     if (button == 3 && b->right_button_action == OTG_RIGHT_BUTTON_BACK) {
         if (b->right_button_back_down != press) {
             b->right_button_back_down = press;
-            b->keys[HID_KEY_F14] = press;
-            send_keyboard_report(b);
+            if (press) send_navigation_shortcut(b, HID_KEY_BACKSPACE);
         }
         return;
     }
