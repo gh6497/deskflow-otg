@@ -19,6 +19,70 @@ bool aoa_hid_send(struct aoa_hid *a,uint16_t id,const uint8_t *data,uint16_t siz
 bool aoa_hid_poll(struct aoa_hid *a){return !a->disconnected;}
 bool aoa_hid_is_disconnected(const struct aoa_hid *a){return a->disconnected;}
 
+static bool has_key(uint8_t key)
+{
+    for (unsigned i = 2; i < sizeof(report); ++i) if (report[i] == key) return true;
+    return false;
+}
+
+static void test_back_shortcut(enum otg_mouse_mode mode)
+{
+    struct otg_bridge b;
+    registrations = 0;
+    CHECK(!otg_bridge_open(&b, "mock", 1080, 2340, mode));
+    CHECK(b.right_button_action == OTG_RIGHT_BUTTON_NORMAL);
+    otg_bridge_set_right_button_action(&b, OTG_RIGHT_BUTTON_BACK);
+    int before = reports;
+    otg_bridge_mouse_button(&b, 3, true);
+    CHECK(reports == before); /* Ignore input outside the phone. */
+    otg_bridge_enter(&b, 0, 0, 0);
+    otg_bridge_key(&b, 'a', true);
+    otg_bridge_set_middle_button_action(&b, OTG_MIDDLE_BUTTON_HOME);
+    otg_bridge_mouse_button(&b, 2, true);
+    before = reports;
+    otg_bridge_mouse_button(&b, 3, true);
+    CHECK(reports == before + 1 && last_id == 1 && last_size == 8);
+    CHECK(has_key(HID_KEY_A) && has_key(HID_KEY_F13) && has_key(HID_KEY_F14));
+    CHECK(!b.mouse_buttons && b.right_button_back_down);
+    otg_bridge_mouse_button(&b, 3, true);
+    CHECK(reports == before + 1); /* Duplicate down does not repeat Back. */
+    otg_bridge_mouse_button(&b, 3, false);
+    CHECK(last_id == 1 && !has_key(HID_KEY_F14) && has_key(HID_KEY_F13) && has_key(HID_KEY_A));
+    before = reports;
+    otg_bridge_mouse_button(&b, 3, false);
+    CHECK(reports == before);
+    otg_bridge_mouse_button(&b, 3, true);
+    otg_bridge_leave(&b);
+    CHECK(!b.keys[HID_KEY_F13] && !b.keys[HID_KEY_F14]);
+    CHECK(!b.middle_button_home_down && !b.right_button_back_down);
+    before = reports;
+    otg_bridge_mouse_button(&b, 3, false);
+    CHECK(reports == before);
+    otg_bridge_enter(&b, 0, 0, 0);
+    otg_bridge_mouse_button(&b, 3, true);
+    otg_bridge_release_keyboard(&b);
+    CHECK(last_id == 1 && !has_key(HID_KEY_F14) && !b.right_button_back_down);
+    otg_bridge_mouse_button(&b, 3, true);
+    CHECK(has_key(HID_KEY_F14));
+    otg_bridge_reset_input(&b);
+    CHECK(!b.right_button_back_down && !b.keys[HID_KEY_F14] && !b.active);
+    CHECK(b.right_button_action == OTG_RIGHT_BUTTON_BACK);
+    otg_bridge_enter(&b, 0, 0, 0);
+    otg_bridge_mouse_button(&b, 3, true);
+    otg_bridge_set_right_button_action(&b, OTG_RIGHT_BUTTON_NORMAL);
+    CHECK(last_id == 1 && !has_key(HID_KEY_F14) && !b.right_button_back_down);
+    otg_bridge_mouse_button(&b, 3, true);
+    CHECK(last_id == 2 && b.mouse_buttons == 2); /* Normal right click restored. */
+    otg_bridge_mouse_button(&b, 3, false);
+    CHECK(last_id == 2 && !b.mouse_buttons);
+    otg_bridge_set_right_button_action(&b, (enum otg_right_button_action)99);
+    CHECK(b.right_button_action == OTG_RIGHT_BUTTON_NORMAL);
+    otg_bridge_set_right_button_action(&b, OTG_RIGHT_BUTTON_BACK);
+    otg_bridge_mouse_button(&b, 3, true);
+    otg_bridge_close(&b);
+    CHECK(!b.keys[HID_KEY_F14] && !b.right_button_back_down);
+}
+
 int main(void)
 {
     struct otg_bridge b;
@@ -58,6 +122,8 @@ int main(void)
     otg_bridge_mouse_button(&b,2,false);
     CHECK(last_id==1 && report[2]==0);
     otg_bridge_close(&b);
-    puts("PASS: default USB descriptors, absolute coordinates, buttons, wheel, keyboard, Home shortcut and close lifecycle");
+    test_back_shortcut(OTG_MOUSE_ABSOLUTE);
+    test_back_shortcut(OTG_MOUSE_RELATIVE);
+    puts("PASS: default USB descriptors, absolute coordinates, buttons, wheel, keyboard, Home/Back shortcuts and close lifecycle");
     return 0;
 }

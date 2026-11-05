@@ -41,6 +41,11 @@ enum otg_middle_button_action {
     OTG_MIDDLE_BUTTON_HOME,
 };
 
+enum otg_right_button_action {
+    OTG_RIGHT_BUTTON_NORMAL,
+    OTG_RIGHT_BUTTON_BACK,
+};
+
 struct otg_bridge {
     struct aoa_hid aoa;
     const struct otg_hid_transport_ops *transport_ops;
@@ -55,6 +60,8 @@ struct otg_bridge {
     enum otg_mouse_mode mouse_mode;
     enum otg_middle_button_action middle_button_action;
     bool middle_button_home_down;
+    enum otg_right_button_action right_button_action;
+    bool right_button_back_down;
     uint8_t mouse_buttons;    /* HID button byte */
     int32_t mouse_x, mouse_y; /* last absolute cursor position */
     bool have_mouse_pos;
@@ -103,6 +110,9 @@ void otg_bridge_mouse_button(struct otg_bridge *b, uint8_t button, bool press);
 /* Configure the optional companion-app Home shortcut. Must be set while idle. */
 void otg_bridge_set_middle_button_action(struct otg_bridge *b,
                                          enum otg_middle_button_action action);
+/* Configure the optional companion-app Back shortcut. Must be set while idle. */
+void otg_bridge_set_right_button_action(struct otg_bridge *b,
+                                       enum otg_right_button_action action);
 void otg_bridge_mouse_move(struct otg_bridge *b, int16_t x, int16_t y);
 void otg_bridge_mouse_rel_move(struct otg_bridge *b, int16_t dx, int16_t dy);
 void otg_bridge_mouse_wheel(struct otg_bridge *b, int16_t x, int16_t y);

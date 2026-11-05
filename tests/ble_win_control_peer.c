@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0 */
 #include "ble_win.h"
 #include "bridge.h"
+#include "keymap.h"
 #include "deskflow_client.h"
 #include <windows.h>
 #include <stdio.h>
@@ -24,7 +25,15 @@ static bool reg(void *ctx, uint16_t id, const uint8_t *desc, uint16_t size)
     return true;
 }
 static bool send_report(void *ctx, uint16_t id, const uint8_t *data, uint16_t size)
-{ (void)ctx; (void)id; (void)data; return size == 8; }
+{
+    (void)ctx;
+    if (size != 8) return false;
+    if (id == AOA_HID_ID_KEYBOARD) {
+        for (unsigned i = 2; i < size; ++i)
+            if (data[i] == HID_KEY_F14) { trace("back-shortcut"); break; }
+    } else if (id == AOA_HID_ID_MOUSE && (data[1] & 2)) trace("right-click");
+    return true;
+}
 static bool poll_report(void *ctx) { (void)ctx; return true; }
 static bool ready(void *ctx) { (void)ctx; return !getenv("OTG_TEST_NATIVE_BLE_WAIT"); }
 static void close_report(void *ctx) { (void)ctx; }
@@ -66,6 +75,8 @@ int df_client_run(df_client *c, volatile sig_atomic_t *stop)
     c->cbs->on_connected(c->ud);
     c->cbs->on_enter(c->ud, 100, 100, 1, 0);
     c->cbs->on_key_down(c->ud, 'a', 0);
+    c->cbs->on_mouse_down(c->ud, 3);
+    c->cbs->on_mouse_up(c->ud, 3);
     c->cbs->on_mouse_down(c->ud, 1);
     trace("input-held");
     while (!*stop && !(stop_check && stop_check())) Sleep(2);

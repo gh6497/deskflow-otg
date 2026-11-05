@@ -194,7 +194,42 @@ Deskflow 连接自动播放功能可能随后请求恢复所选播放器。
 `DeskflowAccessibilityService` 请求过滤 F13，在按下时调用
 `AccessibilityService.performGlobalAction(GLOBAL_ACTION_HOME)`，返回安卓桌面并消费该按键。
 
-使用前在手机伴侣应用首页点击「打开无障碍设置」，启用「Deskflow OTG 返回桌面」服务；
+使用前在手机伴侣应用首页点击「打开无障碍设置」，启用「Deskflow OTG 返回桌面 / 返回上一级」服务；
 桌面 GUI 的该选项默认关闭，普通中键行为不变。该路径不依赖 ADB，但需要用户手动授予无障碍
 权限；部分 ROM 的后台限制可能停止无障碍服务。若服务未启用，Home 模式下的中键会被桥接端
 转换为 F13，但不会执行安卓 Home，也不会发送普通中键。
+
+### 鼠标右键映射安卓 Back（0.1.7）
+
+同时更新桌面 GUI 和手机 APK（版本码 9），在桌面「右键功能」选择「安卓返回键（需要伴侣应用）」。
+桥接端用独立的 F14 HID 快捷键替代普通右键，同一无障碍服务在首次按下时执行
+`GLOBAL_ACTION_BACK`，消费按下、重复与松开事件，避免同时触发普通右键。
+中键 Home 与右键 Back 独立配置并按设备保存，默认均为普通鼠标按钮；CLI 可用
+`--right-button-action normal|back`。USB、Linux BLE、Windows BLE 共用该映射，macOS 支持 USB。
+Windows 空闲 BLE provider 恢复会话时同步更新映射，不因修改该选项注销 GATT。
+
+安装后打开手机 App，手动启用上述无障碍服务；已启用但更新后失效时可手动关闭再开启。
+运行时无需 ADB 或通知使用权，未安装新版 APK、未启用服务或服务被 ROM 停止时不会执行 Back，
+也不会回退发送普通右键。保留的 F13/F14 来自真实键盘时同样会被服务拦截，请避免用于其他快捷键。
+
+`bridge_transport` 覆盖绝对/相对指针、Home 与 Back 同时按下、重复去重、切出/重置/关闭释放与恢复普通右键；
+`android_accessibility` 用最小 Android API fake 执行真实服务，验证 Home/Back 分发、重复和松开不触发、
+无关按键放行及全局操作失败仍消费快捷键；GUI 测试覆盖双语、设备隔离、保存恢复与参数传递。
+均为离线测试，不代表手机 ROM 的 F14 映射、无障碍过滤或实际页面返回已经验收。
+
+### Android 10–15 无反应修复（0.1.8）
+
+F13/F14 的标准 Android KeyCode（326/327）到 API 36（Android 16）才加入。
+在当前 Android 14 真机上，已确认 APK 0.1.7、无障碍服务已绑定、桥接进程带
+`--right-button-action back`，且 AOA 键盘声明 F13/F14；但手机 Generic.kl 中
+`key 183 F13` / `key 184 F14` 均为注释，不能依赖新系统 KeyCode 识别。
+
+0.1.8（版本码10）保留新 KeyCode 路径，同时在事件为 `KEYCODE_UNKNOWN` 时，根据
+Linux HID evdev 扫描码183/184识别 Home/Back。已映射为其他已知键的事件不作扫描码回退，
+其他未知键仍放行；首次按下触发、重复/松开仅消费，失败不重试。USB/BLE 的桌面报告无需改变。
+
+更新手机 APK 后打开一次，确认无障碍服务绑定；必要时由用户手动关闭再开启。
+仅针对保留快捷键记录 `HID shortcut Back keyCode=0 scanCode=184 requested=true` 等日志，
+不记录普通键盘输入。`requested=true` 表示系统接受全局操作请求，不等于已确认页面切换。
+`android_accessibility` 现同时覆盖 Android 10–15 未映射事件和 Android16标准 KeyCode；
+0.1.8 实际 ROM 事件投递及页面返回仍需安装后真机测试。

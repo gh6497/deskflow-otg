@@ -72,6 +72,7 @@
 #define HID_KEY_KP_0         0x62
 #define HID_KEY_KP_PERIOD    0x63
 #define HID_KEY_F13          0x68
+#define HID_KEY_F14          0x69
 #define HID_KEY_F24          0x73
 #define HID_KEY_LCTRL        0xE0
 #define HID_KEY_LSHIFT       0xE1

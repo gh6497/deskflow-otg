@@ -174,6 +174,7 @@ void Session::start(const ConnectionOptions &options)
         (options.transport != "usb" && !ble) ||
         (ble && (!peerPattern.match(options.blePeer).hasMatch() || options.mouseMode != "absolute")) ||
         (options.middleButtonAction != "normal" && options.middleButtonAction != "home") ||
+        (options.rightButtonAction != "normal" && options.rightButtonAction != "back") ||
         (options.tls && options.tlsFingerprint.isEmpty() && options.tlsFingerprintFile.isEmpty()) ||
         (options.tls && !options.tlsFingerprint.isEmpty() && !options.tlsFingerprintFile.isEmpty()) ||
         !validScreenName(options.phone) ||
@@ -292,7 +293,8 @@ void Session::launchBridge()
                     "--port", QString::number(m_options.port), "--name", m_options.phone,
                      "--width", QString::number(m_options.width),
                      "--height", QString::number(m_options.height), "--mouse-mode", m_options.mouseMode,
-                     "--middle-button-action", m_options.middleButtonAction};
+                     "--middle-button-action", m_options.middleButtonAction,
+                     "--right-button-action", m_options.rightButtonAction};
     if (m_options.audio || m_options.clipboard) {
         if (m_options.audio) args << "--audio";
         if (m_options.clipboard) args << "--clipboard";
@@ -326,10 +328,10 @@ void Session::launchBridge()
     if (windowsBle()) {
         m_bleActive = true;
         if (hasBleProvider()) {
-            const auto resume = QString("resume\t%1\t%2\t%3\t%4\t%5\t%6\n")
+            const auto resume = QString("resume\t%1\t%2\t%3\t%4\t%5\t%6\t%7\n")
                 .arg(m_options.manageServer ? "127.0.0.1" : m_options.host)
                 .arg(m_options.port).arg(m_options.phone).arg(m_options.width).arg(m_options.height)
-                .arg(m_options.middleButtonAction).toUtf8();
+                .arg(m_options.middleButtonAction).arg(m_options.rightButtonAction).toUtf8();
             m_bleProvider.write(resume);
             emit log(qtTrId("otg.ble.provider_reused"));
         } else {

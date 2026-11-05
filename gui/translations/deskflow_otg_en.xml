@@ -149,6 +149,10 @@
   <message id="otg.middle_button.home"><source>Return to Android home (companion app)</source><translation>Return to Android home (companion app)</translation></message>
   <message id="otg.label.middle_button_action"><source>Middle button action</source><translation>Middle button action</translation></message>
   <message id="otg.middle_button.tooltip"><source>Home mode sends F13 through HID. Enable the deskflow-otg accessibility service on the phone; otherwise the middle button has no effect.</source><translation>Home mode sends F13 through HID. Enable the deskflow-otg accessibility service on the phone; otherwise the middle button has no effect.</translation></message>
+  <message id="otg.right_button.normal"><source>Normal right button</source><translation>Normal right button</translation></message>
+  <message id="otg.right_button.back"><source>Android Back (companion app)</source><translation>Android Back (companion app)</translation></message>
+  <message id="otg.label.right_button_action"><source>Right button action</source><translation>Right button action</translation></message>
+  <message id="otg.right_button.tooltip"><source>Back mode sends F14 through HID instead of a right click. Enable the updated deskflow-otg accessibility service on the phone; otherwise the right button has no effect.</source><translation>Back mode sends F14 through HID instead of a right click. Enable the updated deskflow-otg accessibility service on the phone; otherwise the right button has no effect.</translation></message>
   <message id="otg.status.not_connected"><source>Not connected</source><translation>Not connected</translation></message>
   <message id="otg.action.connect"><source>Connect</source><translation>Connect</translation></message>
   <message id="otg.action.disconnect"><source>Disconnect</source><translation>Disconnect</translation></message>

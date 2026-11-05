@@ -53,6 +53,51 @@ protected:
 class WindowTest : public QObject {
     Q_OBJECT
 private slots:
+    void rightButtonSettings()
+    {
+        QTemporaryDir dir;
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dir.path());
+        QSettings settings;
+        settings.setValue("adb", "");
+        settings.setValue("language", "zh_CN");
+        settings.setValue("manageServer", false);
+        {
+            AutoConnectTestWindow window;
+            QCoreApplication::processEvents();
+            auto *right = window.findChild<QComboBox *>("rightButtonAction");
+            auto *middle = window.findChild<QComboBox *>("middleButtonAction");
+            auto *list = window.findChild<QListWidget *>("deviceSidebar");
+            auto *language = window.findChild<QComboBox *>("languageSelector");
+            QVERIFY(right && middle && list && language);
+            QCOMPARE(right->currentData().toString(), "normal");
+            right->setCurrentIndex(right->findData("back"));
+            QCOMPARE(middle->currentData().toString(), "normal");
+            QCOMPARE(right->currentText(), "安卓返回键（需要伴侣应用）");
+            language->setCurrentIndex(language->findData("en"));
+            QCOMPARE(right->currentText(), "Android Back (companion app)");
+            QCOMPARE(right->currentData().toString(), "back");
+            window.findChild<QPushButton *>("addDeviceButton")->click();
+            QCOMPARE(list->count(), 2);
+            right->setCurrentIndex(right->findData("normal"));
+            middle->setCurrentIndex(middle->findData("home"));
+            for (int i = 0; i < list->count(); ++i)
+                if (list->item(i)->data(Qt::UserRole) == "initial") list->setCurrentRow(i);
+            QCOMPARE(right->currentData().toString(), "back");
+            QCOMPARE(middle->currentData().toString(), "normal");
+            window.findChild<QAction *>("trayQuit")->trigger();
+        }
+        AutoConnectTestWindow restored;
+        auto *right = restored.findChild<QComboBox *>("rightButtonAction");
+        auto *middle = restored.findChild<QComboBox *>("middleButtonAction");
+        auto *list = restored.findChild<QListWidget *>("deviceSidebar");
+        QCOMPARE(right->currentData().toString(), "back");
+        QCOMPARE(middle->currentData().toString(), "normal");
+        list->setCurrentRow(1);
+        QCOMPARE(right->currentData().toString(), "normal");
+        QCOMPARE(middle->currentData().toString(), "home");
+        restored.findChild<QAction *>("trayQuit")->trigger();
+    }
     void fileSharingWindow()
     {
         QTemporaryDir dir;
@@ -773,7 +818,10 @@ private slots:
         const QByteArray phone = "{\"version\":1,\"devices\":[{\"id\":\"1:2\",\"serial\":\"TEST123\"}]}";
         QVERIFY(writeSnapshot(phone));
         qputenv("OTG_TEST_USB_SNAPSHOT", snapshotFile.toUtf8());
-        const auto restore = qScopeGuard([] { qunsetenv("OTG_TEST_USB_SNAPSHOT"); });
+        qputenv("OTG_TEST_RIGHT_ACTION", "back");
+        const auto restore = qScopeGuard([] {
+            qunsetenv("OTG_TEST_USB_SNAPSHOT"); qunsetenv("OTG_TEST_RIGHT_ACTION");
+        });
         {
             AutoConnectTestWindow window;
             auto *enabled = window.findChild<QCheckBox *>("autoConnectEnabled");
@@ -792,6 +840,7 @@ private slots:
             adbSerial->setText("192.168.1.20:5555");
             width->setValue(1234);
             multiplier->setValue(2.0);
+            window.findChild<QComboBox *>("rightButtonAction")->setCurrentIndex(1);
             enabled->setChecked(true);
             button->click();
             QTRY_COMPARE(session->state(), Session::State::Connected);
@@ -800,6 +849,7 @@ private slots:
             QCOMPARE(settings.value("profile").toMap().value("originalWidth").toInt(), 1234);
             QCOMPARE(settings.value("profile").toMap().value("adbSerial").toString(),
                      QStringLiteral("192.168.1.20:5555"));
+            QCOMPARE(settings.value("profile").toMap().value("rightButtonAction").toString(), "back");
             settings.endArray();
             QVERIFY(monitor->acceptSnapshot(phone));
             window.findChild<QAction *>("trayDisconnect")->trigger();
@@ -809,6 +859,7 @@ private slots:
             // Reinsert restores the phone's settings, not unsaved form edits.
             width->setValue(999);
             multiplier->setValue(1.0);
+            window.findChild<QComboBox *>("rightButtonAction")->setCurrentIndex(0);
             QVERIFY(writeSnapshot("{\"version\":1,\"devices\":[]}"));
             QVERIFY(monitor->acceptSnapshot("{\"version\":1,\"devices\":[]}"));
             window.show();
@@ -819,6 +870,7 @@ private slots:
             QTRY_COMPARE(session->state(), Session::State::Connected);
             QCOMPARE(width->value(), 1234);
             QCOMPARE(multiplier->value(), 2.0);
+            QCOMPARE(window.findChild<QComboBox *>("rightButtonAction")->currentData().toString(), "back");
             window.findChild<QAction *>("trayQuit")->trigger();
             QTRY_COMPARE(session->state(), Session::State::Idle);
         }
