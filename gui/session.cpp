@@ -173,6 +173,7 @@ void Session::start(const ConnectionOptions &options)
                               options.scrcpyVersion.isEmpty() || (ble && options.adbSerial.isEmpty()))) ||
         (options.transport != "usb" && !ble) ||
         (ble && (!peerPattern.match(options.blePeer).hasMatch() || options.mouseMode != "absolute")) ||
+        (options.middleButtonAction != "normal" && options.middleButtonAction != "home") ||
         (options.tls && options.tlsFingerprint.isEmpty() && options.tlsFingerprintFile.isEmpty()) ||
         (options.tls && !options.tlsFingerprint.isEmpty() && !options.tlsFingerprintFile.isEmpty()) ||
         !validScreenName(options.phone) ||
@@ -289,8 +290,9 @@ void Session::launchBridge()
     emit log(qtTrId(ble ? "otg.ble.waiting" : "otg.log.usb_initializing"));
     QStringList args = {"--gui", "--host", m_options.manageServer ? "127.0.0.1" : m_options.host,
                     "--port", QString::number(m_options.port), "--name", m_options.phone,
-                    "--width", QString::number(m_options.width),
-                    "--height", QString::number(m_options.height), "--mouse-mode", m_options.mouseMode};
+                     "--width", QString::number(m_options.width),
+                     "--height", QString::number(m_options.height), "--mouse-mode", m_options.mouseMode,
+                     "--middle-button-action", m_options.middleButtonAction};
     if (m_options.audio || m_options.clipboard) {
         if (m_options.audio) args << "--audio";
         if (m_options.clipboard) args << "--clipboard";
@@ -324,9 +326,10 @@ void Session::launchBridge()
     if (windowsBle()) {
         m_bleActive = true;
         if (hasBleProvider()) {
-            const auto resume = QString("resume\t%1\t%2\t%3\t%4\t%5\n")
+            const auto resume = QString("resume\t%1\t%2\t%3\t%4\t%5\t%6\n")
                 .arg(m_options.manageServer ? "127.0.0.1" : m_options.host)
-                .arg(m_options.port).arg(m_options.phone).arg(m_options.width).arg(m_options.height).toUtf8();
+                .arg(m_options.port).arg(m_options.phone).arg(m_options.width).arg(m_options.height)
+                .arg(m_options.middleButtonAction).toUtf8();
             m_bleProvider.write(resume);
             emit log(qtTrId("otg.ble.provider_reused"));
         } else {

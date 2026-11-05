@@ -88,6 +88,8 @@ void MainWindow::retranslateUi()
         m_direction->setItemText(i, qtTrId(directions[i]));
     m_mouseMode->setItemText(0, qtTrId("otg.mouse.absolute"));
     m_mouseMode->setItemText(1, qtTrId("otg.mouse.relative"));
+    m_middleButtonAction->setItemText(0, qtTrId("otg.middle_button.normal"));
+    m_middleButtonAction->setItemText(1, qtTrId("otg.middle_button.home"));
     m_transport->setItemText(0, qtTrId("otg.transport.usb"));
     if (m_transport->count() > 1)
 #ifdef Q_OS_WIN
@@ -425,6 +427,13 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     m_mouseMode->addItem(qtTrId("otg.mouse.relative"), "relative");
     addTranslatedRow(featuresForm, "otg.label.mouse_mode", m_mouseMode);
 
+    m_middleButtonAction = new QComboBox;
+    m_middleButtonAction->setObjectName("middleButtonAction");
+    m_middleButtonAction->addItem(qtTrId("otg.middle_button.normal"), "normal");
+    m_middleButtonAction->addItem(qtTrId("otg.middle_button.home"), "home");
+    setTranslatedProperty(m_middleButtonAction, "toolTip", "otg.middle_button.tooltip");
+    addTranslatedRow(featuresForm, "otg.label.middle_button_action", m_middleButtonAction);
+
     m_audio = translated(new QCheckBox, "text", "otg.audio.enabled");
     m_audio->setObjectName("audioEnabled");
     setTranslatedProperty(m_audio, "toolTip", "otg.audio.tooltip");
@@ -666,6 +675,8 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     m_tlsFingerprintFile->setText(settings.value("tlsFingerprintFile").toString());
     m_direction->setCurrentIndex(qMax(0, m_direction->findData(settings.value("direction", "right"))));
     m_mouseMode->setCurrentIndex(qMax(0, m_mouseMode->findData(settings.value("mouseMode", "absolute"))));
+    m_middleButtonAction->setCurrentIndex(qMax(0, m_middleButtonAction->findData(
+        settings.value("middleButtonAction", "normal"))));
     if (m_transport->currentData() == "ble") m_mouseMode->setCurrentIndex(0);
     const int profileCount = settings.beginReadArray("rememberedDevices");
     for (int i = 0; i < profileCount; ++i) {
@@ -1081,6 +1092,7 @@ ConnectionOptions MainWindow::connectionOptions(const QVariantMap &profile) cons
     options.autoRotate = options.transport == "usb" &&
         (options.audio || options.clipboard) && profile.value("autoRotate", false).toBool();
     options.mouseMode = options.transport == "ble" ? "absolute" : profile.value("mouseMode", "absolute").toString();
+    options.middleButtonAction = profile.value("middleButtonAction", "normal").toString();
     options.blePeer = profile.value("blePeer").toString();
 #ifdef Q_OS_LINUX
     options.adapter = profile.value("bleAdapter", "hci0").toString();
@@ -1453,7 +1465,8 @@ QVariantMap MainWindow::deviceProfile() const
                {"tlsFingerprintFile", m_tlsFingerprintFile->text()},
                {"direction", m_direction->currentData()},
               {"mouseMode", m_mouseMode->currentData()}, {"audio", m_audio->isChecked()},
-               {"clipboard", m_clipboard->isChecked()}, {"autoRotate", m_autoRotate->isChecked()}};
+                {"middleButtonAction", m_middleButtonAction->currentData()},
+                {"clipboard", m_clipboard->isChecked()}, {"autoRotate", m_autoRotate->isChecked()}};
 }
 
 void MainWindow::applyDeviceProfile(const QVariantMap &profile)
@@ -1487,6 +1500,8 @@ void MainWindow::applyDeviceProfile(const QVariantMap &profile)
     m_autoConnectEnabled->setChecked(profile.value("autoConnect", false).toBool());
     m_direction->setCurrentIndex(qMax(0, m_direction->findData(profile.value("direction", "right"))));
     m_mouseMode->setCurrentIndex(qMax(0, m_mouseMode->findData(profile.value("mouseMode", "absolute"))));
+    m_middleButtonAction->setCurrentIndex(qMax(0, m_middleButtonAction->findData(
+        profile.value("middleButtonAction", "normal"))));
     if (m_transport->currentData() == "ble") m_mouseMode->setCurrentIndex(0);
     const auto neighbor = profile.value("neighbor", m_computer->text()).toString();
     if (m_neighbor->findData(neighbor) < 0) m_neighbor->addItem(neighbor, neighbor);
@@ -1548,6 +1563,7 @@ void MainWindow::saveSettings()
     settings.setValue("tlsFingerprintFile", m_tlsFingerprintFile->text());
     settings.setValue("direction", m_direction->currentData());
     settings.setValue("mouseMode", m_mouseMode->currentData());
+    settings.setValue("middleButtonAction", m_middleButtonAction->currentData());
     settings.setValue("autoConnect", m_autoConnectEnabled->isChecked());
 }
 

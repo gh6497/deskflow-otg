@@ -96,6 +96,8 @@ The USB device page provides **Install / update APK**, **Open phone setup**, and
 
 Companion **0.1.4** also displays the actual Deskflow session state reported by the updated desktop GUI over already-authorized ADB. Only the completed Deskflow handshake counts as connected; reports expire to **Status unknown** after 15 seconds without confirmation. This optional status channel does not require notification access, does not connect/pair ADB automatically, and does not affect HID or immediate USB-disconnect pause. Open the app once after installation. CLI sessions and connections without ADB cannot report status; phone-side broadcast delivery still requires real-device validation.
 
+The GUI's **Middle button action** can be set to **Return to Android home (companion app)**. In this mode the bridge sends a reserved F13 HID shortcut instead of a mouse middle-button report; the companion app's accessibility service consumes it and calls Android's global Home action. Enable **Deskflow OTG Home shortcut** in the phone's Accessibility settings after installing the updated APK. The default remains a normal middle button, and this feature does not require ADB once the accessibility service is enabled.
+
 ### Share to computer and file transfer
 
 With companion app **0.1.6+** and an already-authorized ADB connection, the desktop **Files & sharing**

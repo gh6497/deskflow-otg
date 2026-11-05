@@ -1,6 +1,7 @@
 /* USB wire regression using an in-memory AOA device; no libusb calls.
  * SPDX-License-Identifier: Apache-2.0 */
 #include "bridge.h"
+#include "keymap.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,6 +49,15 @@ int main(void)
     int before=reports;otg_bridge_mouse_move(&b,50,50);CHECK(reports==before);
     otg_bridge_close(&b);CHECK(closes==1);
     otg_bridge_close(&b);CHECK(closes==1);
-    puts("PASS: default USB descriptors, absolute coordinates, buttons, wheel, keyboard and close lifecycle");
+    registrations = 0;
+    CHECK(!otg_bridge_open(&b,"mock",1080,2340,OTG_MOUSE_ABSOLUTE));
+    otg_bridge_set_middle_button_action(&b, OTG_MIDDLE_BUTTON_HOME);
+    otg_bridge_enter(&b,0,0,0);
+    otg_bridge_mouse_button(&b,2,true);
+    CHECK(last_id==1 && report[2]==HID_KEY_F13);
+    otg_bridge_mouse_button(&b,2,false);
+    CHECK(last_id==1 && report[2]==0);
+    otg_bridge_close(&b);
+    puts("PASS: default USB descriptors, absolute coordinates, buttons, wheel, keyboard, Home shortcut and close lifecycle");
     return 0;
 }

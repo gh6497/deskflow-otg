@@ -36,6 +36,11 @@ enum otg_mouse_mode {
     OTG_MOUSE_RELATIVE,
 };
 
+enum otg_middle_button_action {
+    OTG_MIDDLE_BUTTON_NORMAL,
+    OTG_MIDDLE_BUTTON_HOME,
+};
+
 struct otg_bridge {
     struct aoa_hid aoa;
     const struct otg_hid_transport_ops *transport_ops;
@@ -44,10 +49,12 @@ struct otg_bridge {
 
     /* keyboard state */
     uint8_t hid_mods;         /* HID modifier byte (bits 0..7) */
-    bool keys[0x66];          /* pressed non-modifier HID usages (0x00..0x65) */
+    bool keys[0x74];          /* pressed non-modifier HID usages (0x00..0x73) */
 
     /* mouse state */
     enum otg_mouse_mode mouse_mode;
+    enum otg_middle_button_action middle_button_action;
+    bool middle_button_home_down;
     uint8_t mouse_buttons;    /* HID button byte */
     int32_t mouse_x, mouse_y; /* last absolute cursor position */
     bool have_mouse_pos;
@@ -93,6 +100,9 @@ void otg_bridge_key(struct otg_bridge *b, uint32_t keyid, bool down);
 /* Release a cancelled clipboard input barrier without disturbing pointer state. */
 void otg_bridge_release_keyboard(struct otg_bridge *b);
 void otg_bridge_mouse_button(struct otg_bridge *b, uint8_t button, bool press);
+/* Configure the optional companion-app Home shortcut. Must be set while idle. */
+void otg_bridge_set_middle_button_action(struct otg_bridge *b,
+                                         enum otg_middle_button_action action);
 void otg_bridge_mouse_move(struct otg_bridge *b, int16_t x, int16_t y);
 void otg_bridge_mouse_rel_move(struct otg_bridge *b, int16_t dx, int16_t dy);
 void otg_bridge_mouse_wheel(struct otg_bridge *b, int16_t x, int16_t y);

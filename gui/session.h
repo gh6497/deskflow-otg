@@ -24,6 +24,7 @@ struct ConnectionOptions {
     QString phone = "android";
     QString direction = "right";
     QString mouseMode = "absolute";
+    QString middleButtonAction = "normal";
     QString tlsCertificate;
     QString tlsFingerprint;
     QString tlsFingerprintFile;

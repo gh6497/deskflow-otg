@@ -64,7 +64,7 @@ static const struct otg_hid_transport_ops USB_TRANSPORT = {
 };
 
 /* scrcpy SC_HID_KEYBOARD_REPORT_DESC (8-byte report: 1 modifier + 1 reserved
- * + 6 key slots). */
+ * + 6 key slots). F13..F24 are included for companion-app shortcuts. */
 static const uint8_t KEYBOARD_REPORT_DESC_FULL[] = {
     0x05, 0x01,       /* Usage Page (Generic Desktop) */
     0x09, 0x06,       /* Usage (Keyboard) */
@@ -91,9 +91,9 @@ static const uint8_t KEYBOARD_REPORT_DESC_FULL[] = {
     0x91, 0x01,       /* Output (Constant): LED padding */
     0x05, 0x07,       /* Usage Page (Key Codes) */
     0x19, 0x00,       /* Usage Minimum (0) */
-    0x29, 0x65,       /* Usage Maximum (101) */
+    0x29, 0x73,       /* Usage Maximum (115) */
     0x15, 0x00,       /* Logical Minimum (0) */
-    0x25, 0x65,       /* Logical Maximum (101) */
+    0x25, 0x73,       /* Logical Maximum (115) */
     0x75, 0x08,       /* Report Size (8) */
     0x95, 0x06,       /* Report Count (6) */
     0x81, 0x00,       /* Input (Data, Array): keys */
@@ -245,7 +245,7 @@ static void send_keyboard_report(struct otg_bridge *b)
 
     int n = 0;
     bool phantom = false;
-    for (int i = 0; i < 0x66; ++i) {
+    for (size_t i = 0; i < sizeof(b->keys); ++i) {
         if (b->keys[i]) {
             if (n >= HID_KEYBOARD_MAX_KEYS) {
                 phantom = true;
@@ -491,6 +491,20 @@ void otg_bridge_close(struct otg_bridge *b)
     }
 }
 
+void otg_bridge_set_middle_button_action(struct otg_bridge *b,
+                                         enum otg_middle_button_action action)
+{
+    if (action != OTG_MIDDLE_BUTTON_HOME) {
+        action = OTG_MIDDLE_BUTTON_NORMAL;
+    }
+    if (b->middle_button_home_down && action != OTG_MIDDLE_BUTTON_HOME) {
+        b->keys[HID_KEY_F13] = false;
+        b->middle_button_home_down = false;
+        send_keyboard_report(b);
+    }
+    b->middle_button_action = action;
+}
+
 bool otg_bridge_check(struct otg_bridge *b)
 {
     return b->transport_ops && b->transport_ops->poll(b->transport_ctx);
@@ -505,6 +519,7 @@ void otg_bridge_reset_input(struct otg_bridge *b)
 {
     b->hid_mods = 0;
     memset(b->keys, 0, sizeof(b->keys));
+    b->middle_button_home_down = false;
     b->mouse_buttons = 0;
     b->mouse_x = b->mouse_y = 0;
     b->active = b->have_mouse_pos = false;
@@ -552,6 +567,11 @@ void otg_bridge_enter(struct otg_bridge *b, int16_t x, int16_t y, uint16_t mask)
 
 void otg_bridge_leave(struct otg_bridge *b)
 {
+    if (b->middle_button_home_down) {
+        b->keys[HID_KEY_F13] = false;
+        b->middle_button_home_down = false;
+        send_keyboard_report(b);
+    }
     if (b->mouse_buttons) {
         /* Never leave a button stuck down on the device. */
         b->mouse_buttons = 0;
@@ -580,6 +600,7 @@ void otg_bridge_release_keyboard(struct otg_bridge *b)
 {
     b->hid_mods = 0;
     memset(b->keys, 0, sizeof(b->keys));
+    b->middle_button_home_down = false;
     send_keyboard_report(b);
 }
 
@@ -598,7 +619,7 @@ void otg_bridge_key(struct otg_bridge *b, uint32_t keyid, bool down)
         } else {
             b->hid_mods &= (uint8_t)~mod_bit;
         }
-    } else if (usage <= 0x65) {
+    } else if (usage < (int)sizeof(b->keys)) {
         b->keys[usage] = down;
     } else {
         return; /* out of report range */
@@ -610,6 +631,14 @@ void otg_bridge_key(struct otg_bridge *b, uint32_t keyid, bool down)
 void otg_bridge_mouse_button(struct otg_bridge *b, uint8_t button, bool press)
 {
     if (!b->active) {
+        return;
+    }
+    if (button == 2 && b->middle_button_action == OTG_MIDDLE_BUTTON_HOME) {
+        if (b->middle_button_home_down != press) {
+            b->middle_button_home_down = press;
+            b->keys[HID_KEY_F13] = press;
+            send_keyboard_report(b);
+        }
         return;
     }
     /* deskflow ButtonID -> HID button bit
