@@ -145,7 +145,7 @@ Windows 原生 ADB USB 后端可能返回 `unknown` 路径，此时继续读取�
 ### Android 伴侣应用（可选）
 
 USB 设备页提供「安装 / 更新 APK」「打开手机端设置」「检查授权状态」，用于接入
-[Android 伴侣应用](docs/ANDROID_COMPANION.md)。0.1.9 同时监听 USB 连接状态和 accessory 拔出，
+[Android 伴侣应用](docs/ANDROID_COMPANION.md)。0.1.10 同时监听 USB 连接状态和 accessory 拔出，
 收到断开事件就立即请求暂停所有播放/缓冲中的媒体会话，不增加等待；即使通知监听服务暂时未绑定，
 清单 Receiver 也会处理事件。ROM 仍需允许应用运行且不能强制停止；快速拔插或重新枚举也可能暂停。
 适用于所有 USB 数据连接，不仅限于 Deskflow。

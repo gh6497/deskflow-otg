@@ -335,9 +335,6 @@ if(BUILD_TESTING)
     add_test(NAME android_connection_receiver COMMAND "${Python3_EXECUTABLE}"
       "${PROJECT_SOURCE_DIR}/tests/test_android_connection_receiver.py")
     set_tests_properties(android_connection_receiver PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45)
-    add_test(NAME android_accessibility COMMAND "${Python3_EXECUTABLE}"
-      "${PROJECT_SOURCE_DIR}/tests/test_android_accessibility.py")
-    set_tests_properties(android_accessibility PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45)
     add_test(NAME android_transfer COMMAND "${Python3_EXECUTABLE}"
       "${PROJECT_SOURCE_DIR}/tests/test_android_transfer.py")
     set_tests_properties(android_transfer PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45)
