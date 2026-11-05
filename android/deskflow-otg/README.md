@@ -8,6 +8,7 @@
 - 0.1.6 起，支持系统「分享至电脑」与图片 / 文件双向传输，复用已授权 ADB，不需要通知使用权。
   分享后在桌面「文件与分享」刷新、选择接收；电脑发来的文件在 App 中通过系统选择器另存。
   单文件1 GiB、私有暂存合计32个 / 2 GiB，详见 [文件分享](../../docs/FILE_SHARING.md)。
+- 支持可选的鼠标滚轮键返回安卓桌面：桌面端发送保留的 F13 HID 快捷键，伴侣应用的无障碍服务执行系统 Home 操作。
 
 工程使用 Android 原生 Java API，不依赖 AndroidX 或第三方库，便于后续增加设备握手、
 状态同步等功能。
@@ -46,6 +47,7 @@
 界面使用原生 XML 布局，位于 `app/src/main/res/layout/`，可在 IDE 中预览和调整：
 
 - `activity_main.xml`：首页、连接状态、通知使用权与自动播放设置。
+- 首页也显示返回桌面无障碍服务状态，并提供打开系统无障碍设置的按钮。
 - `activity_transfer.xml`：文件列表页，`item_transfer.xml` 定义动态列表项，
   `transfer_empty.xml` 定义空状态。
 - `activity_share.xml`：系统分享确认、进度与取消。

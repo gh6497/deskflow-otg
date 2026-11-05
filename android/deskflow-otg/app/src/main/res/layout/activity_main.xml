@@ -51,6 +51,25 @@
             android:layout_marginTop="24dp"
             android:text="@string/open_notification_access_settings" />
 
+        <TextView
+            android:id="@+id/home_accessibility_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:textSize="15sp" />
+
+        <Button
+            android:id="@+id/home_accessibility_settings"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/open_accessibility_settings" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/home_accessibility_help" />
+
         <Switch
             android:id="@+id/autoplay_enabled"
             android:layout_width="match_parent"

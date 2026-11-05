@@ -15,17 +15,19 @@ int main(void)
     struct otg_ble_control c = {0};
     assert(feed(&c, "pa")); assert(c.phase == OTG_BLE_ACTIVE);
     assert(feed(&c, "use\n")); assert(c.phase == OTG_BLE_PAUSING);
-    assert(!feed(&c, "resume\tlocalhost\t24800\tandroid\t1080\t1920\n"));
+    assert(!feed(&c, "resume\tlocalhost\t24800\tandroid\t1080\t1920\tnormal\n"));
     c.used = 0; c.phase = OTG_BLE_IDLE;
-    const char *resume = "resume\t127.0.0.2\t24801\tphone-2\t540\t1170\n";
+    const char *resume = "resume\t127.0.0.2\t24801\tphone-2\t540\t1170\thome\n";
     for (size_t i = 0; i < strlen(resume); ++i) assert(otg_ble_control_feed(&c, resume + i, 1));
     assert(c.phase == OTG_BLE_ACTIVE && c.port == 24801 && c.width == 540 && c.height == 1170);
     assert(!strcmp(c.host, "127.0.0.2") && !strcmp(c.name, "phone-2"));
+    assert(c.middle_button_home);
     const char *invalid[] = {
-        "resume\tx\t0\tphone\t10\t20\n", "resume\tx\t65536\tphone\t10\t20\n",
-        "resume\tx\t24800\tphone\t32768\t20\n", "resume\tx\t+12\tphone\t10\t20\n",
-        "resume\tx\t12\tbad name\t10\t20\n", "resume\t\t12\tp\t10\t20\n",
-        "resume\tx\t12\tp\t10\t20\textra\n", "wat\n", "pause\r\n"
+        "resume\tx\t0\tphone\t10\t20\tnormal\n", "resume\tx\t65536\tphone\t10\t20\tnormal\n",
+        "resume\tx\t24800\tphone\t32768\t20\tnormal\n", "resume\tx\t+12\tphone\t10\t20\tnormal\n",
+        "resume\tx\t12\tbad name\t10\t20\tnormal\n", "resume\t\t12\tp\t10\t20\tnormal\n",
+        "resume\tx\t12\tp\t10\t20\textra\n", "resume\tx\t12\tp\t10\t20\tbad\n",
+        "wat\n", "pause\r\n"
     };
     for (unsigned i = 0; i < sizeof(invalid)/sizeof(invalid[0]); ++i) {
         memset(&c, 0, sizeof(c)); c.phase = OTG_BLE_IDLE;

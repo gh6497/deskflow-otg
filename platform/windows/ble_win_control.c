@@ -21,11 +21,11 @@ static bool command(struct otg_ble_control *c)
         if (c->phase == OTG_BLE_ACTIVE) c->phase = OTG_BLE_PAUSING;
         return true;
     }
-    char *fields[6], *p = c->line;
-    for (unsigned i = 0; i < 6; ++i) {
+    char *fields[7], *p = c->line;
+    for (unsigned i = 0; i < 7; ++i) {
         fields[i] = p;
         char *tab = strchr(p, '\t');
-        if (i == 5) { if (tab) return false; }
+        if (i == 6) { if (tab) return false; }
         else { if (!tab) return false; *tab = 0; p = tab + 1; }
     }
     if (strcmp(fields[0], "resume") || c->phase != OTG_BLE_IDLE ||
@@ -36,9 +36,11 @@ static bool command(struct otg_ble_control *c)
               (*n >= '0' && *n <= '9') || *n == '_' || *n == '.' || *n == '-')) return false;
     unsigned port = number(fields[2], 65535), width = number(fields[4], 32767),
              height = number(fields[5], 32767);
-    if (!port || !width || !height) return false;
+    if (!port || !width || !height ||
+        (strcmp(fields[6], "normal") && strcmp(fields[6], "home"))) return false;
     strcpy(c->host, fields[1]); strcpy(c->name, fields[3]);
     c->port = port; c->width = width; c->height = height;
+    c->middle_button_home = !strcmp(fields[6], "home");
     c->phase = OTG_BLE_ACTIVE;
     return true;
 }

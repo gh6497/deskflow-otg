@@ -145,6 +145,10 @@
   <message id="otg.mouse.absolute"><source>Absolute (recommended)</source><translation>绝对坐标（推荐）</translation></message>
   <message id="otg.mouse.relative"><source>Relative (compatibility mode)</source><translation>相对坐标（兼容模式）</translation></message>
   <message id="otg.label.mouse_mode"><source>Mouse mode</source><translation>鼠标模式</translation></message>
+  <message id="otg.middle_button.normal"><source>Normal middle button</source><translation>普通中键</translation></message>
+  <message id="otg.middle_button.home"><source>Return to Android home (companion app)</source><translation>返回安卓桌面（需要伴侣应用）</translation></message>
+  <message id="otg.label.middle_button_action"><source>Middle button action</source><translation>中键功能</translation></message>
+  <message id="otg.middle_button.tooltip"><source>Home mode sends F13 through HID. Enable the deskflow-otg accessibility service on the phone; otherwise the middle button has no effect.</source><translation>返回桌面模式通过 HID 发送 F13。请在手机上启用 deskflow-otg 无障碍服务，否则中键不会生效。</translation></message>
   <message id="otg.status.not_connected"><source>Not connected</source><translation>未连接</translation></message>
   <message id="otg.action.connect"><source>Connect</source><translation>连接</translation></message>
   <message id="otg.action.disconnect"><source>Disconnect</source><translation>断开</translation></message>

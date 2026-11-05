@@ -17,6 +17,8 @@ LAYOUTS = {
         "connection_status": "TextView",
         "notification_status": "TextView",
         "notification_settings": "Button",
+        "home_accessibility_status": "TextView",
+        "home_accessibility_settings": "Button",
         "autoplay_enabled": "Switch",
         "autoplay_target": "TextView",
         "autoplay_select_player": "Button",
