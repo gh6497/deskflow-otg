@@ -21,7 +21,7 @@ with (root / 'calls').open('a') as f:
     f.write(' '.join(args) + '\n')
 scenario = os.environ.get('OTG_TEST_AUX_WIRELESS', '')
 if args[0] == 'get-state':
-    ready = scenario == 'online' or (root / 'connected').exists()
+    ready = not scenario or scenario == 'online' or (root / 'connected').exists()
     if scenario in ('offline', 'unauthorized', 'timeout', 'connect-fail'):
         ready = False
     print('device' if ready else 'unauthorized' if scenario == 'unauthorized' else 'offline')
@@ -191,7 +191,8 @@ for mode, scenario, target, pause in cases:
                 if scenario not in ('connect-fail', 'timeout'):
                     assert calls[2] == 'get-state', calls
         else:
-            assert not any(line.startswith(('get-state', 'connect ')) for line in calls), calls
+            assert calls[0] == 'get-state', calls
+            assert calls[1].startswith('push '), calls
         assert sum(line.startswith('connect ') for line in calls) == bool(scenario and scenario != 'online'), calls
         pushes = sum(line.startswith("push ") for line in calls)
         if mode in ("fail", "audio-fail"):

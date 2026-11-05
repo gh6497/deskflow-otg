@@ -49,8 +49,16 @@ bool otg_adb_state_is_device(const char *output, size_t size)
 
 int otg_adb_target_prepare(const char *serial, otg_adb_target_command command, void *ud)
 {
-    if (!otg_adb_target_is_tcp(serial)) return 0;
+    if (!serial || !*serial || !command) return -1;
+    /* Check every explicit target before pushing a server.  Only TCP targets
+     * may be auto-connected; USB, mDNS and other adb transports must already
+     * be authorized and online. */
     if (command(ud, serial, false) == 0) return 0;
+    if (!otg_adb_target_is_tcp(serial)) {
+        fprintf(stderr, "ERROR: ADB target %s is not ready; check USB debugging, authorization "
+                        "and the selected transport\n", serial);
+        return -1;
+    }
     fprintf(stderr, "INFO: connecting wireless ADB target %s\n", serial);
     if (command(ud, serial, true) != 0 || command(ud, serial, false) != 0) {
         fprintf(stderr, "ERROR: wireless ADB target %s is not ready; check the phone's "

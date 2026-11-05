@@ -828,6 +828,10 @@ int main(int argc, char **argv)
         unlock_pin = unlock_pin_file_data;
         unlock_adb_gate = 1;
     }
+    /* ADB is an auxiliary dependency, not part of the HID transport.  Keep
+     * this single predicate in sync with the options that actually invoke
+     * ADB, so feature-only sessions get the same validation and lifecycle. */
+    const int adb_features = audio || clipboard || unlock_adb_gate;
     if (unlock_pin && *unlock_pin &&
         (strlen(unlock_pin) < 4 || strlen(unlock_pin) > 32)) {
         fprintf(stderr, "ERROR: OTG_UNLOCK_PIN must contain 4..32 digits\n");
@@ -841,11 +845,11 @@ int main(int argc, char **argv)
             }
         }
     }
-    if ((audio || clipboard) && (ble_service || ble_status || ble_stop_service || ble_restore)) {
-        fprintf(stderr, "ERROR: audio/clipboard require a bridge session, not standalone BLE service operations\n");
+    if (adb_features && (ble_service || ble_status || ble_stop_service || ble_restore)) {
+        fprintf(stderr, "ERROR: ADB features require a bridge session, not standalone BLE service operations\n");
         return 2;
     }
-    if ((audio || clipboard) && (!(adb_serial && *adb_serial) && !(serial && *serial))) {
+    if (adb_features && (!(adb_serial && *adb_serial) && !(serial && *serial))) {
         fprintf(stderr, "ERROR: ADB features require --adb-serial or --serial\n");
         return 2;
     }
@@ -874,8 +878,8 @@ int main(int argc, char **argv)
         fprintf(stderr, "ERROR: ADB features require --scrcpy-server and --scrcpy-version\n");
         return 2;
     }
-    if (adb_serial && !audio && !clipboard && !unlock_adb_gate) {
-        fprintf(stderr, "ERROR: --adb-serial requires --audio or --clipboard\n");
+    if (adb_serial && !adb_features) {
+        fprintf(stderr, "ERROR: --adb-serial requires an ADB feature (audio, clipboard or unlock)\n");
         return 2;
     }
     if (audio && strcmp(transport, "usb") != 0) {
@@ -953,7 +957,8 @@ int main(int argc, char **argv)
         g_control.right_button_back = right_button_action == OTG_RIGHT_BUTTON_BACK;
     }
     if (!strcmp(transport, "ble") && !ble_service && !ble_status && !ble_stop_service && !ble_restore &&
-        (ble_session || ble_isolate || serial || (adb_serial && !clipboard) || adapter_explicit || mouse_mode != OTG_MOUSE_ABSOLUTE)) {
+        (ble_session || ble_isolate || serial || (adb_serial && !(clipboard || unlock_adb_gate)) ||
+         adapter_explicit || mouse_mode != OTG_MOUSE_ABSOLUTE)) {
         fprintf(stderr, "ERROR: Windows BLE supports default adapter and absolute pointer only; Linux service/isolation options and USB serial are unsupported\n");
         return 2;
     }
@@ -1100,9 +1105,9 @@ int main(int argc, char **argv)
         .on_mouse_wheel = cb_mouse_wheel,
         .on_disconnected = cb_disconnected,
         .on_idle = cb_idle,
-        .on_tick = state.transport_owner || audio || clipboard || (unlock_pin && *unlock_pin) ? cb_tick : NULL,
+        .on_tick = state.transport_owner || adb_features ? cb_tick : NULL,
         .tick_interval_ms = state.transport_owner ? 1 : clipboard ? 5 : audio ? 50 :
-                            (unlock_pin && *unlock_pin) ? 5 : 0,
+                            unlock_adb_gate ? 5 : 0,
         .on_clipboard = cb_clipboard,
         .on_clipboard_enabled = clipboard ? cb_clipboard_enabled : NULL,
     };
@@ -1142,7 +1147,8 @@ int main(int argc, char **argv)
             clipboard_failed(&state);
         }
         if ((auto_rotate && scrcpy_session_started(&state.scrcpy)) || state.unlock_adb_gate) {
-            state.display = otg_display_monitor_create(adb_path, adb_serial ? adb_serial : serial,
+            const char *target = adb_serial && *adb_serial ? adb_serial : serial;
+            state.display = otg_display_monitor_create(adb_path, target,
                                                        state.bridge.screen_w, state.bridge.screen_h);
             if (state.display && state.unlock_adb_gate)
                 otg_display_monitor_prefer_companion(state.display);
