@@ -145,12 +145,6 @@ void Session::syncCompanionStatus()
                              !m_options.audio || m_audioReady);
 }
 
-static QStringList auxiliarySignature(const ConnectionOptions &options)
-{
-    if (!options.clipboard) return {};
-    return {options.adb, options.adbSerial, options.scrcpyServer, options.scrcpyVersion};
-}
-
 static bool isWirelessAdbTarget(const QString &target)
 {
     static const QRegularExpression pattern("^(?:\\[[^\\]]+\\]|[^:]+):[0-9]+$");
@@ -160,6 +154,30 @@ static bool isWirelessAdbTarget(const QString &target)
 static bool adbDeviceState(const QString &output)
 {
     return output.trimmed() == QStringLiteral("device");
+}
+
+/* Keep the ADB boundary in one place.  HID itself never needs ADB, while
+ * these three bridge features do: scrcpy audio/clipboard and PIN unlock. */
+static bool adbRequired(const ConnectionOptions &options)
+{
+    return options.audio || options.clipboard || options.unlockAdb;
+}
+
+static QString adbTarget(const ConnectionOptions &options)
+{
+    if (!options.adbSerial.trimmed().isEmpty()) return options.adbSerial.trimmed();
+    return options.transport == "usb" ? options.serial.trimmed() : QString();
+}
+
+static QStringList auxiliarySignature(const ConnectionOptions &options)
+{
+    if (!adbRequired(options)) return {};
+    /* Windows BLE keeps the provider alive between sessions.  Every value
+     * consumed by the bridge's ADB path must therefore invalidate a retained
+     * provider; otherwise a later session silently reuses the old target. */
+    return {options.adb, options.adbSerial, options.scrcpyServer, options.scrcpyVersion,
+            options.unlockAdb ? QStringLiteral("unlock") : QStringLiteral("no-unlock"),
+            options.unlockPin};
 }
 
 void Session::start(const ConnectionOptions &options)
@@ -181,18 +199,15 @@ void Session::start(const ConnectionOptions &options)
     const bool ble = options.transport == "ble";
     static const QRegularExpression peerPattern("^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$");
     if ((!ble && options.serial.isEmpty()) ||
-        (options.audio && (ble || options.adb.isEmpty() || options.scrcpyServer.isEmpty() ||
-                           options.scrcpyVersion.isEmpty())) ||
-        (options.clipboard && (options.adb.isEmpty() || options.scrcpyServer.isEmpty() ||
-                              options.scrcpyVersion.isEmpty() || (ble && options.adbSerial.isEmpty()))) ||
+        (adbRequired(options) && (options.adb.isEmpty() || adbTarget(options).isEmpty())) ||
+        ((options.audio || options.clipboard) &&
+         (options.adb.isEmpty() || options.scrcpyServer.isEmpty() || options.scrcpyVersion.isEmpty())) ||
         (options.transport != "usb" && !ble) ||
         (ble && (!peerPattern.match(options.blePeer).hasMatch() || options.mouseMode != "absolute")) ||
         (options.middleButtonAction != "normal" && options.middleButtonAction != "home") ||
         (options.rightButtonAction != "normal" && options.rightButtonAction != "back") ||
         (!options.unlockPin.isEmpty() && (options.unlockPin.size() < 4 || options.unlockPin.size() > 32 ||
             !options.unlockPin.contains(QRegularExpression("^[0-9]+$")))) ||
-        (options.unlockAdb && (options.adb.isEmpty() ||
-            (options.transport == "ble" ? options.adbSerial.isEmpty() : options.serial.isEmpty()))) ||
         (options.tls && options.tlsFingerprint.isEmpty() && options.tlsFingerprintFile.isEmpty()) ||
         (options.tls && !options.tlsFingerprint.isEmpty() && !options.tlsFingerprintFile.isEmpty()) ||
         !validScreenName(options.phone) ||
@@ -301,41 +316,50 @@ void Session::prepareBle(bool started, int attempts)
 
 void Session::startConnection()
 {
-    if (m_options.unlockAdb && !m_adbServerStarted) {
+    if (adbRequired(m_options) && !m_adbServerStarted) {
         m_adbServerStarted = true;
         const auto generation = m_generation;
         runCommand(this, m_options.adb, {"start-server"},
-                   [this, generation](bool, const QString &) {
-            if (generation == m_generation && m_state == State::Starting)
-                startConnection();
+                   [this, generation](bool ok, const QString &output) {
+            if (generation != m_generation || m_state != State::Starting) return;
+            if (!ok) {
+                fail("otg.error.bridge_start", output.trimmed());
+                return;
+            }
+            startConnection();
         });
         return;
     }
-    const auto adbTarget = m_options.adbSerial.trimmed();
-    if (m_options.unlockAdb && !m_adbTargetPrepared && isWirelessAdbTarget(adbTarget)) {
+    const auto target = adbTarget(m_options);
+    if (adbRequired(m_options) && !m_adbTargetPrepared) {
         m_adbTargetPrepared = true;
         const auto generation = m_generation;
-        runCommand(this, m_options.adb, {"-s", adbTarget, "get-state"},
-                   [this, generation, adbTarget](bool ok, const QString &output) {
+        runCommand(this, m_options.adb, {"-s", target, "get-state"},
+                   [this, generation, target](bool ok, const QString &output) {
             if (generation != m_generation || m_state != State::Starting) return;
             if (ok && adbDeviceState(output)) {
                 startConnection();
                 return;
             }
-            emit log(QStringLiteral("[ADB] wireless target not ready; connecting %1").arg(adbTarget));
-            runCommand(this, m_options.adb, {"connect", adbTarget},
-                       [this, generation, adbTarget](bool connected, const QString &connectOutput) {
+            if (!isWirelessAdbTarget(target)) {
+                fail("otg.error.bridge_start",
+                     QStringLiteral("ADB target %1 is not ready").arg(target));
+                return;
+            }
+            emit log(QStringLiteral("[ADB] wireless target not ready; connecting %1").arg(target));
+            runCommand(this, m_options.adb, {"connect", target},
+                       [this, generation, target](bool connected, const QString &connectOutput) {
                 if (generation != m_generation || m_state != State::Starting) return;
                 if (!connected) {
                     fail("otg.error.bridge_start", connectOutput.trimmed());
                     return;
                 }
-                runCommand(this, m_options.adb, {"-s", adbTarget, "get-state"},
-                           [this, generation, adbTarget](bool ready, const QString &stateOutput) {
+                runCommand(this, m_options.adb, {"-s", target, "get-state"},
+                           [this, generation, target](bool ready, const QString &stateOutput) {
                     if (generation != m_generation || m_state != State::Starting) return;
                     if (!ready || !adbDeviceState(stateOutput)) {
                         fail("otg.error.bridge_start",
-                             QStringLiteral("ADB target %1 is not ready").arg(adbTarget));
+                             QStringLiteral("ADB target %1 is not ready").arg(target));
                         return;
                     }
                     startConnection();
@@ -379,16 +403,17 @@ void Session::launchBridge()
                      "--height", QString::number(m_options.height), "--mouse-mode", m_options.mouseMode,
                      "--middle-button-action", m_options.middleButtonAction,
                      "--right-button-action", m_options.rightButtonAction};
-    if (m_options.audio || m_options.clipboard) {
+    if (adbRequired(m_options)) {
         if (m_options.audio) args << "--audio";
         if (m_options.clipboard) args << "--clipboard";
-        args << "--adb" << m_options.adb << "--scrcpy-server" << m_options.scrcpyServer
-             << "--scrcpy-version" << m_options.scrcpyVersion;
+        args << "--adb" << m_options.adb;
+        if (m_options.audio || m_options.clipboard) {
+            args << "--scrcpy-server" << m_options.scrcpyServer
+                 << "--scrcpy-version" << m_options.scrcpyVersion;
+        }
         if (!m_options.adbSerial.isEmpty()) args << "--adb-serial" << m_options.adbSerial;
         if (m_options.autoRotate) args << "--auto-rotate";
-    } else if (m_options.unlockAdb) {
-        args << "--adb" << m_options.adb << "--adb-serial"
-             << (!m_options.adbSerial.isEmpty() ? m_options.adbSerial : m_options.serial);
+        if (m_options.adbSerial.isEmpty()) args << "--adb-serial" << m_options.serial;
     }
     if (ble && m_options.bleIsolate && m_options.unlockAdb)
         args << "--unlock-pin-file" << m_unlockPinFile.fileName();

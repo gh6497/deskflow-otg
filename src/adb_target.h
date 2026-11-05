@@ -14,9 +14,10 @@ bool otg_adb_state_is_device(const char *output, size_t size);
  * Implementations must bound child lifetime and preserve the configured target. */
 typedef int (*otg_adb_target_command)(void *ud, const char *target, bool connect);
 
-/* USB/mDNS serials pass through unchanged. Explicit host:port targets are
- * checked, connected once if needed, and checked again before server push.
- * Never pairs, disconnects, switches to USB, or restarts the global ADB server. */
+/* Every target is checked before server push. Explicit host:port targets are
+ * connected once if needed, then checked again. USB/mDNS targets must already
+ * be online. Never pairs, disconnects, switches transport, or restarts the
+ * global ADB server. */
 int otg_adb_target_prepare(const char *serial, otg_adb_target_command command, void *ud);
 
 #endif

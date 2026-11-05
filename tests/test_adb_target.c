@@ -8,6 +8,18 @@
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL %d: %s\n", __LINE__, #x); exit(1); } } while (0)
 
 struct fake { unsigned states, connects; bool ready, fail_connect, stay_offline; };
+static int passthrough(void *ud, const char *target, bool connect)
+{
+    (void)ud; (void)target;
+    return connect ? -1 : 0;
+}
+static int offline(void *ud, const char *target, bool connect)
+{
+    unsigned *calls = ud;
+    (void)target;
+    if (!connect) ++*calls;
+    return -1;
+}
 static int command(void *ud, const char *target, bool connect)
 {
     struct fake *f = ud;
@@ -33,7 +45,8 @@ int main(void)
     for (unsigned i = 0; i < sizeof(tcp) / sizeof(*tcp); ++i) CHECK(otg_adb_target_is_tcp(tcp[i]));
     for (unsigned i = 0; i < sizeof(other) / sizeof(*other); ++i) {
         CHECK(!otg_adb_target_is_tcp(other[i]));
-        CHECK(!otg_adb_target_prepare(other[i], NULL, NULL));
+        CHECK((other[i] && *other[i]) ? !otg_adb_target_prepare(other[i], passthrough, NULL) :
+              otg_adb_target_prepare(other[i], passthrough, NULL) == -1);
     }
     CHECK(otg_adb_state_is_device("device\n", 7));
     CHECK(otg_adb_state_is_device("device\r\n", 8));
@@ -53,6 +66,9 @@ int main(void)
     f = (struct fake){.stay_offline = true};
     CHECK(otg_adb_target_prepare(tcp[0], command, &f) == -1);
     CHECK(f.states == 2 && f.connects == 1);
-    puts("PASS: USB/mDNS unchanged; TCP classification, online check, connect and readiness verification");
+    unsigned usb_checks = 0;
+    CHECK(otg_adb_target_prepare("USB123", offline, &usb_checks) == -1);
+    CHECK(usb_checks == 1);
+    puts("PASS: ADB target classification, online checks, TCP connect and readiness verification");
     return 0;
 }
