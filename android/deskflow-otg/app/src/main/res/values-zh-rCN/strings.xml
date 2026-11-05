@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="setup_description">收到 USB 断开事件时立即请求暂停所有正在播放或缓冲的媒体会话。\n\n首次使用需要启用通知使用权。本应用在后台监听 USB 连接状态及配件拔出事件，不读取通知内容。不增加等待时间；USB 重新枚举的短暂断开也可能暂停播放。仅重新插入 USB 不会恢复播放，可选的自动播放需要真实 Deskflow 连接。已暂停的播放器保持不动，单个播放器失败不影响其他会话。适用于所有 USB 数据连接，不仅限于 Deskflow 会话。</string>
+    <string name="setup_description">收到 USB 断开事件时立即请求暂停所有正在播放或缓冲的媒体会话。\n\n首次使用需要启用通知使用权。即使通知监听服务暂时未绑定，清单 Receiver 也会接收 USB 事件；但 ROM 仍需允许应用运行，不能将应用强制停止。本应用在后台监听 USB 连接状态及配件拔出事件，不读取通知内容。不增加等待时间；USB 重新枚举的短暂断开也可能暂停播放。仅重新插入 USB 不会恢复播放，可选的自动播放需要真实 Deskflow 连接。已暂停的播放器保持不动，单个播放器失败不影响其他会话。适用于所有 USB 数据连接，不仅限于 Deskflow 会话。</string>
     <string name="status_access_enabled">状态：已启用媒体控制权限，收到 USB 断开事件即请求暂停</string>
     <string name="status_access_required">状态：请先启用通知使用权</string>
     <string name="open_notification_access_settings">打开通知使用权设置</string>

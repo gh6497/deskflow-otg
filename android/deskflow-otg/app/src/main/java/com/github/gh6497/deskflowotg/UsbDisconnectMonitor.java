@@ -40,4 +40,22 @@ final class UsbDisconnectMonitor {
     void reset() {
         initialized = connected = handled = false;
     }
+
+    void restore(boolean restoredInitialized, boolean restoredConnected, boolean restoredHandled) {
+        initialized = restoredInitialized;
+        connected = restoredConnected;
+        handled = restoredHandled;
+    }
+
+    boolean isInitialized() {
+        return initialized;
+    }
+
+    boolean isConnected() {
+        return connected;
+    }
+
+    boolean isHandled() {
+        return handled;
+    }
 }
