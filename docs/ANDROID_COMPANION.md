@@ -108,9 +108,9 @@ Windows 的 ADB 与 WinUSB 可能不能同时访问同一 USB 接口；可先用
 
 ## 手机端生效条件与后台限制
 
-**安装成功、通知使用权已开启，不等于拔线暂停一定生效。** 拔线时必须有正在运行且已被
-Android 绑定的 `DeskflowNotificationListenerService`，才能接收 USB 断开事件并控制媒体会话。
-仅把应用界面留在后台或看到「已授权」提示，不能证明服务正在运行。
+**安装成功、通知使用权已开启，不等于拔线暂停一定生效。** USB 事件由清单中的
+`UsbDisconnectReceiver` 接收，不依赖 `DeskflowNotificationListenerService` 当时已经绑定；通知使用权
+仍是读取和控制媒体会话的必要授权。应用被强制停止或 ROM 完全禁止后台运行时，仍可能收不到广播。
 
 请在手机上针对 **deskflow-otg** 检查以下设置：
 
@@ -126,9 +126,8 @@ Android 绑定的 `DeskflowNotificationListenerService`，才能接收 USB 断�
    应用被强制停止、被后台管理清理或手机重启后，也需重新确认服务是否已恢复。
 
 这些设置必须由用户在手机上操作，桌面 GUI 和 APK 不会静默修改自启动、电池策略或通知授权。
-GUI「检查授权状态」只查询通知使用权，**不检查自启动、电池策略或服务存活**。
-放宽后台限制也不能保证所有 ROM 都能长期保活；如果服务没有运行，拔线不会唤醒本应用，
-之后重新绑定也不会补处理已经错过的拔线事件。
+GUI「检查授权状态」只查询通知使用权，**不检查自启动、电池策略、Receiver 是否被 ROM 拦截或播放器响应**。
+放宽后台限制也不能保证所有 ROM 都会投递广播；进程被强制停止时，错过的拔线事件不会在之后补处理。
 
 排查时可使用已授权的 ADB，只读检查指定手机（将 `SERIAL` 替换为实际目标）：
 
@@ -137,11 +136,10 @@ adb -s SERIAL shell dumpsys activity services com.github.gh6497.deskflowotg
 adb -s SERIAL logcat -d -v threadtime -s deskflow-otg:V '*:S'
 ```
 
-服务列表应能看到 `DeskflowNotificationListenerService` 的服务记录与绑定信息；
-日志中的 `media pause listener connected` 表示曾成功绑定，仍需结合当前服务列表判断，
-不能只依据历史日志。若服务列表为 `(nothing)`、没有 USB 事件接收器，或系统日志出现
-`AutStart Unable to bind notification listener service`，应先处理后台启动限制，
-而不是反复调整暂停延迟或重装 APK。
+如果需要检查媒体访问能力，服务列表应能看到 `DeskflowNotificationListenerService` 的服务记录与绑定信息；
+日志中的 `media pause listener connected` 表示曾成功绑定，但 USB Receiver 不再依赖这条绑定。
+若系统日志显示应用被强制停止、后台广播被拦截，或通知使用权已撤销，应先处理对应设置，
+而不是反复调整暂停延迟。
 
 Redmi K20 Pro / Android 14 已观察到：覆盖安装 0.1.3 后通知授权仍保留，但系统报告
 `AutStart Unable to bind notification listener service`，服务列表为空；此时系统虽发出
