@@ -267,11 +267,15 @@ for f in platform/linux/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only
 
 - 鼠标中键 Home 与右键 Back 为独立、默认 normal 的按设备配置，CLI 分别为
   `--middle-button-action normal|home`、`--right-button-action normal|back`。
-  `bridge.c` 用 F13/F14 HID 快捷键替代对应鼠标按钮，Android 伴侣 0.1.7 的同一无障碍服务
-  执行 GLOBAL_ACTION_HOME/BACK，只在非重复按下触发并消费松开；无需 ADB，需手动启用无障碍。
-  切出、重置、键盘屏障取消、关闭须清除映射按键状态。Windows BLE resume 同步两项映射，
+  当前 `bridge.c` 直接发送系统 HID 快捷键 Win+Enter / Win+Backspace，无需伴侣、无障碍或ADB。
+  首次鼠标按下发完整的 Meta-down / chord-down / chord-up / Meta-up，长按与重复不补发，
+  组合报告不修改真实键盘状态，保留已有键与修饰键；Enter/Backspace已按住或6键满时跳过，
+  不通过松开重按真实键强行触发。描述符不变，不破坏已有BLE缓存。ROM须支持系统快捷键。
+  切出、重置、键盘屏障取消、关闭须清除映射按下标记。Windows BLE resume 同步两项映射，
   旧七字段命令将右键重置为 normal，不注销 provider。离线 fake 回归不代表真机 ROM 兼容性。
-  Android F13/F14 KeyCode 是 API 36 新增，不能只按新 KeyCode 判断：0.1.8 对
+  2026-11-05 用户确认本次系统快捷键版本使用正常；不外推为所有ROM、macOS/Windows或BLE完整验收。
+  旧版桌面的F13/F14路径保留在伴侣0.1.8作兼容，当前桌面不再发送这些导航快捷键。
+  Android F13/F14 KeyCode 是 API 36 新增，旧路径不能只按新 KeyCode 判断：0.1.8 对
   KEYCODE_UNKNOWN + Linux evdev 扫描码183/184兼容 Home/Back，已知其他 KeyCode 不回退。
   Android14 真机已确认 HID 键盘能力包含 F13/F14，但 Generic.kl 对183/184的映射为注释；
   0.1.8新增旧系统回归和仅快捷键诊断日志，不记录普通键盘输入；实际返回仍需安装后验证。

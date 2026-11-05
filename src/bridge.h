@@ -107,10 +107,10 @@ void otg_bridge_key(struct otg_bridge *b, uint32_t keyid, bool down);
 /* Release a cancelled clipboard input barrier without disturbing pointer state. */
 void otg_bridge_release_keyboard(struct otg_bridge *b);
 void otg_bridge_mouse_button(struct otg_bridge *b, uint8_t button, bool press);
-/* Configure the optional companion-app Home shortcut. Must be set while idle. */
+/* Configure Android Meta+Enter (Home). Must be set while idle. */
 void otg_bridge_set_middle_button_action(struct otg_bridge *b,
                                          enum otg_middle_button_action action);
-/* Configure the optional companion-app Back shortcut. Must be set while idle. */
+/* Configure Android Meta+Backspace (Back). Must be set while idle. */
 void otg_bridge_set_right_button_action(struct otg_bridge *b,
                                        enum otg_right_button_action action);
 void otg_bridge_mouse_move(struct otg_bridge *b, int16_t x, int16_t y);
