@@ -469,6 +469,9 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     setTranslatedProperty(m_unlockPin, "placeholderText", "otg.unlock.pin_hint");
     setTranslatedProperty(m_unlockPin, "toolTip", "otg.unlock.tooltip");
     addTranslatedRow(featuresForm, "otg.label.unlock_pin", m_unlockPin);
+    auto *unlockHint = translated(new QLabel, "text", "otg.unlock.adb_hint");
+    unlockHint->setWordWrap(true);
+    featuresForm->addRow(unlockHint);
     connect(m_unlockEnabled, &QCheckBox::toggled, this, [this] { updateEnabled(); });
 
     m_audio = translated(new QCheckBox, "text", "otg.audio.enabled");

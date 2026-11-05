@@ -156,6 +156,7 @@
   <message id="otg.unlock.enabled"><source>Try automatic numeric PIN unlock on entry</source><translation>Try automatic numeric PIN unlock on entry</translation></message>
   <message id="otg.label.unlock_pin"><source>Numeric PIN (session only)</source><translation>Numeric PIN (session only)</translation></message>
   <message id="otg.unlock.pin_hint"><source>4–32 digits; not saved to settings</source><translation>4–32 digits; not saved to settings</translation></message>
+  <message id="otg.unlock.adb_hint"><source>Automatic PIN unlock requires the companion app and authorized ADB. If ADB is unavailable, no PIN is sent.</source><translation>Automatic PIN unlock requires the companion app and authorized ADB. If ADB is unavailable, no PIN is sent.</translation></message>
   <message id="otg.unlock.tooltip"><source>Uses authorized ADB to check the lock state before each entry. If locked, sends wake/Enter, swipes from bottom to top, then sends the PIN and Enter. Requires ADB and absolute mouse mode. PIN is not logged or saved.</source><translation>Uses authorized ADB to check the lock state before each entry. If locked, sends wake/Enter, swipes from bottom to top, then sends the PIN and Enter. Requires ADB and absolute mouse mode. PIN is not logged or saved.</translation></message>
   <message id="otg.status.not_connected"><source>Not connected</source><translation>Not connected</translation></message>
   <message id="otg.action.connect"><source>Connect</source><translation>Connect</translation></message>
