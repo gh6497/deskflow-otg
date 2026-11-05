@@ -75,12 +75,70 @@ bool otg_display_parse(const char *text, struct otg_display_sample *sample)
     return true;
 }
 
+static bool parse_bool_field(const char *text, const char *name, bool *value)
+{
+    const char *p = text;
+    const size_t name_len = strlen(name);
+    while ((p = strstr(p, name)) != NULL) {
+        const char *eol = strchr(p, '\n');
+        if (!eol) eol = p + strlen(p);
+        const char *separator = memchr(p + name_len, '=', (size_t)(eol - (p + name_len)));
+        if (!separator)
+            separator = memchr(p + name_len, ':', (size_t)(eol - (p + name_len)));
+        if (separator) {
+            const char *v = separator + 1;
+            while (v < eol && isspace((unsigned char)*v)) ++v;
+            if ((size_t)(eol - v) >= 4 && !strncmp(v, "true", 4)) {
+                *value = true;
+                return true;
+            }
+            if ((size_t)(eol - v) >= 5 && !strncmp(v, "false", 5)) {
+                *value = false;
+                return true;
+            }
+        }
+        p = eol;
+    }
+    return false;
+}
+
+static bool parse_lock_state(const char *text, bool *locked)
+{
+    bool found = false, result = false, value;
+    const char *fields[] = {"mKeyguardShowing", "mShowingLockscreen",
+                            "isStatusBarKeyguard", "mDreamingLockscreen",
+                            "showingLockscreen", "keyguardShowing",
+                            "mStatusBarKeyguard", "mIsShowing"};
+    for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); ++i) {
+        if (parse_bool_field(text, fields[i], &value)) {
+            found = true;
+            result |= value;
+        }
+    }
+    if (found) *locked = result;
+    return found;
+}
+
+static bool parse_companion_lock_state(const char *text, bool *locked)
+{
+    if (strstr(text, "data=\"locked\"") || strstr(text, "data=locked")) {
+        *locked = true;
+        return true;
+    }
+    if (strstr(text, "data=\"unlocked\"") || strstr(text, "data=unlocked")) {
+        *locked = false;
+        return true;
+    }
+    return false;
+}
+
 struct otg_display_monitor {
     char *adb, *serial;
     int initial_w, initial_h, base_w, base_h, reference_w, reference_h;
     struct otg_display_sample candidate;
     struct otg_display_size published;
     bool have_candidate, have_published, overflow;
+    bool lock_pending, lock_result_ready, lock_valid, locked, prefer_companion;
     uint64_t deadline, next_query;
     size_t used;
     char output[OUTPUT_MAX + 1];
@@ -161,7 +219,9 @@ static bool start_query(struct otg_display_monitor *m)
     if (!command) return false;
     char *p = quote_arg(command, m->adb);
     memcpy(p, " -s ", 4); p = quote_arg(p + 4, m->serial);
-    strcpy(p, " shell \"wm size; dumpsys input\"");
+    strcpy(p, m->prefer_companion
+        ? " shell \"am broadcast --user current -a com.github.gh6497.deskflowotg.LOCK_STATE -n com.github.gh6497.deskflowotg/.LockStateReceiver; wm size; dumpsys input; dumpsys window policy\"")
+        : " shell \"wm size; dumpsys input; dumpsys window policy\"");
     int count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, command, -1, NULL, 0);
     if (!count) goto done;
     wide = malloc((size_t)count * sizeof(*wide));
@@ -195,7 +255,10 @@ done:
             dup2(null_file, STDIN_FILENO) < 0 || dup2(null_file, STDERR_FILENO) < 0) _exit(127);
         close(output[0]); close(output[1]);
         if (null_file > STDERR_FILENO) close(null_file);
-        execlp(m->adb, m->adb, "-s", m->serial, "shell", "wm size; dumpsys input", (char *)NULL);
+        const char *command = m->prefer_companion
+            ? "am broadcast --user current -a com.github.gh6497.deskflowotg.LOCK_STATE -n com.github.gh6497.deskflowotg/.LockStateReceiver; wm size; dumpsys input; dumpsys window policy"
+            : "wm size; dumpsys input; dumpsys window policy";
+        execlp(m->adb, m->adb, "-s", m->serial, "shell", command, (char *)NULL);
         _exit(127);
     }
     close(output[1]);
@@ -303,11 +366,46 @@ bool otg_display_monitor_poll(struct otg_display_monitor *m, struct otg_display_
     /* Failed/slow ADB must not disconnect HID or create a tight retry loop. */
     m->next_query = now + QUERY_INTERVAL_MS;
     struct otg_display_sample sample;
+    bool lock = false;
+    bool lock_ok = done && ok && !m->overflow &&
+                   (m->prefer_companion ? parse_companion_lock_state(m->output, &lock) : false);
+    if (!lock_ok && done && ok && !m->overflow)
+        lock_ok = parse_lock_state(m->output, &lock);
+    if (m->lock_pending) {
+        m->lock_result_ready = true;
+        m->lock_valid = lock_ok;
+        m->locked = lock;
+        m->lock_pending = false;
+    }
     if (!done || !ok || m->overflow || !otg_display_parse(m->output, &sample)) {
         m->have_candidate = false;
         return false;
     }
     return observe(m, &sample, out);
+}
+
+void otg_display_monitor_request_lock(struct otg_display_monitor *m)
+{
+    if (!m) return;
+    if (running(m)) cancel_query(m);
+    m->lock_pending = true;
+    m->lock_result_ready = false;
+    m->next_query = 0;
+}
+
+bool otg_display_monitor_take_lock_state(struct otg_display_monitor *m,
+                                         bool *valid, bool *locked)
+{
+    if (!m || !m->lock_result_ready) return false;
+    m->lock_result_ready = false;
+    if (valid) *valid = m->lock_valid;
+    if (locked) *locked = m->locked;
+    return true;
+}
+
+void otg_display_monitor_prefer_companion(struct otg_display_monitor *m)
+{
+    if (m) m->prefer_companion = true;
 }
 
 void otg_display_monitor_destroy(struct otg_display_monitor *m)

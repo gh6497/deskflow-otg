@@ -240,6 +240,7 @@ static void usage(const char *prog)
              "      --mouse-mode MODE absolute (default) or relative (compatibility)\n"
               "      --middle-button-action MODE normal (default) or home (Android Meta+Enter)\n"
               "      --right-button-action MODE normal (default) or back (Android Meta+Backspace)\n"
+              "      OTG_UNLOCK_PIN       GUI/experimental numeric PIN sent once on first enter\n"
              "      --audio             Forward Android output audio through ADB (Linux/Windows)\n"
               "      --clipboard         Share Deskflow text clipboard through ADB/scrcpy\n"
               "      --tls               Use Deskflow TLS for the server connection\n"
@@ -284,6 +285,8 @@ struct app_state {
     struct otg_display_monitor *display;
     struct otg_display_size display_size;
     bool display_pending;
+    bool unlock_adb_gate;
+    bool unlock_lock_query_pending;
     const char *serial;
     void *transport_owner;
     bool resident_session;
@@ -373,6 +376,12 @@ static void cb_enter(void *ud, int16_t x, int16_t y, uint32_t seq, uint16_t mask
     (void)seq;
     app_state *s = ud;
     otg_bridge_enter(&s->bridge, x, y, mask);
+    if (s->unlock_adb_gate && s->display) {
+        s->unlock_lock_query_pending = true;
+        otg_display_monitor_request_lock(s->display);
+    } else if (s->unlock_adb_gate) {
+        fprintf(stderr, "WARN: ADB lock-state monitor is unavailable; automatic unlock skipped\n");
+    }
 }
 
 static void cb_leave(void *ud)
@@ -506,6 +515,7 @@ static int cb_tick(void *ud)
 {
     app_state *s = ud;
     int result = s->transport_owner ? cb_idle(s) : cb_clipboard_tick(s);
+    otg_bridge_unlock_tick(&s->bridge);
 #ifdef OTG_HAVE_AUDIO
     const bool ready = !result && audio_player_ready(s->scrcpy.player);
     if (ready != s->audio_ready_reported) {
@@ -513,7 +523,20 @@ static int cb_tick(void *ud)
         gui_event(ready ? "audio-ready" : "audio-unavailable");
     }
 #endif
-    return result || display_poll(s);
+    if (s->display && display_poll(s)) result = 1;
+    if (s->display && s->unlock_lock_query_pending) {
+        bool valid = false, locked = false;
+        if (otg_display_monitor_take_lock_state(s->display, &valid, &locked)) {
+            s->unlock_lock_query_pending = false;
+            if (!valid) {
+                fprintf(stderr, "WARN: ADB lock-state query returned no recognized state; automatic unlock skipped\n");
+            } else {
+                fprintf(stderr, "INFO: ADB lock state: %s\n", locked ? "locked" : "unlocked");
+            }
+            otg_bridge_unlock_adb_state(&s->bridge, valid, locked);
+        }
+    }
+    return result;
 }
 
 static void destroy_transport_owner(app_state *s)
@@ -638,6 +661,8 @@ int main(int argc, char **argv)
     const char *tls_fingerprint = NULL;
     const char *tls_fingerprint_file = NULL;
     int auto_rotate = 0;
+    const char *unlock_pin = NULL;
+    int unlock_adb_gate = 0;
 
     if (argc == 2 && strcmp(argv[1], "--usb-scan") == 0) {
         return otg_usb_scan();
@@ -771,6 +796,22 @@ int main(int argc, char **argv)
         fprintf(stderr, "screen width and height must be integers in 1..32767\n");
         return 2;
     }
+    unlock_pin = getenv("OTG_UNLOCK_PIN");
+    unlock_adb_gate = getenv("OTG_UNLOCK_ADB_GATE") &&
+                      strcmp(getenv("OTG_UNLOCK_ADB_GATE"), "1") == 0;
+    if (unlock_pin && *unlock_pin &&
+        (strlen(unlock_pin) < 4 || strlen(unlock_pin) > 32)) {
+        fprintf(stderr, "ERROR: OTG_UNLOCK_PIN must contain 4..32 digits\n");
+        return 2;
+    }
+    if (unlock_pin && *unlock_pin) {
+        for (const char *p = unlock_pin; *p; ++p) {
+            if (*p < '0' || *p > '9') {
+                fprintf(stderr, "ERROR: OTG_UNLOCK_PIN must contain digits only\n");
+                return 2;
+            }
+        }
+    }
     if ((audio || clipboard) && (ble_service || ble_status || ble_stop_service || ble_restore)) {
         fprintf(stderr, "ERROR: audio/clipboard require a bridge session, not standalone BLE service operations\n");
         return 2;
@@ -804,7 +845,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "ERROR: ADB features require --scrcpy-server and --scrcpy-version\n");
         return 2;
     }
-    if (adb_serial && !audio && !clipboard) {
+    if (adb_serial && !audio && !clipboard && !unlock_adb_gate) {
         fprintf(stderr, "ERROR: --adb-serial requires --audio or --clipboard\n");
         return 2;
     }
@@ -994,6 +1035,14 @@ int main(int argc, char **argv)
         fprintf(stderr, "invalid transport: %s (use usb or ble)\n", transport);
         return 2;
     }
+    if (!otg_bridge_set_unlock_pin(&state.bridge, unlock_pin)) {
+        fprintf(stderr, "ERROR: invalid OTG_UNLOCK_PIN\n");
+        otg_bridge_close(&state.bridge);
+        destroy_transport_owner(&state);
+        return 2;
+    }
+    state.unlock_adb_gate = unlock_adb_gate != 0;
+    otg_bridge_set_unlock_adb_gated(&state.bridge, state.unlock_adb_gate);
     if (g_gui && strcmp(transport, "usb") == 0) {
         printf("{\"event\":\"usb-ready\",\"usb-id\":\"%u:%u\"}\n",
                (unsigned)libusb_get_bus_number(state.bridge.aoa.device),
@@ -1022,8 +1071,9 @@ int main(int argc, char **argv)
         .on_mouse_wheel = cb_mouse_wheel,
         .on_disconnected = cb_disconnected,
         .on_idle = cb_idle,
-        .on_tick = state.transport_owner || audio || clipboard ? cb_tick : NULL,
-        .tick_interval_ms = state.transport_owner ? 1 : clipboard ? 5 : audio ? 50 : 0,
+        .on_tick = state.transport_owner || audio || clipboard || (unlock_pin && *unlock_pin) ? cb_tick : NULL,
+        .tick_interval_ms = state.transport_owner ? 1 : clipboard ? 5 : audio ? 50 :
+                            (unlock_pin && *unlock_pin) ? 5 : 0,
         .on_clipboard = cb_clipboard,
         .on_clipboard_enabled = clipboard ? cb_clipboard_enabled : NULL,
     };
@@ -1062,12 +1112,22 @@ int main(int argc, char **argv)
             if (!clipboard) { ret = 1; break; } /* Preserve audio-only startup semantics. */
             clipboard_failed(&state);
         }
-        if (auto_rotate && scrcpy_session_started(&state.scrcpy)) {
+        if ((auto_rotate && scrcpy_session_started(&state.scrcpy)) || state.unlock_adb_gate) {
             state.display = otg_display_monitor_create(adb_path, adb_serial ? adb_serial : serial,
                                                        state.bridge.screen_w, state.bridge.screen_h);
-            if (!state.display) fprintf(stderr, "WARN: automatic display size monitoring unavailable\n");
+            if (state.display && state.unlock_adb_gate)
+                otg_display_monitor_prefer_companion(state.display);
+            if (!state.display && auto_rotate)
+                fprintf(stderr, "WARN: automatic display size monitoring unavailable\n");
+            if (!state.display && state.unlock_adb_gate) {
+                fprintf(stderr, "WARN: ADB lock-state monitoring unavailable; automatic unlock disabled\n");
+                state.unlock_adb_gate = false;
+                otg_bridge_set_unlock_adb_gated(&state.bridge, false);
+                (void)otg_bridge_set_unlock_pin(&state.bridge, NULL);
+            }
         }
         state.display_pending = false;
+        state.unlock_lock_query_pending = false;
         df_client_tls_options tls_options = {
             .enabled = tls != 0,
             .certificate = tls_cert,

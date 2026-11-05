@@ -77,6 +77,17 @@ struct otg_bridge {
     int32_t screen_w, screen_h;
     float residual_hscroll;
     float residual_vscroll;
+
+    /* Optional, experimental numeric PIN unlock sequence.  The PIN is kept
+     * only in the bridge process and is never included in diagnostic output. */
+    char unlock_pin[33];
+    bool unlock_attempted;
+    bool unlock_pending;
+    bool unlock_adb_gated;
+    uint64_t unlock_due_ms;
+    unsigned unlock_phase;
+    unsigned unlock_swipe_step;
+    int32_t unlock_saved_x, unlock_saved_y;
 };
 
 /*
@@ -103,6 +114,11 @@ void otg_bridge_close(struct otg_bridge *b);
 /* Event handlers (driven by the deskflow client callbacks). */
 void otg_bridge_enter(struct otg_bridge *b, int16_t x, int16_t y, uint16_t mask);
 void otg_bridge_leave(struct otg_bridge *b);
+/* Configure an experimental numeric PIN sequence sent once after enter. */
+bool otg_bridge_set_unlock_pin(struct otg_bridge *b, const char *pin);
+void otg_bridge_set_unlock_adb_gated(struct otg_bridge *b, bool gated);
+void otg_bridge_unlock_adb_state(struct otg_bridge *b, bool valid, bool locked);
+void otg_bridge_unlock_tick(struct otg_bridge *b);
 void otg_bridge_key(struct otg_bridge *b, uint32_t keyid, bool down);
 /* Release a cancelled clipboard input barrier without disturbing pointer state. */
 void otg_bridge_release_keyboard(struct otg_bridge *b);

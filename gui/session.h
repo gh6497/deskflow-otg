@@ -26,6 +26,8 @@ struct ConnectionOptions {
     QString mouseMode = "absolute";
     QString middleButtonAction = "normal";
     QString rightButtonAction = "normal";
+    QString unlockPin;
+    bool unlockAdb = false;
     QString tlsCertificate;
     QString tlsFingerprint;
     QString tlsFingerprintFile;
@@ -101,6 +103,7 @@ private:
     QStringList m_bleAuxiliary;
     bool m_bleActive = false, m_shutdown = false, m_stoppingBleProvider = false;
     bool m_audioReady = false;
+    bool m_adbServerStarted = false;
     QByteArray m_failureId, m_statusId;
     QByteArray m_clipboardStatusId = "otg.clipboard.off";
     QString m_failureDetail, m_statusDetail;

@@ -29,6 +29,7 @@
 #include <QScrollArea>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QRegularExpressionValidator>
 #include <QSplitter>
 #include <QSystemTrayIcon>
 #include <QTimer>
@@ -456,6 +457,20 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     setTranslatedProperty(m_rightButtonAction, "toolTip", "otg.right_button.tooltip");
     addTranslatedRow(featuresForm, "otg.label.right_button_action", m_rightButtonAction);
 
+    m_unlockEnabled = translated(new QCheckBox, "text", "otg.unlock.enabled");
+    m_unlockEnabled->setObjectName("unlockEnabled");
+    setTranslatedProperty(m_unlockEnabled, "toolTip", "otg.unlock.tooltip");
+    featuresForm->addRow(m_unlockEnabled);
+    m_unlockPin = new QLineEdit;
+    m_unlockPin->setObjectName("unlockPin");
+    m_unlockPin->setEchoMode(QLineEdit::Password);
+    m_unlockPin->setMaxLength(32);
+    m_unlockPin->setValidator(new QRegularExpressionValidator(QRegularExpression("[0-9]{0,32}"), m_unlockPin));
+    setTranslatedProperty(m_unlockPin, "placeholderText", "otg.unlock.pin_hint");
+    setTranslatedProperty(m_unlockPin, "toolTip", "otg.unlock.tooltip");
+    addTranslatedRow(featuresForm, "otg.label.unlock_pin", m_unlockPin);
+    connect(m_unlockEnabled, &QCheckBox::toggled, this, [this] { updateEnabled(); });
+
     m_audio = translated(new QCheckBox, "text", "otg.audio.enabled");
     m_audio->setObjectName("audioEnabled");
     setTranslatedProperty(m_audio, "toolTip", "otg.audio.tooltip");
@@ -702,6 +717,9 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
         settings.value("middleButtonAction", "normal"))));
     m_rightButtonAction->setCurrentIndex(qMax(0, m_rightButtonAction->findData(
         settings.value("rightButtonAction", "normal"))));
+    /* PINs are deliberately session-only; never restore them from QSettings. */
+    m_unlockEnabled->setChecked(false);
+    m_unlockPin->clear();
     if (m_transport->currentData() == "ble") m_mouseMode->setCurrentIndex(0);
     const int profileCount = settings.beginReadArray("rememberedDevices");
     for (int i = 0; i < profileCount; ++i) {
@@ -926,7 +944,10 @@ void MainWindow::persistDevices()
     for (const auto &id : ids) {
         settings.setArrayIndex(index++);
         settings.setValue("id", id);
-        settings.setValue("profile", m_records.value(id));
+        auto safeProfile = m_records.value(id);
+        safeProfile.remove("unlockPin");
+        safeProfile.remove("unlockEnabled");
+        settings.setValue("profile", safeProfile);
     }
     settings.endArray();
 }
@@ -1119,6 +1140,9 @@ ConnectionOptions MainWindow::connectionOptions(const QVariantMap &profile) cons
     options.mouseMode = options.transport == "ble" ? "absolute" : profile.value("mouseMode", "absolute").toString();
     options.middleButtonAction = profile.value("middleButtonAction", "normal").toString();
     options.rightButtonAction = profile.value("rightButtonAction", "normal").toString();
+    options.unlockPin = profile.value("unlockEnabled", false).toBool() ?
+        profile.value("unlockPin").toString() : QString();
+    options.unlockAdb = !options.unlockPin.isEmpty();
     options.blePeer = profile.value("blePeer").toString();
 #ifdef Q_OS_LINUX
     options.adapter = profile.value("bleAdapter", "hci0").toString();
@@ -1230,6 +1254,8 @@ void MainWindow::updateEnabled()
     m_bleIsolate->setEnabled(linuxBle);
     m_stopBleService->setEnabled((linuxBle || m_session->hasBleProvider()) && !m_stoppingBleService);
     m_mouseMode->setEnabled(!ble);
+    m_unlockEnabled->setEnabled(true);
+    m_unlockPin->setEnabled(m_unlockEnabled->isChecked());
     const bool companionTarget = !m_adb->text().trimmed().isEmpty() &&
         (!m_adbSerial->text().trimmed().isEmpty() || !m_serial->text().trimmed().isEmpty());
     m_transferFiles->setEnabled(!m_closing && !m_companion.busy() &&
@@ -1490,10 +1516,11 @@ QVariantMap MainWindow::deviceProfile() const
                {"tlsCertificate", m_tlsCert->text()}, {"tlsFingerprint", m_tlsFingerprint->text()},
                {"tlsFingerprintFile", m_tlsFingerprintFile->text()},
                {"direction", m_direction->currentData()},
-              {"mouseMode", m_mouseMode->currentData()}, {"audio", m_audio->isChecked()},
-                {"middleButtonAction", m_middleButtonAction->currentData()},
-                {"rightButtonAction", m_rightButtonAction->currentData()},
-                {"clipboard", m_clipboard->isChecked()}, {"autoRotate", m_autoRotate->isChecked()}};
+                {"mouseMode", m_mouseMode->currentData()}, {"audio", m_audio->isChecked()},
+                 {"middleButtonAction", m_middleButtonAction->currentData()},
+                 {"rightButtonAction", m_rightButtonAction->currentData()},
+                 {"unlockEnabled", m_unlockEnabled->isChecked()}, {"unlockPin", m_unlockPin->text()},
+                 {"clipboard", m_clipboard->isChecked()}, {"autoRotate", m_autoRotate->isChecked()}};
 }
 
 void MainWindow::applyDeviceProfile(const QVariantMap &profile)
@@ -1531,6 +1558,8 @@ void MainWindow::applyDeviceProfile(const QVariantMap &profile)
         profile.value("middleButtonAction", "normal"))));
     m_rightButtonAction->setCurrentIndex(qMax(0, m_rightButtonAction->findData(
         profile.value("rightButtonAction", "normal"))));
+    m_unlockEnabled->setChecked(profile.value("unlockEnabled", false).toBool());
+    m_unlockPin->setText(profile.value("unlockPin").toString());
     if (m_transport->currentData() == "ble") m_mouseMode->setCurrentIndex(0);
     const auto neighbor = profile.value("neighbor", m_computer->text()).toString();
     if (m_neighbor->findData(neighbor) < 0) m_neighbor->addItem(neighbor, neighbor);
@@ -1551,7 +1580,10 @@ void MainWindow::rememberDevice()
     int index = 0;
     for (const auto &profile : m_profiles) {
         settings.setArrayIndex(index++);
-        settings.setValue("profile", profile);
+        auto safeProfile = profile;
+        safeProfile.remove("unlockPin");
+        safeProfile.remove("unlockEnabled");
+        settings.setValue("profile", safeProfile);
     }
     settings.endArray();
     updateAutoConnect();

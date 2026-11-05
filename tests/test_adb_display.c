@@ -38,6 +38,11 @@ static void check_parse(void)
     CHECK(!otg_display_parse("Physical size: 32768x2400\nSurfaceOrientation: 0\n", &s));
     CHECK(!otg_display_parse("Physical size: 1080x2400junk\nSurfaceOrientation: 0\n", &s));
     CHECK(!otg_display_parse("Physical size: 1080x2400\nViewport INTERNAL: displayId=0\nViewport EXTERNAL: displayId=1 orientation=1\n", &s));
+    bool locked = false;
+    CHECK(parse_lock_state("mKeyguardShowing=true\nmShowingLockscreen=true\nmIsShowing=true\n", &locked) && locked);
+    CHECK(parse_lock_state("mKeyguardShowing=false\nmShowingLockscreen=false\nmIsShowing=false\n", &locked) && !locked);
+    CHECK(parse_companion_lock_state("Broadcast completed: result=0, data=\"locked\"\n", &locked) && locked);
+    CHECK(parse_companion_lock_state("Broadcast completed: result=0, data=\"unlocked\"\n", &locked) && !locked);
 }
 
 static void check_observe(void)
@@ -74,7 +79,7 @@ static void check_observe(void)
 int main(int argc, char **argv)
 {
     if (argc == 5 && !strcmp(argv[1], "-s")) {
-        if (strcmp(argv[3], "shell") || strcmp(argv[4], "wm size; dumpsys input")) return 5;
+        if (strcmp(argv[3], "shell") || strcmp(argv[4], "wm size; dumpsys input; dumpsys window policy")) return 5;
         if (!strcmp(argv[2], "slow")) { for (int i = 0; i < 10000; ++i) delay(); return 0; }
         if (!strcmp(argv[2], "fail")) { puts("Physical size: 1080x2400\nSurfaceOrientation: 1"); return 1; }
         if (!strcmp(argv[2], "overflow")) { for (int i = 0; i < OUTPUT_MAX + 1024; ++i) putchar('x'); return 0; }
@@ -82,6 +87,9 @@ int main(int argc, char **argv)
         puts("Physical size: 1080x2400");
         for (int i = 0; i < 3000; ++i) puts("ignored input diagnostic line");
         puts("Viewport INTERNAL: displayId=0, orientation=1");
+        puts("mKeyguardShowing=false");
+        puts("mShowingLockscreen=false");
+        puts("mIsShowing=false");
         return 0;
     }
     check_parse(); check_observe();
