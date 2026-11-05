@@ -115,6 +115,8 @@ private:
     QAction *m_trayDisconnect = nullptr;
     QWidget *m_form;
     QComboBox *m_devices, *m_direction, *m_mouseMode, *m_middleButtonAction, *m_rightButtonAction;
+    QCheckBox *m_unlockEnabled;
+    QLineEdit *m_unlockPin;
     QComboBox *m_transport;
     QLineEdit *m_adapter, *m_blePeer;
     QCheckBox *m_bleIsolate;

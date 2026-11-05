@@ -14,5 +14,9 @@ struct otg_display_monitor;
 struct otg_display_monitor *otg_display_monitor_create(const char *adb, const char *serial,
                                                       int width, int height);
 bool otg_display_monitor_poll(struct otg_display_monitor *monitor, struct otg_display_size *size);
+void otg_display_monitor_request_lock(struct otg_display_monitor *monitor);
+bool otg_display_monitor_take_lock_state(struct otg_display_monitor *monitor,
+                                         bool *valid, bool *locked);
+void otg_display_monitor_prefer_companion(struct otg_display_monitor *monitor);
 void otg_display_monitor_destroy(struct otg_display_monitor *monitor);
 #endif

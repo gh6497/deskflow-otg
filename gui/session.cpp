@@ -10,6 +10,7 @@
 #include <QJsonObject>
 #include <QSettings>
 #include <QRegularExpression>
+#include <QProcessEnvironment>
 #include <QStandardPaths>
 #include <QTcpServer>
 
@@ -157,6 +158,7 @@ void Session::start(const ConnectionOptions &options)
     m_shutdown = false;
     m_options = options;
     m_audioReady = false;
+    m_adbServerStarted = false;
     m_clipboardStatusId = options.clipboard ? "otg.clipboard.waiting" : "otg.clipboard.off";
     emit clipboardChanged();
     m_failureId.clear();
@@ -175,6 +177,10 @@ void Session::start(const ConnectionOptions &options)
         (ble && (!peerPattern.match(options.blePeer).hasMatch() || options.mouseMode != "absolute")) ||
         (options.middleButtonAction != "normal" && options.middleButtonAction != "home") ||
         (options.rightButtonAction != "normal" && options.rightButtonAction != "back") ||
+        (!options.unlockPin.isEmpty() && (options.unlockPin.size() < 4 || options.unlockPin.size() > 32 ||
+            !options.unlockPin.contains(QRegularExpression("^[0-9]+$")))) ||
+        (options.unlockAdb && (options.adb.isEmpty() ||
+            (options.transport == "ble" ? options.adbSerial.isEmpty() : options.serial.isEmpty()))) ||
         (options.tls && options.tlsFingerprint.isEmpty() && options.tlsFingerprintFile.isEmpty()) ||
         (options.tls && !options.tlsFingerprint.isEmpty() && !options.tlsFingerprintFile.isEmpty()) ||
         !validScreenName(options.phone) ||
@@ -268,6 +274,16 @@ void Session::prepareBle(bool started, int attempts)
 
 void Session::startConnection()
 {
+    if (m_options.unlockAdb && !m_adbServerStarted) {
+        m_adbServerStarted = true;
+        const auto generation = m_generation;
+        runCommand(this, m_options.adb, {"start-server"},
+                   [this, generation](bool, const QString &) {
+            if (generation == m_generation && m_state == State::Starting)
+                startConnection();
+        });
+        return;
+    }
     m_deadline.start(30000);
     if (!m_options.manageServer) {
         launchBridge();
@@ -288,6 +304,14 @@ void Session::launchBridge()
     if (!windowsBle() && m_bridge.state() != QProcess::NotRunning)
         return;
     const bool ble = m_options.transport == "ble";
+    auto environment = QProcessEnvironment::systemEnvironment();
+    environment.remove("OTG_UNLOCK_PIN");
+    environment.remove("OTG_UNLOCK_ADB_GATE");
+    if (!m_options.unlockPin.isEmpty())
+        environment.insert("OTG_UNLOCK_PIN", m_options.unlockPin);
+    if (m_options.unlockAdb)
+        environment.insert("OTG_UNLOCK_ADB_GATE", "1");
+    m_bridge.setProcessEnvironment(environment);
     emit log(qtTrId(ble ? "otg.ble.waiting" : "otg.log.usb_initializing"));
     QStringList args = {"--gui", "--host", m_options.manageServer ? "127.0.0.1" : m_options.host,
                     "--port", QString::number(m_options.port), "--name", m_options.phone,
@@ -302,6 +326,9 @@ void Session::launchBridge()
              << "--scrcpy-version" << m_options.scrcpyVersion;
         if (!m_options.adbSerial.isEmpty()) args << "--adb-serial" << m_options.adbSerial;
         if (m_options.autoRotate) args << "--auto-rotate";
+    } else if (m_options.unlockAdb) {
+        args << "--adb" << m_options.adb << "--adb-serial"
+             << (!m_options.adbSerial.isEmpty() ? m_options.adbSerial : m_options.serial);
     }
     if (ble) {
         m_deadline.stop(); // Pairing and desktop authentication are user paced.
@@ -326,6 +353,7 @@ void Session::launchBridge()
         else args << "--tls-fingerprint-file" << m_options.tlsFingerprintFile;
     }
     if (windowsBle()) {
+        m_bleProvider.setProcessEnvironment(environment);
         m_bleActive = true;
         if (hasBleProvider()) {
             const auto resume = QString("resume\t%1\t%2\t%3\t%4\t%5\t%6\t%7\n")

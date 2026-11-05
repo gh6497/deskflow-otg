@@ -47,6 +47,11 @@
             android:exported="true"
             android:permission="android.permission.DUMP" />
 
+        <receiver
+            android:name=".LockStateReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+
         <!-- USB_STATE is a protected system broadcast. Keep this receiver
              independent from notification-listener service binding: some ROMs
              stop/rebind that service while still delivering the USB event. -->

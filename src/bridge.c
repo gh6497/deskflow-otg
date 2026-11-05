@@ -10,11 +10,18 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#endif
 
 #include "bridge.h"
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include "keymap.h"
 
@@ -28,6 +35,17 @@
 /* Deskflow wheel deltas are in units of 120 per notch (PlatformScreen.h
  * s_scrollDelta), matching the Windows WHEEL_DELTA convention. */
 #define WHEEL_DELTA 120
+#define UNLOCK_WAKE_DELAY_MS 800
+#define UNLOCK_SWIPE_STEPS 12
+#define UNLOCK_SWIPE_INTERVAL_MS 10
+#define UNLOCK_PIN_DELAY_MS 500
+
+enum {
+    UNLOCK_PHASE_NONE,
+    UNLOCK_PHASE_WAIT_SWIPE,
+    UNLOCK_PHASE_SWIPE,
+    UNLOCK_PHASE_WAIT_PIN,
+};
 
 static bool usb_register_report(void *ctx, uint16_t id, const uint8_t *desc,
                                 uint16_t size)
@@ -275,6 +293,42 @@ static bool send_keyboard_report_with_shortcut(struct otg_bridge *b,
 static void send_keyboard_report(struct otg_bridge *b)
 {
     (void)send_keyboard_report_with_shortcut(b, 0, -1);
+}
+
+static uint64_t bridge_now_ms(void)
+{
+#ifdef _WIN32
+    return (uint64_t)GetTickCount64();
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000U + (uint64_t)ts.tv_nsec / 1000000U;
+#endif
+}
+
+static void send_key_tap(struct otg_bridge *b, int usage)
+{
+    if (send_keyboard_report_with_shortcut(b, 0, usage))
+        (void)send_keyboard_report_with_shortcut(b, 0, -1);
+}
+
+static int pin_digit_usage(char digit)
+{
+    if (digit >= '1' && digit <= '9') return HID_KEY_1 + (digit - '1');
+    if (digit == '0') return HID_KEY_0;
+    return -1;
+}
+
+static void schedule_unlock(struct otg_bridge *b)
+{
+    b->unlock_pending = true;
+    b->unlock_due_ms = bridge_now_ms() + UNLOCK_WAKE_DELAY_MS;
+    b->unlock_phase = UNLOCK_PHASE_WAIT_SWIPE;
+    b->unlock_swipe_step = 0;
+    /* Enter is widely accepted as a harmless wake-up key on Android lock
+     * screens.  The swipe and PIN are delayed for the screen animation. */
+    send_key_tap(b, HID_KEY_ENTER);
+    LOG_DBG("unlock swipe scheduled after screen entry\n");
 }
 
 /* One click produces one complete system shortcut, never a held/repeating
@@ -563,6 +617,10 @@ void otg_bridge_reset_input(struct otg_bridge *b)
     b->mouse_x = b->mouse_y = 0;
     b->active = b->have_mouse_pos = false;
     b->residual_hscroll = b->residual_vscroll = 0;
+    b->unlock_attempted = false;
+    b->unlock_pending = false;
+    b->unlock_phase = UNLOCK_PHASE_NONE;
+    b->unlock_swipe_step = 0;
     if (b->transport_ops && otg_bridge_ready(b)) {
         send_keyboard_report(b);
         send_mouse_state(b, 0, 0);
@@ -601,6 +659,11 @@ void otg_bridge_enter(struct otg_bridge *b, int16_t x, int16_t y, uint16_t mask)
         mouse_warp(b, b->mouse_x, b->mouse_y);
     }
     send_keyboard_report(b);
+    if (b->unlock_pin[0] && !b->unlock_attempted) {
+        b->unlock_attempted = true;
+        if (!b->unlock_adb_gated) schedule_unlock(b);
+        else LOG_DBG("waiting for ADB lock-state result\n");
+    }
     LOG_DBG("enter at %d,%d mask=0x%04x\n", x, y, mask);
 }
 
@@ -631,6 +694,96 @@ void otg_bridge_leave(struct otg_bridge *b)
     b->have_mouse_pos = false;
     b->residual_hscroll = 0;
     b->residual_vscroll = 0;
+    b->unlock_pending = false;
+    b->unlock_phase = UNLOCK_PHASE_NONE;
+    if (b->unlock_adb_gated) b->unlock_attempted = false;
+}
+
+bool otg_bridge_set_unlock_pin(struct otg_bridge *b, const char *pin)
+{
+    if (!b) return false;
+    memset(b->unlock_pin, 0, sizeof(b->unlock_pin));
+    b->unlock_attempted = false;
+    b->unlock_pending = false;
+    b->unlock_adb_gated = false;
+    b->unlock_phase = UNLOCK_PHASE_NONE;
+    b->unlock_swipe_step = 0;
+    if (!pin || !*pin) return true;
+    size_t length = strlen(pin);
+    if (length < 4 || length > 32) return false;
+    for (size_t i = 0; i < length; ++i) {
+        if (pin[i] < '0' || pin[i] > '9') return false;
+    }
+    memcpy(b->unlock_pin, pin, length);
+    return true;
+}
+
+void otg_bridge_set_unlock_adb_gated(struct otg_bridge *b, bool gated)
+{
+    if (!b) return;
+    b->unlock_adb_gated = gated;
+}
+
+void otg_bridge_unlock_adb_state(struct otg_bridge *b, bool valid, bool locked)
+{
+    if (!b || !b->unlock_adb_gated || !b->active || !b->unlock_attempted ||
+        b->unlock_pending || !valid || !locked) return;
+    schedule_unlock(b);
+}
+
+void otg_bridge_unlock_tick(struct otg_bridge *b)
+{
+    if (!b || !b->unlock_pending || !b->active) return;
+    if (bridge_now_ms() < b->unlock_due_ms) return;
+
+    const uint64_t now = bridge_now_ms();
+    if (b->unlock_phase == UNLOCK_PHASE_WAIT_SWIPE) {
+        if (b->mouse_mode != OTG_MOUSE_ABSOLUTE) {
+            b->unlock_pending = false;
+            b->unlock_phase = UNLOCK_PHASE_NONE;
+            LOG_WARN("automatic unlock requires absolute mouse mode; skipped\n");
+            return;
+        }
+        b->unlock_saved_x = b->mouse_x;
+        b->unlock_saved_y = b->mouse_y;
+        b->mouse_x = b->screen_w / 2;
+        b->mouse_y = b->screen_h - 1;
+        b->mouse_buttons = 1; /* Tip Switch: begin the upward swipe. */
+        send_mouse_state(b, 0, 0);
+        b->unlock_swipe_step = 0;
+        b->unlock_phase = UNLOCK_PHASE_SWIPE;
+        b->unlock_due_ms = now + UNLOCK_SWIPE_INTERVAL_MS;
+        return;
+    }
+    if (b->unlock_phase == UNLOCK_PHASE_SWIPE) {
+        ++b->unlock_swipe_step;
+        b->mouse_y = (int32_t)((int64_t)(b->screen_h - 1) *
+                                (UNLOCK_SWIPE_STEPS - b->unlock_swipe_step) /
+                                UNLOCK_SWIPE_STEPS);
+        send_mouse_state(b, 0, 0);
+        if (b->unlock_swipe_step < UNLOCK_SWIPE_STEPS) {
+            b->unlock_due_ms = now + UNLOCK_SWIPE_INTERVAL_MS;
+            return;
+        }
+        b->mouse_buttons = 0; /* Release at the top of the lock screen. */
+        send_mouse_state(b, 0, 0);
+        b->mouse_x = b->unlock_saved_x;
+        b->mouse_y = b->unlock_saved_y;
+        send_mouse_state(b, 0, 0);
+        b->unlock_phase = UNLOCK_PHASE_WAIT_PIN;
+        b->unlock_due_ms = now + UNLOCK_PIN_DELAY_MS;
+        return;
+    }
+    if (b->unlock_phase == UNLOCK_PHASE_WAIT_PIN) {
+        for (size_t i = 0; b->unlock_pin[i]; ++i) {
+            const int usage = pin_digit_usage(b->unlock_pin[i]);
+            if (usage >= 0) send_key_tap(b, usage);
+        }
+        send_key_tap(b, HID_KEY_ENTER);
+        b->unlock_pending = false;
+        b->unlock_phase = UNLOCK_PHASE_NONE;
+        LOG_DBG("unlock PIN sequence sent\n");
+    }
 }
 
 void otg_bridge_release_keyboard(struct otg_bridge *b)

@@ -38,6 +38,15 @@ BLE 必须配置显式 ADB 目标，不能以 BLE MAC 代替。Windows USB 驱�
 无线 ADB；Linux / Windows / macOS 共用 Qt 实现，无新增平台专用依赖。CLI 暂不提供状态同步。
 无 ADB 时手机显示未知，原有无需调试的 AOA HID 及拔线立即暂停逻辑保持不变。
 
+## 锁屏状态查询（0.1.11）
+
+桌面端自动解锁开启后，优先通过已授权的 ADB 显式调用伴侣应用的
+`LockStateReceiver`。手机端使用 Android `KeyguardManager.isDeviceLocked()` 返回
+`locked` / `unlocked`，Receiver 由清单中的 `android.permission.DUMP` 保护，普通应用不能伪造结果。
+仅当返回 `locked` 时，桌面端才发送唤醒、上划和数字 PIN；未安装新版伴侣、ADB 未授权或返回状态不明确时，
+桌面端不发送 PIN，并回退到兼容性的 `dumpsys window policy` 检查。该回退输出不是 Android 稳定 API，
+不同 ROM 可能需要额外字段适配。
+
 ## 连接后自动恢复播放器（0.1.5）
 
 同时更新桌面 GUI 和 APK（版本码 6）。手机首页新增「连接后自动恢复所选播放器」，

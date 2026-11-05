@@ -41,6 +41,7 @@
 #define HID_KEY_CAPSLOCK     0x39
 #define HID_KEY_F1           0x3A
 #define HID_KEY_F12          0x45
+#define HID_KEY_POWER        0x66
 #define HID_KEY_PRINTSCREEN  0x46
 #define HID_KEY_SCROLLLOCK   0x47
 #define HID_KEY_PAUSE        0x48
