@@ -48,6 +48,52 @@ static struct otg_ble_control g_control;
 #define DEFAULT_WIDTH  1080
 #define DEFAULT_HEIGHT 1920
 
+/* Parsed connection configuration; runtime resources belong to app_state. */
+struct app_options {
+    /* Deskflow connection and virtual screen. */
+    const char *host;
+    unsigned port;
+    const char *name;
+    int width;
+    int height;
+    df_client_tls_options tls;
+
+    /* HID transport and input behavior. */
+    const char *serial;
+    const char *transport;
+    const char *adapter;
+    const char *ble_peer;
+    int ble_isolate;
+    int ble_restore;
+    int ble_service;
+    int ble_session;
+    int ble_status;
+    int ble_stop_service;
+#ifdef OTG_HAVE_BLE_WIN
+    bool adapter_explicit;
+#endif
+#ifdef _WIN32
+    int background;
+    int background_child;
+    int background_stop;
+#endif
+    enum otg_mouse_mode mouse_mode;
+    enum otg_middle_button_action middle_button_action;
+    enum otg_right_button_action right_button_action;
+
+    /* Optional ADB features and unlock configuration. */
+    const char *adb_path;
+    const char *adb_serial;
+    const char *scrcpy_server;
+    const char *scrcpy_version;
+    int audio;
+    int clipboard;
+    int auto_rotate;
+    const char *unlock_pin;
+    const char *unlock_pin_file;
+    int unlock_adb_gate;
+};
+
 static volatile sig_atomic_t g_stop = 0;
 static int g_gui = 0;
 #ifdef _WIN32
@@ -630,40 +676,19 @@ static bool windows_ble_control_wait(app_state *s)
 
 int main(int argc, char **argv)
 {
-    const char *host = DEFAULT_HOST;
-    const char *name = DEFAULT_NAME;
-    const char *serial = NULL;
-    const char *transport = "usb";
-    const char *adb_path = "adb";
-    const char *adb_serial = NULL;
-    const char *scrcpy_server = NULL;
-    const char *scrcpy_version = NULL;
-    const char *adapter = "hci0";
-#ifdef OTG_HAVE_BLE_WIN
-    bool adapter_explicit = false;
-#endif
-    const char *ble_peer = NULL;
-    int ble_isolate = 0, ble_restore = 0;
-    int ble_service = 0, ble_session = 0, ble_status = 0, ble_stop_service = 0;
-#ifdef _WIN32
-    int background = 0, background_child = 0, background_stop = 0;
-#endif
-    unsigned port = DEFAULT_PORT;
-    int width = DEFAULT_WIDTH;
-    int height = DEFAULT_HEIGHT;
-    enum otg_mouse_mode mouse_mode = OTG_MOUSE_ABSOLUTE;
-    enum otg_middle_button_action middle_button_action = OTG_MIDDLE_BUTTON_NORMAL;
-    enum otg_right_button_action right_button_action = OTG_RIGHT_BUTTON_NORMAL;
-    int audio = 0;
-    int clipboard = 0;
-    int tls = 0;
-    const char *tls_cert = NULL;
-    const char *tls_fingerprint = NULL;
-    const char *tls_fingerprint_file = NULL;
-    int auto_rotate = 0;
-    const char *unlock_pin = NULL;
-    const char *unlock_pin_file = NULL;
-    int unlock_adb_gate = 0;
+    struct app_options opts = {
+        .host = DEFAULT_HOST,
+        .port = DEFAULT_PORT,
+        .name = DEFAULT_NAME,
+        .width = DEFAULT_WIDTH,
+        .height = DEFAULT_HEIGHT,
+        .transport = "usb",
+        .adapter = "hci0",
+        .mouse_mode = OTG_MOUSE_ABSOLUTE,
+        .middle_button_action = OTG_MIDDLE_BUTTON_NORMAL,
+        .right_button_action = OTG_RIGHT_BUTTON_NORMAL,
+        .adb_path = "adb",
+    };
     char unlock_pin_file_data[64] = {0};
 
     if (argc == 2 && strcmp(argv[1], "--usb-scan") == 0) {
@@ -688,47 +713,47 @@ int main(int argc, char **argv)
             usage(argv[0]);
             return 0;
         } else if ((strcmp(a, "-H") == 0 || strcmp(a, "--host") == 0) && i + 1 < argc) {
-            host = argv[++i];
+            opts.host = argv[++i];
         } else if ((strcmp(a, "-p") == 0 || strcmp(a, "--port") == 0) && i + 1 < argc) {
-            port = (unsigned)atoi(argv[++i]);
+            opts.port = (unsigned)atoi(argv[++i]);
         } else if ((strcmp(a, "-n") == 0 || strcmp(a, "--name") == 0) && i + 1 < argc) {
-            name = argv[++i];
+            opts.name = argv[++i];
         } else if ((strcmp(a, "-s") == 0 || strcmp(a, "--serial") == 0) && i + 1 < argc) {
-            serial = argv[++i];
+            opts.serial = argv[++i];
         } else if (strcmp(a, "--transport") == 0 && i + 1 < argc) {
-            transport = argv[++i];
+            opts.transport = argv[++i];
         } else if (strcmp(a, "--adapter") == 0 && i + 1 < argc) {
-            adapter = argv[++i];
+            opts.adapter = argv[++i];
 #ifdef OTG_HAVE_BLE_WIN
-            adapter_explicit = true;
+            opts.adapter_explicit = true;
 #endif
         } else if (strcmp(a, "--ble-isolate") == 0) {
-            ble_isolate = 1;
+            opts.ble_isolate = 1;
         } else if (strcmp(a, "--ble-restore") == 0) {
-            ble_restore = 1;
+            opts.ble_restore = 1;
         } else if (strcmp(a, "--ble-service") == 0) {
-            ble_service = 1;
+            opts.ble_service = 1;
         } else if (strcmp(a, "--ble-session") == 0) {
-            ble_session = 1;
+            opts.ble_session = 1;
         } else if (strcmp(a, "--ble-status") == 0) {
-            ble_status = 1;
+            opts.ble_status = 1;
         } else if (strcmp(a, "--ble-stop-service") == 0) {
-            ble_stop_service = 1;
+            opts.ble_stop_service = 1;
         } else if (strcmp(a, "--ble-peer") == 0 && i + 1 < argc) {
-            ble_peer = argv[++i];
+            opts.ble_peer = argv[++i];
 #ifdef _WIN32
         } else if (strcmp(a, "--background") == 0) {
-            background = 1;
+            opts.background = 1;
         } else if (strcmp(a, "--background-child") == 0) {
-            background = 1;
-            background_child = 1;
+            opts.background = 1;
+            opts.background_child = 1;
         } else if (strcmp(a, "--background-stop") == 0) {
-            background_stop = 1;
+            opts.background_stop = 1;
 #endif
         } else if (strcmp(a, "--width") == 0 && i + 1 < argc) {
-            width = parse_screen_size(argv[++i]);
+            opts.width = parse_screen_size(argv[++i]);
         } else if (strcmp(a, "--height") == 0 && i + 1 < argc) {
-            height = parse_screen_size(argv[++i]);
+            opts.height = parse_screen_size(argv[++i]);
         } else if (strcmp(a, "--gui") == 0) {
             g_gui = 1;
 #ifdef OTG_HAVE_BLE_WIN
@@ -738,9 +763,9 @@ int main(int argc, char **argv)
         } else if (strcmp(a, "--mouse-mode") == 0 && i + 1 < argc) {
             const char *mode = argv[++i];
             if (strcmp(mode, "absolute") == 0) {
-                mouse_mode = OTG_MOUSE_ABSOLUTE;
+                opts.mouse_mode = OTG_MOUSE_ABSOLUTE;
             } else if (strcmp(mode, "relative") == 0) {
-                mouse_mode = OTG_MOUSE_RELATIVE;
+                opts.mouse_mode = OTG_MOUSE_RELATIVE;
             } else {
                 fprintf(stderr, "invalid mouse mode: %s (use absolute or relative)\n", mode);
                 return 2;
@@ -748,9 +773,9 @@ int main(int argc, char **argv)
         } else if (strcmp(a, "--right-button-action") == 0 && i + 1 < argc) {
             const char *action = argv[++i];
             if (strcmp(action, "normal") == 0) {
-                right_button_action = OTG_RIGHT_BUTTON_NORMAL;
+                opts.right_button_action = OTG_RIGHT_BUTTON_NORMAL;
             } else if (strcmp(action, "back") == 0) {
-                right_button_action = OTG_RIGHT_BUTTON_BACK;
+                opts.right_button_action = OTG_RIGHT_BUTTON_BACK;
             } else {
                 fprintf(stderr, "invalid right button action: %s (use normal or back)\n", action);
                 return 2;
@@ -758,39 +783,39 @@ int main(int argc, char **argv)
         } else if (strcmp(a, "--middle-button-action") == 0 && i + 1 < argc) {
             const char *action = argv[++i];
             if (strcmp(action, "normal") == 0) {
-                middle_button_action = OTG_MIDDLE_BUTTON_NORMAL;
+                opts.middle_button_action = OTG_MIDDLE_BUTTON_NORMAL;
             } else if (strcmp(action, "home") == 0) {
-                middle_button_action = OTG_MIDDLE_BUTTON_HOME;
+                opts.middle_button_action = OTG_MIDDLE_BUTTON_HOME;
             } else {
                 fprintf(stderr, "invalid middle button action: %s (use normal or home)\n", action);
                 return 2;
             }
         } else if (strcmp(a, "--audio") == 0) {
-            audio = 1;
+            opts.audio = 1;
         } else if (strcmp(a, "--clipboard") == 0) {
-            clipboard = 1;
+            opts.clipboard = 1;
         } else if (strcmp(a, "--tls") == 0) {
-            tls = 1;
+            opts.tls.enabled = true;
         } else if (strcmp(a, "--tls-cert") == 0 && i + 1 < argc) {
-            tls_cert = argv[++i];
+            opts.tls.certificate = argv[++i];
         } else if (strcmp(a, "--tls-fingerprint") == 0 && i + 1 < argc) {
-            tls_fingerprint = argv[++i];
+            opts.tls.fingerprint = argv[++i];
         } else if (strcmp(a, "--tls-fingerprint-file") == 0 && i + 1 < argc) {
-            tls_fingerprint_file = argv[++i];
+            opts.tls.fingerprint_file = argv[++i];
         } else if (strcmp(a, "--auto-rotate") == 0) {
-            auto_rotate = 1;
+            opts.auto_rotate = 1;
         } else if (strcmp(a, "--adb") == 0 && i + 1 < argc) {
-            adb_path = argv[++i];
+            opts.adb_path = argv[++i];
         } else if (strcmp(a, "--adb-serial") == 0 && i + 1 < argc) {
-            adb_serial = argv[++i];
+            opts.adb_serial = argv[++i];
         } else if (strcmp(a, "--unlock-pin-file") == 0 && i + 1 < argc) {
             /* Internal GUI hand-off for pkexec: the PIN must not be put in
              * argv, while the file path survives the privilege boundary. */
-            unlock_pin_file = argv[++i];
+            opts.unlock_pin_file = argv[++i];
         } else if (strcmp(a, "--scrcpy-server") == 0 && i + 1 < argc) {
-            scrcpy_server = argv[++i];
+            opts.scrcpy_server = argv[++i];
         } else if (strcmp(a, "--scrcpy-version") == 0 && i + 1 < argc) {
-            scrcpy_version = argv[++i];
+            opts.scrcpy_version = argv[++i];
         } else {
             fprintf(stderr, "unknown argument: %s\n", a);
             usage(argv[0]);
@@ -798,17 +823,17 @@ int main(int argc, char **argv)
         }
     }
 
-    if (!width || !height) {
+    if (!opts.width || !opts.height) {
         fprintf(stderr, "screen width and height must be integers in 1..32767\n");
         return 2;
     }
-    unlock_pin = getenv("OTG_UNLOCK_PIN");
-    unlock_adb_gate = getenv("OTG_UNLOCK_ADB_GATE") &&
-                      strcmp(getenv("OTG_UNLOCK_ADB_GATE"), "1") == 0;
-    if (unlock_pin_file) {
-        FILE *file = fopen(unlock_pin_file, "rb");
+    opts.unlock_pin = getenv("OTG_UNLOCK_PIN");
+    opts.unlock_adb_gate = getenv("OTG_UNLOCK_ADB_GATE") &&
+                           strcmp(getenv("OTG_UNLOCK_ADB_GATE"), "1") == 0;
+    if (opts.unlock_pin_file) {
+        FILE *file = fopen(opts.unlock_pin_file, "rb");
         if (!file) {
-            fprintf(stderr, "ERROR: cannot read unlock PIN file: %s\n", unlock_pin_file);
+            fprintf(stderr, "ERROR: cannot read unlock PIN file: %s\n", opts.unlock_pin_file);
             return 2;
         }
         const size_t length = fread(unlock_pin_file_data, 1,
@@ -825,82 +850,83 @@ int main(int argc, char **argv)
             fprintf(stderr, "ERROR: unlock PIN file is empty\n");
             return 2;
         }
-        unlock_pin = unlock_pin_file_data;
-        unlock_adb_gate = 1;
+        opts.unlock_pin = unlock_pin_file_data;
+        opts.unlock_adb_gate = 1;
     }
     /* ADB is an auxiliary dependency, not part of the HID transport.  Keep
      * this single predicate in sync with the options that actually invoke
      * ADB, so feature-only sessions get the same validation and lifecycle. */
-    const int adb_features = audio || clipboard || unlock_adb_gate;
-    if (unlock_pin && *unlock_pin &&
-        (strlen(unlock_pin) < 4 || strlen(unlock_pin) > 32)) {
+    const int adb_features = opts.audio || opts.clipboard || opts.unlock_adb_gate;
+    if (opts.unlock_pin && *opts.unlock_pin &&
+        (strlen(opts.unlock_pin) < 4 || strlen(opts.unlock_pin) > 32)) {
         fprintf(stderr, "ERROR: OTG_UNLOCK_PIN must contain 4..32 digits\n");
         return 2;
     }
-    if (unlock_pin && *unlock_pin) {
-        for (const char *p = unlock_pin; *p; ++p) {
+    if (opts.unlock_pin && *opts.unlock_pin) {
+        for (const char *p = opts.unlock_pin; *p; ++p) {
             if (*p < '0' || *p > '9') {
                 fprintf(stderr, "ERROR: OTG_UNLOCK_PIN must contain digits only\n");
                 return 2;
             }
         }
     }
-    if (adb_features && (ble_service || ble_status || ble_stop_service || ble_restore)) {
+    if (adb_features && (opts.ble_service || opts.ble_status || opts.ble_stop_service || opts.ble_restore)) {
         fprintf(stderr, "ERROR: ADB features require a bridge session, not standalone BLE service operations\n");
         return 2;
     }
-    if (adb_features && (!(adb_serial && *adb_serial) && !(serial && *serial))) {
+    if (adb_features && (!(opts.adb_serial && *opts.adb_serial) && !(opts.serial && *opts.serial))) {
         fprintf(stderr, "ERROR: ADB features require --adb-serial or --serial\n");
         return 2;
     }
-    if (auto_rotate && !(audio || clipboard)) {
+    if (opts.auto_rotate && !(opts.audio || opts.clipboard)) {
         fprintf(stderr, "ERROR: --auto-rotate requires --audio or --clipboard\n");
         return 2;
     }
-    if (!tls && (tls_cert || tls_fingerprint || tls_fingerprint_file)) {
+    if (!opts.tls.enabled && (opts.tls.certificate || opts.tls.fingerprint || opts.tls.fingerprint_file)) {
         fprintf(stderr, "ERROR: TLS options require --tls\n");
         return 2;
     }
-    if (tls && ((!tls_fingerprint || !*tls_fingerprint) &&
-                (!tls_fingerprint_file || !*tls_fingerprint_file))) {
+    if (opts.tls.enabled && ((!opts.tls.fingerprint || !*opts.tls.fingerprint) &&
+                            (!opts.tls.fingerprint_file || !*opts.tls.fingerprint_file))) {
         fprintf(stderr, "ERROR: --tls requires --tls-fingerprint or --tls-fingerprint-file\n");
         return 2;
     }
-    if (tls && tls_fingerprint && tls_fingerprint_file) {
+    if (opts.tls.enabled && opts.tls.fingerprint && opts.tls.fingerprint_file) {
         fprintf(stderr, "ERROR: use either --tls-fingerprint or --tls-fingerprint-file, not both\n");
         return 2;
     }
-    if (tls && (ble_service || ble_status || ble_stop_service || ble_restore)) {
+    if (opts.tls.enabled && (opts.ble_service || opts.ble_status || opts.ble_stop_service || opts.ble_restore)) {
         fprintf(stderr, "ERROR: TLS is only available for a Deskflow bridge connection\n");
         return 2;
     }
-    if ((audio || clipboard) && (!scrcpy_server || !*scrcpy_server || !scrcpy_version || !*scrcpy_version)) {
+    if ((opts.audio || opts.clipboard) && (!opts.scrcpy_server || !*opts.scrcpy_server ||
+                                         !opts.scrcpy_version || !*opts.scrcpy_version)) {
         fprintf(stderr, "ERROR: ADB features require --scrcpy-server and --scrcpy-version\n");
         return 2;
     }
-    if (adb_serial && !adb_features) {
+    if (opts.adb_serial && !adb_features) {
         fprintf(stderr, "ERROR: --adb-serial requires an ADB feature (audio, clipboard or unlock)\n");
         return 2;
     }
-    if (audio && strcmp(transport, "usb") != 0) {
+    if (opts.audio && strcmp(opts.transport, "usb") != 0) {
         fprintf(stderr, "ERROR: --audio currently requires --transport usb\n");
         return 2;
     }
 #ifndef OTG_HAVE_AUDIO
-    if (audio) {
+    if (opts.audio) {
         fprintf(stderr, "ERROR: audio support was not built; configure with -DBUILD_AUDIO=ON\n");
         return 2;
     }
 #endif
 #ifndef OTG_HAVE_CLIPBOARD
-    if (clipboard) {
+    if (opts.clipboard) {
         fprintf(stderr, "ERROR: clipboard support was not built; configure with -DBUILD_CLIPBOARD=ON\n");
         return 2;
     }
 #endif
 
 #ifdef _WIN32
-    if (background_stop) {
+    if (opts.background_stop) {
         if (argc != 2) {
             fprintf(stderr, "ERROR: --background-stop takes no other arguments\n");
             return 2;
@@ -921,93 +947,93 @@ int main(int argc, char **argv)
      * pipes must not kill the root process before it restores adapter modes. */
     if(g_gui)signal(SIGPIPE,SIG_IGN);
 #endif
-    if(strcmp(transport,"usb") && strcmp(transport,"ble")) {
+    if(strcmp(opts.transport,"usb") && strcmp(opts.transport,"ble")) {
         fprintf(stderr,"ERROR: invalid transport (use usb or ble)\n");return 2;
     }
-    if(!strcmp(transport,"ble") || ble_service || ble_session || ble_status || ble_stop_service || ble_restore) {
+    if(!strcmp(opts.transport,"ble") || opts.ble_service || opts.ble_session || opts.ble_status || opts.ble_stop_service || opts.ble_restore) {
         char *end=NULL;
-        unsigned long index=strncmp(adapter,"hci",3) ? UINT16_MAX : strtoul(adapter+3,&end,10);
-        if(!end || end==adapter+3 || *end || adapter[3]<'0' || adapter[3]>'9' || index>=UINT16_MAX) {
+        unsigned long index=strncmp(opts.adapter,"hci",3) ? UINT16_MAX : strtoul(opts.adapter+3,&end,10);
+        if(!end || end==opts.adapter+3 || *end || opts.adapter[3]<'0' || opts.adapter[3]>'9' || index>=UINT16_MAX) {
             fprintf(stderr,"ERROR: invalid adapter (use hci0..hci65534)\n");return 2;
         }
     }
-    if(!strcmp(transport,"ble") && !ble_service && !ble_status && !ble_stop_service && !ble_restore && !ble_peer) {
+    if(!strcmp(opts.transport,"ble") && !opts.ble_service && !opts.ble_status && !opts.ble_stop_service && !opts.ble_restore && !opts.ble_peer) {
         fprintf(stderr,"ERROR: BLE bridge requires --ble-peer identity-address\n");return 2;
     }
-    if(ble_peer) {
-        bool valid=strlen(ble_peer)==17;
+    if(opts.ble_peer) {
+        bool valid=strlen(opts.ble_peer)==17;
         for(unsigned i=0;valid && i<17;i++) {
-            char c=ble_peer[i];
+            char c=opts.ble_peer[i];
             valid=i%3==2 ? c==':' : (c>='0'&&c<='9') || (c>='a'&&c<='f') || (c>='A'&&c<='F');
         }
-        if(!valid || strcmp(transport,"ble") || ble_service || ble_status || ble_stop_service || ble_restore) {
+        if(!valid || strcmp(opts.transport,"ble") || opts.ble_service || opts.ble_status || opts.ble_stop_service || opts.ble_restore) {
             fprintf(stderr,"ERROR: --ble-peer requires BLE bridge mode and an identity MAC address\n");return 2;
         }
     }
 #ifdef OTG_HAVE_BLE_WIN
-    if (g_ble_control && (!g_gui || strcmp(transport, "ble") || background ||
-        strlen(host) >= sizeof(g_control.host) || strlen(name) >= sizeof(g_control.name))) {
+    if (g_ble_control && (!g_gui || strcmp(opts.transport, "ble") || opts.background ||
+        strlen(opts.host) >= sizeof(g_control.host) || strlen(opts.name) >= sizeof(g_control.name))) {
         fprintf(stderr, "ERROR: --gui-ble-control requires foreground --gui --transport ble\n");
         return 2;
     }
     if (g_ble_control) {
-        strcpy(g_control.host, host); strcpy(g_control.name, name);
-        g_control.port = port; g_control.width = (unsigned)width; g_control.height = (unsigned)height;
-        g_control.middle_button_home = middle_button_action == OTG_MIDDLE_BUTTON_HOME;
-        g_control.right_button_back = right_button_action == OTG_RIGHT_BUTTON_BACK;
+        strcpy(g_control.host, opts.host); strcpy(g_control.name, opts.name);
+        g_control.port = opts.port; g_control.width = (unsigned)opts.width; g_control.height = (unsigned)opts.height;
+        g_control.middle_button_home = opts.middle_button_action == OTG_MIDDLE_BUTTON_HOME;
+        g_control.right_button_back = opts.right_button_action == OTG_RIGHT_BUTTON_BACK;
     }
-    if (!strcmp(transport, "ble") && !ble_service && !ble_status && !ble_stop_service && !ble_restore &&
-        (ble_session || ble_isolate || serial || (adb_serial && !(clipboard || unlock_adb_gate)) ||
-         adapter_explicit || mouse_mode != OTG_MOUSE_ABSOLUTE)) {
+    if (!strcmp(opts.transport, "ble") && !opts.ble_service && !opts.ble_status && !opts.ble_stop_service && !opts.ble_restore &&
+        (opts.ble_session || opts.ble_isolate || opts.serial || (opts.adb_serial && !(opts.clipboard || opts.unlock_adb_gate)) ||
+         opts.adapter_explicit || opts.mouse_mode != OTG_MOUSE_ABSOLUTE)) {
         fprintf(stderr, "ERROR: Windows BLE supports default adapter and absolute pointer only; Linux service/isolation options and USB serial are unsupported\n");
         return 2;
     }
 #ifdef _WIN32
-    if (background && g_gui) {
+    if (opts.background && g_gui) {
         fprintf(stderr, "ERROR: --background cannot be combined with --gui (GUI owns the bridge lifetime)\n");
         return 2;
     }
-    if (background && strcmp(transport, "ble") != 0) {
+    if (opts.background && strcmp(opts.transport, "ble") != 0) {
         fprintf(stderr, "ERROR: --background is supported only with Windows BLE\n");
         return 2;
     }
-    if (background && !background_child) {
+    if (opts.background && !opts.background_child) {
         return windows_ble_start_background_child();
     }
-    if (background_child && !windows_ble_background_init()) {
+    if (opts.background_child && !windows_ble_background_init()) {
         return 1;
     }
 #endif
 #endif
-    if(ble_status || ble_stop_service) {
-        if((ble_status && ble_stop_service) || ble_service || ble_session || ble_isolate || ble_restore || g_gui || serial || adb_serial)return 2;
+    if(opts.ble_status || opts.ble_stop_service) {
+        if((opts.ble_status && opts.ble_stop_service) || opts.ble_service || opts.ble_session || opts.ble_isolate || opts.ble_restore || g_gui || opts.serial || opts.adb_serial)return 2;
 #ifdef OTG_HAVE_BLE
-        return ble_status ? otg_ble_service_status(adapter) : otg_ble_service_stop(adapter);
+        return opts.ble_status ? otg_ble_service_status(opts.adapter) : otg_ble_service_stop(opts.adapter);
 #else
         fprintf(stderr,"ERROR: BLE requires BUILD_BLE=ON\n");return 2;
 #endif
     }
-    if(ble_service || ble_session) {
-        if((ble_service && (g_gui || ble_session || ble_isolate || ble_restore || serial || adb_serial)) ||
-           (ble_session && (!ble_peer || ble_restore || strcmp(transport,"ble") || mouse_mode!=OTG_MOUSE_ABSOLUTE))) {
+    if(opts.ble_service || opts.ble_session) {
+        if((opts.ble_service && (g_gui || opts.ble_session || opts.ble_isolate || opts.ble_restore || opts.serial || opts.adb_serial)) ||
+           (opts.ble_session && (!opts.ble_peer || opts.ble_restore || strcmp(opts.transport,"ble") || opts.mouse_mode!=OTG_MOUSE_ABSOLUTE))) {
             fprintf(stderr,"ERROR: --ble-service is standalone; --ble-session requires --transport ble, --ble-peer and absolute mouse mode\n");return 2;
         }
 #ifdef OTG_HAVE_BLE
-        if(ble_service)return otg_ble_service_run(adapter,&g_stop);
+        if(opts.ble_service)return otg_ble_service_run(opts.adapter,&g_stop);
 #else
         fprintf(stderr,"ERROR: resident BLE requires BUILD_BLE=ON\n");return 2;
 #endif
     }
-    if (ble_isolate || ble_restore) {
-        if ((g_gui && ble_restore) || (ble_isolate && ble_restore) ||
-            (ble_isolate && strcmp(transport, "ble"))) {
+    if (opts.ble_isolate || opts.ble_restore) {
+        if ((g_gui && opts.ble_restore) || (opts.ble_isolate && opts.ble_restore) ||
+            (opts.ble_isolate && strcmp(opts.transport, "ble"))) {
             fprintf(stderr, "ERROR: use --ble-isolate with --transport ble in CLI; --ble-restore is separate\n");
             return 2;
         }
 #ifdef OTG_HAVE_BLE
-        return otg_ble_supervise(argc, argv, adapter, ble_restore, &g_stop);
+        return otg_ble_supervise(argc, argv, opts.adapter, opts.ble_restore, &g_stop);
 #else
-        fprintf(stderr, "ERROR: BLE supervision requires Linux with BUILD_BLE=ON (adapter %s)\n", adapter);
+        fprintf(stderr, "ERROR: BLE supervision requires Linux with BUILD_BLE=ON (adapter %s)\n", opts.adapter);
         return 2;
 #endif
     }
@@ -1020,64 +1046,64 @@ int main(int argc, char **argv)
 
     app_state state;
     memset(&state, 0, sizeof(state));
-    state.serial = serial;
+    state.serial = opts.serial;
 
     /* 1. Open the selected HID transport and register keyboard + pointer. */
-    if (strcmp(transport, "usb") == 0) {
-        if (otg_bridge_open(&state.bridge, serial, width, height, mouse_mode) != 0) {
+    if (strcmp(opts.transport, "usb") == 0) {
+        if (otg_bridge_open(&state.bridge, opts.serial, opts.width, opts.height, opts.mouse_mode) != 0) {
             return 1;
         }
-        otg_bridge_set_middle_button_action(&state.bridge, middle_button_action);
-        otg_bridge_set_right_button_action(&state.bridge, right_button_action);
+        otg_bridge_set_middle_button_action(&state.bridge, opts.middle_button_action);
+        otg_bridge_set_right_button_action(&state.bridge, opts.right_button_action);
         fprintf(stderr, "INFO:  AOA HID keyboard + %s pointer ready (screen %dx%d)\n",
-                mouse_mode == OTG_MOUSE_ABSOLUTE ? "absolute" : "relative", width, height);
-    } else if (strcmp(transport, "ble") == 0) {
+                opts.mouse_mode == OTG_MOUSE_ABSOLUTE ? "absolute" : "relative", opts.width, opts.height);
+    } else if (strcmp(opts.transport, "ble") == 0) {
 #ifdef OTG_HAVE_BLE
-        state.resident_session=ble_session;
-        state.transport_owner=ble_session ? (void *)otg_ble_session_open(adapter) :
-                                            (void *)otg_ble_hid_create(adapter);
-        if(state.transport_owner && ble_peer &&
-           !(ble_session ? otg_ble_session_set_peer(state.transport_owner,ble_peer) :
-                           otg_ble_hid_set_peer(state.transport_owner,ble_peer))) {
+        state.resident_session=opts.ble_session;
+        state.transport_owner=opts.ble_session ? (void *)otg_ble_session_open(opts.adapter) :
+                                                 (void *)otg_ble_hid_create(opts.adapter);
+        if(state.transport_owner && opts.ble_peer &&
+           !(opts.ble_session ? otg_ble_session_set_peer(state.transport_owner,opts.ble_peer) :
+                                otg_ble_hid_set_peer(state.transport_owner,opts.ble_peer))) {
             fprintf(stderr,"ERROR: BLE target differs from resident identity; explicitly stop the idle service before changing phones\n");
             destroy_transport_owner(&state);return 1;
         }
-        const struct otg_hid_transport_ops *ops=ble_session ? otg_ble_session_ops() : otg_ble_hid_ops();
+        const struct otg_hid_transport_ops *ops=opts.ble_session ? otg_ble_session_ops() : otg_ble_hid_ops();
         if (!state.transport_owner || otg_bridge_open_transport(&state.bridge, ops, state.transport_owner,
-                                              width, height, mouse_mode) != 0) {
+                                              opts.width, opts.height, opts.mouse_mode) != 0) {
             destroy_transport_owner(&state);
             return 1;
         }
-        otg_bridge_set_middle_button_action(&state.bridge, middle_button_action);
-        otg_bridge_set_right_button_action(&state.bridge, right_button_action);
-        fprintf(stderr, "INFO:  BLE HID advertisement started on %s; waiting for phone subscriptions\n", adapter);
+        otg_bridge_set_middle_button_action(&state.bridge, opts.middle_button_action);
+        otg_bridge_set_right_button_action(&state.bridge, opts.right_button_action);
+        fprintf(stderr, "INFO:  BLE HID advertisement started on %s; waiting for phone subscriptions\n", opts.adapter);
 #elif defined(OTG_HAVE_BLE_WIN)
-        state.transport_owner = otg_ble_win_create(ble_peer);
+        state.transport_owner = otg_ble_win_create(opts.ble_peer);
         if (!state.transport_owner || otg_bridge_open_transport(&state.bridge,
-                otg_ble_win_ops(), state.transport_owner, width, height, mouse_mode) != 0) {
+                otg_ble_win_ops(), state.transport_owner, opts.width, opts.height, opts.mouse_mode) != 0) {
             destroy_transport_owner(&state);
             return 1;
         }
-        otg_bridge_set_middle_button_action(&state.bridge, middle_button_action);
-        otg_bridge_set_right_button_action(&state.bridge, right_button_action);
-        fprintf(stderr, "INFO: Windows BLE target %s; starting GATT worker, waiting for paired phone subscriptions\n", ble_peer);
+        otg_bridge_set_middle_button_action(&state.bridge, opts.middle_button_action);
+        otg_bridge_set_right_button_action(&state.bridge, opts.right_button_action);
+        fprintf(stderr, "INFO: Windows BLE target %s; starting GATT worker, waiting for paired phone subscriptions\n", opts.ble_peer);
 #else
-        fprintf(stderr, "ERROR: BLE HID requires Linux with BUILD_BLE=ON (adapter %s)\n", adapter);
+        fprintf(stderr, "ERROR: BLE HID requires Linux with BUILD_BLE=ON (adapter %s)\n", opts.adapter);
         return 2;
 #endif
     } else {
-        fprintf(stderr, "invalid transport: %s (use usb or ble)\n", transport);
+        fprintf(stderr, "invalid transport: %s (use usb or ble)\n", opts.transport);
         return 2;
     }
-    if (!otg_bridge_set_unlock_pin(&state.bridge, unlock_pin)) {
+    if (!otg_bridge_set_unlock_pin(&state.bridge, opts.unlock_pin)) {
         fprintf(stderr, "ERROR: invalid OTG_UNLOCK_PIN\n");
         otg_bridge_close(&state.bridge);
         destroy_transport_owner(&state);
         return 2;
     }
-    state.unlock_adb_gate = unlock_adb_gate != 0;
+    state.unlock_adb_gate = opts.unlock_adb_gate != 0;
     otg_bridge_set_unlock_adb_gated(&state.bridge, state.unlock_adb_gate);
-    if (g_gui && strcmp(transport, "usb") == 0) {
+    if (g_gui && strcmp(opts.transport, "usb") == 0) {
         printf("{\"event\":\"usb-ready\",\"usb-id\":\"%u:%u\"}\n",
                (unsigned)libusb_get_bus_number(state.bridge.aoa.device),
                (unsigned)libusb_get_device_address(state.bridge.aoa.device));
@@ -1106,10 +1132,10 @@ int main(int argc, char **argv)
         .on_disconnected = cb_disconnected,
         .on_idle = cb_idle,
         .on_tick = state.transport_owner || adb_features ? cb_tick : NULL,
-        .tick_interval_ms = state.transport_owner ? 1 : clipboard ? 5 : audio ? 50 :
-                            unlock_adb_gate ? 5 : 0,
+        .tick_interval_ms = state.transport_owner ? 1 : opts.clipboard ? 5 : opts.audio ? 50 :
+                            opts.unlock_adb_gate ? 5 : 0,
         .on_clipboard = cb_clipboard,
-        .on_clipboard_enabled = clipboard ? cb_clipboard_enabled : NULL,
+        .on_clipboard_enabled = opts.clipboard ? cb_clipboard_enabled : NULL,
     };
 
     int ret = 0;
@@ -1120,9 +1146,9 @@ int main(int argc, char **argv)
 #ifdef OTG_HAVE_BLE_WIN
         if (g_ble_control) {
             if (!windows_ble_control_wait(&state)) break;
-            host = g_control.host; name = g_control.name; port = g_control.port;
-            width = (int)g_control.width; height = (int)g_control.height;
-            state.bridge.screen_w = width; state.bridge.screen_h = height;
+            opts.host = g_control.host; opts.name = g_control.name; opts.port = g_control.port;
+            opts.width = (int)g_control.width; opts.height = (int)g_control.height;
+            state.bridge.screen_w = opts.width; state.bridge.screen_h = opts.height;
             otg_bridge_set_middle_button_action(&state.bridge,
                 g_control.middle_button_home ? OTG_MIDDLE_BUTTON_HOME : OTG_MIDDLE_BUTTON_NORMAL);
             otg_bridge_set_right_button_action(&state.bridge,
@@ -1140,19 +1166,19 @@ int main(int argc, char **argv)
 #endif
         state.clipboard_error = false;
         state.audio_ready_reported = false;
-        if ((audio || clipboard) && scrcpy_session_start(&state.scrcpy, adb_path,
-                adb_serial ? adb_serial : serial, scrcpy_server, scrcpy_version,
-                audio != 0, clipboard != 0)) {
-            if (!clipboard) { ret = 1; break; } /* Preserve audio-only startup semantics. */
+        if ((opts.audio || opts.clipboard) && scrcpy_session_start(&state.scrcpy, opts.adb_path,
+                opts.adb_serial ? opts.adb_serial : opts.serial, opts.scrcpy_server, opts.scrcpy_version,
+                opts.audio != 0, opts.clipboard != 0)) {
+            if (!opts.clipboard) { ret = 1; break; } /* Preserve audio-only startup semantics. */
             clipboard_failed(&state);
         }
-        if ((auto_rotate && scrcpy_session_started(&state.scrcpy)) || state.unlock_adb_gate) {
-            const char *target = adb_serial && *adb_serial ? adb_serial : serial;
-            state.display = otg_display_monitor_create(adb_path, target,
+        if ((opts.auto_rotate && scrcpy_session_started(&state.scrcpy)) || state.unlock_adb_gate) {
+            const char *target = opts.adb_serial && *opts.adb_serial ? opts.adb_serial : opts.serial;
+            state.display = otg_display_monitor_create(opts.adb_path, target,
                                                        state.bridge.screen_w, state.bridge.screen_h);
             if (state.display && state.unlock_adb_gate)
                 otg_display_monitor_prefer_companion(state.display);
-            if (!state.display && auto_rotate)
+            if (!state.display && opts.auto_rotate)
                 fprintf(stderr, "WARN: automatic display size monitoring unavailable\n");
             if (!state.display && state.unlock_adb_gate) {
                 fprintf(stderr, "WARN: ADB lock-state monitoring unavailable; automatic unlock disabled\n");
@@ -1163,18 +1189,12 @@ int main(int argc, char **argv)
         }
         state.display_pending = false;
         state.unlock_lock_query_pending = false;
-        df_client_tls_options tls_options = {
-            .enabled = tls != 0,
-            .certificate = tls_cert,
-            .fingerprint = tls_fingerprint,
-            .fingerprint_file = tls_fingerprint_file,
-        };
-        df_client *client=df_client_connect_ex(host,(uint16_t)port,name,state.bridge.screen_w,state.bridge.screen_h,
-                                               &cbs,&state,&tls_options);
+        df_client *client=df_client_connect_ex(opts.host,(uint16_t)opts.port,opts.name,state.bridge.screen_w,state.bridge.screen_h,
+                                               &cbs,&state,&opts.tls);
         if(client) {
             state.client = client;
-            df_client_enable_clipboard(client, clipboard && !state.clipboard_error);
-            fprintf(stderr,"INFO: connected to deskflow server %s:%u as \"%s\"\n",host,port,name);
+            df_client_enable_clipboard(client, opts.clipboard && !state.clipboard_error);
+            fprintf(stderr,"INFO: connected to deskflow server %s:%u as \"%s\"\n",opts.host,opts.port,opts.name);
             ret=df_client_run(client,&g_stop);
             state.client = NULL;
             state.held_key_count = 0;
