@@ -15,7 +15,32 @@ if(APPLE)
     /opt/homebrew/opt/openssl@3 /opt/homebrew/opt/openssl
     /usr/local/opt/openssl@3 /usr/local/opt/openssl)
 endif()
-find_package(OpenSSL REQUIRED COMPONENTS SSL Crypto)
+if(WIN32 AND NOT VCPKG_INSTALLED_DIR AND DEFINED ENV{VCPKG_INSTALLATION_ROOT})
+  # Allow a developer shell to use the installed vcpkg packages even when
+  # CMake was invoked without vcpkg.cmake. The toolchain remains preferred.
+  set(VCPKG_INSTALLED_DIR "$ENV{VCPKG_INSTALLATION_ROOT}/installed"
+      CACHE PATH "vcpkg installed package root")
+endif()
+if(WIN32 AND VCPKG_INSTALLED_DIR AND VCPKG_TARGET_TRIPLET)
+  list(APPEND CMAKE_PREFIX_PATH
+    "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
+endif()
+if(WIN32 AND DEFINED ENV{OPENSSL_ROOT_DIR} AND NOT OPENSSL_ROOT_DIR)
+  set(OPENSSL_ROOT_DIR "$ENV{OPENSSL_ROOT_DIR}" CACHE PATH
+      "OpenSSL installation root")
+endif()
+find_package(OpenSSL QUIET COMPONENTS SSL Crypto)
+if(NOT OpenSSL_FOUND)
+  if(WIN32)
+    message(FATAL_ERROR
+      "OpenSSL was not found. Install it with vcpkg and configure with:\n"
+      "  vcpkg install libusb:x64-windows-static openssl:x64-windows-static\n"
+      "  cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows-static\n"
+      "For BUILD_GUI=ON, also install openssl:x64-windows-static-md.\n"
+      "Alternatively set OPENSSL_ROOT_DIR to an OpenSSL installation.")
+  endif()
+  message(FATAL_ERROR "OpenSSL with SSL and Crypto components is required")
+endif()
 
 option(BUILD_AUDIO "Build scrcpy-compatible ADB audio forwarding" OFF)
 option(BUILD_CLIPBOARD "Build Deskflow text clipboard sharing via ADB/scrcpy" OFF)
