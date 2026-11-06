@@ -12,6 +12,7 @@
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
@@ -24,6 +25,7 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QUrl>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QScrollArea>
@@ -254,8 +256,14 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     auto *about = translated(new QPushButton, "text", "otg.action.about");
     about->setObjectName("aboutButton");
     connect(about, &QPushButton::clicked, this, [this] {
-        QMessageBox::about(this, qtTrId("otg.about.title"),
-            qtTrId("otg.about.text").arg(OTG_VERSION, OTG_COMMIT));
+        QMessageBox dialog(QMessageBox::Information, qtTrId("otg.about.title"),
+                           qtTrId("otg.about.text").arg(OTG_VERSION, OTG_COMMIT),
+                           QMessageBox::Ok, this);
+        auto *github = dialog.addButton(qtTrId("otg.about.github"), QMessageBox::ActionRole);
+        connect(github, &QAbstractButton::clicked, this, [] {
+            QDesktopServices::openUrl(QUrl(QStringLiteral("https://github.com/gh6497/deskflow-otg")));
+        });
+        dialog.exec();
     });
     headingRow->addWidget(about);
     root->addLayout(headingRow);
