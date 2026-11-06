@@ -208,16 +208,41 @@ private slots:
         QCOMPARE(spy.first().at(1).toString(), "otg.transfer.cancelled");
         QVERIFY(QDir(receiveDir()).entryList(QDir::Files | QDir::Hidden).isEmpty());
     }
+    void boundedUploadAndCancel_data()
+    {
+        QTest::addColumn<bool>("fillPipe");
+        QTest::newRow("immediate") << false;
+        QTest::newRow("pipe-buffered") << true;
+    }
     void boundedUploadAndCancel()
     {
-        write("large", QByteArray(4 * 1024 * 1024, 'x'));
+        QFETCH(bool, fillPipe);
+        constexpr qint64 fileSize = 4 * 1024 * 1024;
+        write("large", QByteArray(fileSize, 'x'));
         qputenv("OTG_TEST_TRANSFER_MODE", "hold");
         CompanionTransfer transfer(peer(), "[::1]:5555");
         QSignalSpy progress(&transfer, &CompanionTransfer::progress);
         QSignalSpy spy(&transfer, &CompanionTransfer::completed);
         transfer.send({m_dir.filePath("large")}); OTG_QTRY_VERIFY(progress.size() > 2);
-        QVERIFY(progress.last().at(1).toLongLong() < 1024 * 1024);
+        // Exercise both cancellation timings. This wait deliberately lets pipe
+        // writes complete; no assertion depends on completing them by a deadline.
+        if (fillPipe) QTest::qWait(200);
+        // Progress counts bytes read from the file, including data already in
+        // the OS pipe (Qt uses a 1 MiB pipe on Windows). Only the application
+        // queue has a portable bound: the 256 KiB watermark plus one chunk.
+        const auto queuedBytes = [&transfer]() -> qint64 {
+            for (auto *process : transfer.findChildren<QProcess *>())
+                if (process->state() == QProcess::Running) return process->bytesToWrite();
+            return -1;
+        };
+        OTG_QTRY_VERIFY(queuedBytes() > 0);
+        QVERIFY(queuedBytes() <= 256 * 1024 + 65536);
+        QVERIFY(progress.last().at(1).toLongLong() < fileSize);
+        QVERIFY(transfer.busy());
+        QVERIFY(spy.isEmpty());
         transfer.cancel(); OTG_QTRY_COMPARE(spy.size(), 1); QVERIFY(!spy.first().first().toBool());
+        QCOMPARE(spy.first().at(1).toString(), "otg.transfer.cancelled");
+        QVERIFY(!transfer.busy());
     }
     void failClosed_data()
     {
