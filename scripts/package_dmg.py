@@ -37,7 +37,9 @@ def main():
         shutil.copytree(app, bundled_app, symlinks=True)
         # The app is moved out of the image on installation, so licenses must
         # travel with it rather than live only beside it in the DMG.
-        shutil.copytree(docs, bundled_app / "Contents/Resources/deskflow-otg", symlinks=True)
+        # Audio/clipboard builds already contain scrcpy runtime files here.
+        shutil.copytree(docs, bundled_app / "Contents/Resources/deskflow-otg",
+                        symlinks=True, dirs_exist_ok=True)
         (root / "Applications").symlink_to("/Applications", target_is_directory=True)
         subprocess.run(["hdiutil", "create", "-volname", "Deskflow OTG", "-srcfolder",
                         str(root), "-format", "UDZO", "-ov", str(output)], check=True)
