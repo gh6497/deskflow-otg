@@ -12,6 +12,15 @@
 #include <QProgressBar>
 #include <QtTest>
 
+// Windows CI can spend several seconds starting the fake ADB process while
+// the test suite is under load. Keep the asynchronous assertions deterministic
+// without changing the production command timeouts.
+#define OTG_QTRY_TIMEOUT_MS 15000
+#define OTG_QTRY_COMPARE(actual, expected) \
+    QTRY_COMPARE_WITH_TIMEOUT(actual, expected, OTG_QTRY_TIMEOUT_MS)
+#define OTG_QTRY_VERIFY(condition) \
+    QTRY_VERIFY_WITH_TIMEOUT(condition, OTG_QTRY_TIMEOUT_MS)
+
 class TransferTest : public QObject {
     Q_OBJECT
     QTemporaryDir m_dir;
@@ -46,7 +55,7 @@ class TransferTest : public QObject {
     void load(CompanionTransfer &transfer)
     {
         QSignalSpy spy(&transfer, &CompanionTransfer::completed);
-        transfer.refresh(); QTRY_COMPARE(spy.size(), 1); QVERIFY(spy.first().first().toBool());
+        transfer.refresh(); OTG_QTRY_COMPARE(spy.size(), 1); QVERIFY(spy.first().first().toBool());
         QCOMPARE(transfer.files().size(), 1);
     }
     QString receiveDir()
@@ -85,7 +94,7 @@ private slots:
         CompanionTransfer transfer(peer(), "[::1]:5555"); load(transfer);
         QCOMPARE(commands().size(), 3); // Refresh never downloads or acknowledges files.
         QSignalSpy spy(&transfer, &CompanionTransfer::completed);
-        transfer.receive({id}, receiveDir()); QTRY_COMPARE(spy.size(), 1);
+        transfer.receive({id}, receiveDir()); OTG_QTRY_COMPARE(spy.size(), 1);
         QVERIFY(spy.first().first().toBool());
         const auto names = QDir(receiveDir()).entryList(QDir::Files);
         QCOMPARE(names.size(), 1); QVERIFY(!names.first().contains('/'));
@@ -99,7 +108,7 @@ private slots:
             if (args.contains("content")) QCOMPARE(args.value(args.indexOf("--user") + 1), "10");
         }
         QSignalSpy refreshed(&transfer, &CompanionTransfer::completed);
-        transfer.refresh(); QTRY_COMPARE(refreshed.size(), 1); QVERIFY(transfer.files().isEmpty());
+        transfer.refresh(); OTG_QTRY_COMPARE(refreshed.size(), 1); QVERIFY(transfer.files().isEmpty());
     }
     void sendBinaryAndEmpty()
     {
@@ -107,7 +116,7 @@ private slots:
         CompanionTransfer transfer(peer(), "[::1]:5555");
         QSignalSpy spy(&transfer, &CompanionTransfer::completed);
         transfer.send({m_dir.filePath("你好 '$; image.png"), m_dir.filePath("empty")});
-        QTRY_COMPARE(spy.size(), 1); QVERIFY(spy.first().first().toBool());
+        OTG_QTRY_COMPARE(spy.size(), 1); QVERIFY(spy.first().first().toBool());
         const auto sent = QDir(m_dir.path()).entryList({"*.wire"}, QDir::Files);
         QCOMPARE(sent.size(), 2);
         // The peer verified magic, name length, BE64 size, NUL/CR/LF bytes and SHA-256.
@@ -125,7 +134,7 @@ private slots:
         CompanionTransfer transfer(peer(), "[::1]:5555");
         QSignalSpy spy(&transfer, &CompanionTransfer::completed);
         transfer.send({m_dir.filePath("large-binary")});
-        QTRY_COMPARE(spy.size(), 1); QVERIFY(spy.first().first().toBool());
+        OTG_QTRY_COMPARE(spy.size(), 1); QVERIFY(spy.first().first().toBool());
         const auto sent = QDir(m_dir.path()).entryList({"*.wire"}, QDir::Files);
         QCOMPARE(sent.size(), 1);
         QFile file(m_dir.filePath(sent.first())); QVERIFY(file.open(QIODevice::ReadOnly));
@@ -139,7 +148,7 @@ private slots:
         auto *bar = dialog.findChild<QProgressBar *>(); QVERIFY(bar);
         auto *transfer = dialog.findChild<CompanionTransfer *>(); QVERIFY(transfer);
         QSignalSpy initial(transfer, &CompanionTransfer::completed);
-        QTRY_COMPARE(initial.size(), 1);
+        OTG_QTRY_COMPARE(initial.size(), 1);
         transfer->progress("file", 100, 100);
         QCOMPARE(bar->value(), 99);
         transfer->completed(false, "otg.transfer.failed", {});
@@ -162,7 +171,7 @@ private slots:
         CompanionTransfer transfer(peer(), "[::1]:5555"); load(transfer);
         qputenv("OTG_TEST_TRANSFER_MODE", mode);
         QSignalSpy spy(&transfer, &CompanionTransfer::completed);
-        transfer.receive({id}, receiveDir()); QTRY_COMPARE(spy.size(), 1);
+        transfer.receive({id}, receiveDir()); OTG_QTRY_COMPARE(spy.size(), 1);
         QVERIFY(!spy.first().first().toBool());
         QVERIFY(QDir(receiveDir()).entryList(QDir::Files | QDir::Hidden).isEmpty());
         for (const auto &args : commands()) QVERIFY(!args.contains("delete"));
@@ -173,7 +182,7 @@ private slots:
         const auto name = id.left(8) + "-" + transfer.files().first().name;
         write("received/" + name, "existing");
         QSignalSpy spy(&transfer, &CompanionTransfer::completed);
-        transfer.receive({id}, receiveDir()); QTRY_COMPARE(spy.size(), 1);
+        transfer.receive({id}, receiveDir()); OTG_QTRY_COMPARE(spy.size(), 1);
         QVERIFY(!spy.first().first().toBool());
         QFile f(QDir(receiveDir()).filePath(name)); QVERIFY(f.open(QIODevice::ReadOnly));
         QCOMPARE(f.readAll(), "existing");
@@ -184,7 +193,7 @@ private slots:
         CompanionTransfer transfer(peer(), "[::1]:5555"); load(transfer);
         qputenv("OTG_TEST_TRANSFER_MODE", "ack-error");
         QSignalSpy spy(&transfer, &CompanionTransfer::completed);
-        transfer.receive({id}, receiveDir()); QTRY_COMPARE(spy.size(), 1);
+        transfer.receive({id}, receiveDir()); OTG_QTRY_COMPARE(spy.size(), 1);
         QCOMPARE(spy.first().at(1).toString(), "otg.transfer.ack_failed");
         QCOMPARE(QDir(receiveDir()).entryList(QDir::Files).size(), 1);
     }
@@ -194,8 +203,8 @@ private slots:
         qputenv("OTG_TEST_TRANSFER_MODE", "hold");
         QSignalSpy progress(&transfer, &CompanionTransfer::progress);
         QSignalSpy spy(&transfer, &CompanionTransfer::completed);
-        transfer.receive({id}, receiveDir()); QTRY_VERIFY(!progress.isEmpty());
-        transfer.cancel(); QTRY_COMPARE(spy.size(), 1);
+        transfer.receive({id}, receiveDir()); OTG_QTRY_VERIFY(!progress.isEmpty());
+        transfer.cancel(); OTG_QTRY_COMPARE(spy.size(), 1);
         QCOMPARE(spy.first().at(1).toString(), "otg.transfer.cancelled");
         QVERIFY(QDir(receiveDir()).entryList(QDir::Files | QDir::Hidden).isEmpty());
     }
@@ -206,9 +215,9 @@ private slots:
         CompanionTransfer transfer(peer(), "[::1]:5555");
         QSignalSpy progress(&transfer, &CompanionTransfer::progress);
         QSignalSpy spy(&transfer, &CompanionTransfer::completed);
-        transfer.send({m_dir.filePath("large")}); QTRY_VERIFY(progress.size() > 2);
+        transfer.send({m_dir.filePath("large")}); OTG_QTRY_VERIFY(progress.size() > 2);
         QVERIFY(progress.last().at(1).toLongLong() < 1024 * 1024);
-        transfer.cancel(); QTRY_COMPARE(spy.size(), 1); QVERIFY(!spy.first().first().toBool());
+        transfer.cancel(); OTG_QTRY_COMPARE(spy.size(), 1); QVERIFY(!spy.first().first().toBool());
     }
     void failClosed_data()
     {
@@ -222,7 +231,7 @@ private slots:
         QFETCH(QByteArray, mode); qputenv("OTG_TEST_TRANSFER_MODE", mode);
         CompanionTransfer transfer(peer(), "[::1]:5555");
         QSignalSpy spy(&transfer, &CompanionTransfer::completed);
-        transfer.refresh(); QTRY_COMPARE(spy.size(), 1);
+        transfer.refresh(); OTG_QTRY_COMPARE(spy.size(), 1);
         QVERIFY(!spy.first().first().toBool()); QVERIFY(transfer.files().isEmpty());
     }
     void invalidTarget()
@@ -246,9 +255,9 @@ private slots:
     {
         TransferDialog dialog(peer(), "[::1]:5555"); dialog.show();
         auto *list = dialog.findChild<QListWidget *>("sharedFiles"); QVERIFY(list);
-        QTRY_COMPARE(list->count(), 1);
+        OTG_QTRY_COMPARE(list->count(), 1);
         auto *send = dialog.findChild<QPushButton *>("transferSend"); QVERIFY(send);
-        QTRY_VERIFY(send->isEnabled());
+        OTG_QTRY_VERIFY(send->isEnabled());
         const auto screenshot = qEnvironmentVariable("OTG_TEST_TRANSFER_SCREENSHOT");
         if (!screenshot.isEmpty()) QVERIFY(dialog.grab().save(screenshot));
         dialog.reject(); QVERIFY(!dialog.isVisible());
@@ -259,7 +268,7 @@ private slots:
         qputenv("OTG_TEST_TRANSFER_MODE", "bad-receipt");
         CompanionTransfer transfer(peer(), "[::1]:5555");
         QSignalSpy spy(&transfer, &CompanionTransfer::completed);
-        transfer.send({m_dir.filePath("file")}); QTRY_COMPARE(spy.size(), 1);
+        transfer.send({m_dir.filePath("file")}); OTG_QTRY_COMPARE(spy.size(), 1);
         QVERIFY(!spy.first().first().toBool());
     }
     void untrustedMetadata()
