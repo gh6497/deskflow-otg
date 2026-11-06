@@ -9,7 +9,9 @@
 #include <stdint.h>
 #include <ctype.h>
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #else
 #include <errno.h>
@@ -220,7 +222,7 @@ static bool start_query(struct otg_display_monitor *m)
     char *p = quote_arg(command, m->adb);
     memcpy(p, " -s ", 4); p = quote_arg(p + 4, m->serial);
     strcpy(p, m->prefer_companion
-        ? " shell \"am broadcast --user current -a com.github.gh6497.deskflowotg.LOCK_STATE -n com.github.gh6497.deskflowotg/.LockStateReceiver; wm size; dumpsys input; dumpsys window policy\"")
+        ? " shell \"am broadcast --user current -a com.github.gh6497.deskflowotg.LOCK_STATE -n com.github.gh6497.deskflowotg/.LockStateReceiver; wm size; dumpsys input; dumpsys window policy\""
         : " shell \"wm size; dumpsys input; dumpsys window policy\"");
     int count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, command, -1, NULL, 0);
     if (!count) goto done;

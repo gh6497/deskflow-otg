@@ -88,7 +88,14 @@ brew install cmake libusb openssl@3
 
 # Windows：Visual Studio C++ 工具链、CMake、vcpkg
 vcpkg install libusb:x64-windows-static openssl:x64-windows-static
+cmake -S . -B build `
+  -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+  -DVCPKG_TARGET_TRIPLET=x64-windows-static
 ```
+
+编译 GUI 时还需安装 `openssl:x64-windows-static-md`；GUI 使用 Qt 所需的
+`/MD` 版 OpenSSL。若 OpenSSL 安装在其他位置，可在配置时设置
+`OPENSSL_ROOT_DIR`。
 
 命令行桥接不需要 Qt、不需要 FFmpeg、不需要 SDL —— 这就是本程序相对于"直接链接 deskflow/scrcpy
 库"的主要优势（scrcpy 的 `common.h → compat.h` 会拖入 FFmpeg 头文件，deskflow 会拖入 Qt）。

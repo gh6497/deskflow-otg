@@ -62,7 +62,14 @@ brew install cmake libusb openssl@3
 
 # Windows: Visual Studio C++ toolchain, CMake, and vcpkg
 vcpkg install libusb:x64-windows-static openssl:x64-windows-static
+cmake -S . -B build `
+  -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+  -DVCPKG_TARGET_TRIPLET=x64-windows-static
 ```
+
+For a GUI build, also install `openssl:x64-windows-static-md`; the GUI uses
+the `/MD` OpenSSL build required by Qt. If OpenSSL is installed elsewhere,
+set `OPENSSL_ROOT_DIR` when configuring.
 
 The command-line bridge does not require Qt, FFmpeg, or SDL. This is a major advantage over directly linking the Deskflow/scrcpy libraries (scrcpy's `common.h → compat.h` pulls in FFmpeg headers, while Deskflow pulls in Qt). The optional GUI additionally requires a C++17 compiler and Qt 6.8+ (Widgets, Network, and LinguistTools; the Test module is also required for tests).
 
