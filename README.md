@@ -1,5 +1,7 @@
 # deskflow-otg
 
+[简体中文](README.zh-CN.md)
+
 A bridge connecting [Deskflow](https://github.com/deskflow/deskflow) (keyboard and mouse sharing) with [scrcpy](https://github.com/Genymobile/scrcpy)'s **OTG mode** (USB AOA HID).
 
 Run a Deskflow **server** on the host computer and then run this program. With the phone connected to the host by USB, moving the mouse onto the "phone" screen lets you control the Android phone directly with the host keyboard and mouse.
