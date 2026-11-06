@@ -2,10 +2,6 @@ name: Windows BLE HID prototype
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - 'experiments/windows-ble-hid/**'
-      - '.github/workflows/windows-ble-probe.yml'
   pull_request:
     paths:
       - 'experiments/windows-ble-hid/**'
