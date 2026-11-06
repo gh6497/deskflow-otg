@@ -206,7 +206,10 @@ if(BUILD_TESTING)
   add_test(NAME gui_logic COMMAND test_gui)
   add_test(NAME companion_status COMMAND test_companion_status)
   add_test(NAME companion_transfer COMMAND test_companion_transfer)
-  set_tests_properties(companion_transfer PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
+  # QtTest otherwise sends plain-text diagnostics to the Windows debugger when
+  # there is no console, leaving CTest/CI with an empty failure report.
+  set_tests_properties(companion_transfer PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_FORCE_STDERR_LOGGING=1" TIMEOUT 60)
   add_test(NAME usb_auto_connect COMMAND test_usb_auto_connect)
   add_test(NAME gui_window COMMAND test_window)
   add_test(NAME gui_version COMMAND deskflow-otg-gui --version)
