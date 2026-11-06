@@ -140,6 +140,144 @@ static void test_navigation_shortcuts(enum otg_mouse_mode mode)
     CHECK(!b.hid_mods && !b.right_button_back_down);
 }
 
+/* External mouse input must not overwrite the synthetic unlock swipe, send
+ * navigation shortcuts, or accumulate events for replay after PIN entry. */
+static void check_unlock_mouse_blocked(struct otg_bridge *b)
+{
+    int before = reports;
+    int32_t x = b->mouse_x, y = b->mouse_y;
+    uint8_t buttons = b->mouse_buttons;
+    bool have_position = b->have_mouse_pos;
+    otg_bridge_mouse_move(b, 900, 1800);
+    otg_bridge_mouse_rel_move(b, -100, 100);
+    for (uint8_t button = 1; button <= 5; ++button) {
+        otg_bridge_mouse_button(b, button, true);
+        otg_bridge_mouse_button(b, button, false);
+    }
+    otg_bridge_mouse_wheel(b, 180, -180);
+    CHECK(reports == before);
+    CHECK(b->mouse_x == x && b->mouse_y == y && b->mouse_buttons == buttons);
+    CHECK(b->have_mouse_pos == have_position);
+    CHECK(!b->middle_button_home_down && !b->right_button_back_down);
+    CHECK(!b->residual_hscroll && !b->residual_vscroll);
+}
+
+static void unlock_tick_now(struct otg_bridge *b)
+{
+    b->unlock_due_ms = 0; /* Advance the state machine without real sleeps. */
+    otg_bridge_unlock_tick(b);
+}
+
+static void open_unlock_bridge(struct otg_bridge *b, enum otg_mouse_mode mode)
+{
+    registrations = 0;
+    keyboard_count = 0;
+    CHECK(!otg_bridge_open(b, "mock", 1080, 2340, mode));
+    CHECK(otg_bridge_set_unlock_pin(b, "1209"));
+    otg_bridge_set_middle_button_action(b, OTG_MIDDLE_BUTTON_HOME);
+    otg_bridge_set_right_button_action(b, OTG_RIGHT_BUTTON_BACK);
+}
+
+static void test_unlock_mouse_suppression(bool gated)
+{
+    struct otg_bridge b;
+    open_unlock_bridge(&b, OTG_MOUSE_ABSOLUTE);
+    otg_bridge_set_unlock_adb_gated(&b, gated);
+    otg_bridge_enter(&b, 100, 200, 0);
+    if (gated) {
+        /* An unlocked/unknown ADB result must not disable normal mouse input. */
+        CHECK(!b.unlock_pending);
+        otg_bridge_unlock_adb_state(&b, false, true);
+        otg_bridge_unlock_adb_state(&b, true, false);
+        CHECK(!b.unlock_pending);
+        otg_bridge_mouse_move(&b, 100, 200);
+        CHECK(last_id == AOA_HID_ID_MOUSE && report[0] == 2);
+        otg_bridge_mouse_button(&b, 1, true);
+        otg_bridge_mouse_button(&b, 2, true);
+        otg_bridge_mouse_button(&b, 3, true);
+        otg_bridge_mouse_wheel(&b, 60, 60);
+        otg_bridge_unlock_adb_state(&b, true, true);
+        CHECK(!b.mouse_buttons); /* Release a pre-existing drag before unlocking. */
+    }
+    CHECK(b.unlock_pending);
+    check_unlock_mouse_blocked(&b); /* Wake/animation delay. */
+    unlock_tick_now(&b);
+    CHECK(last_id == AOA_HID_ID_MOUSE && report[0] == 3 && report[1] == 1);
+    CHECK(b.mouse_x == 540 && b.mouse_y == 2339);
+    for (unsigned step = 1; step <= 12; ++step) {
+        check_unlock_mouse_blocked(&b);
+        unlock_tick_now(&b);
+        if (step < 12) {
+            CHECK(b.mouse_buttons == 1 && b.mouse_x == 540);
+            CHECK(b.mouse_y == (int32_t)(2339 * (12 - step) / 12));
+        }
+    }
+    CHECK(!b.mouse_buttons && b.mouse_x == 100 && b.mouse_y == 200);
+    check_unlock_mouse_blocked(&b); /* PIN animation delay. */
+    unsigned before = keyboard_count;
+    unlock_tick_now(&b);
+    CHECK(!b.unlock_pending && keyboard_count == before + 10);
+    const uint8_t usages[] = {HID_KEY_1, HID_KEY_1 + 1, HID_KEY_0,
+                              HID_KEY_1 + 8, HID_KEY_ENTER};
+    for (unsigned i = 0; i < 5; ++i) {
+        CHECK(report_has_key(keyboard_reports[before + 2 * i], usages[i]));
+        CHECK(!keyboard_reports[before + 2 * i + 1][2]);
+    }
+    int count = reports;
+    otg_bridge_unlock_tick(&b);
+    CHECK(reports == count); /* No buffered mouse input is replayed. */
+    otg_bridge_mouse_wheel(&b, 60, 60);
+    CHECK(reports == count); /* Suppressed fractional wheel input was discarded. */
+    otg_bridge_mouse_move(&b, 400, 600);
+    CHECK(b.mouse_x == 400 && b.mouse_y == 600 && report[0] == 2);
+    otg_bridge_mouse_rel_move(&b, 10, -10);
+    CHECK(b.mouse_x == 410 && b.mouse_y == 590);
+    otg_bridge_mouse_button(&b, 1, true);
+    CHECK(report[0] == 3 && report[1] == 1);
+    otg_bridge_mouse_button(&b, 1, false);
+    otg_bridge_mouse_wheel(&b, 60, 60);
+    CHECK(report[6] == 1 && report[7] == 1);
+    check_shortcut(&b, 2, HID_KEY_ENTER);
+    check_shortcut(&b, 3, HID_KEY_BACKSPACE);
+    otg_bridge_close(&b);
+}
+
+static void test_unlock_mouse_cancellation(void)
+{
+    for (unsigned action = 0; action < 3; ++action) {
+        struct otg_bridge b;
+        open_unlock_bridge(&b, OTG_MOUSE_ABSOLUTE);
+        otg_bridge_enter(&b, 100, 200, 0);
+        unlock_tick_now(&b); /* Cancel with the synthetic swipe held down. */
+        CHECK(b.mouse_buttons == 1);
+        if (action == 0) otg_bridge_leave(&b);
+        else if (action == 1) otg_bridge_reset_input(&b);
+        else otg_bridge_close(&b);
+        CHECK(!b.unlock_pending && !b.active && !b.mouse_buttons);
+        CHECK(last_id == AOA_HID_ID_MOUSE && !report[0] && !report[1]);
+        int before = reports;
+        unlock_tick_now(&b);
+        CHECK(reports == before); /* Cancelled PIN must never be sent later. */
+        if (action != 2) {
+            CHECK(otg_bridge_set_unlock_pin(&b, NULL));
+            otg_bridge_enter(&b, 100, 200, 0);
+            otg_bridge_mouse_move(&b, 400, 600);
+            CHECK(b.mouse_x == 400 && b.mouse_y == 600 && report[0] == 2);
+            otg_bridge_close(&b);
+        }
+    }
+    struct otg_bridge b;
+    open_unlock_bridge(&b, OTG_MOUSE_RELATIVE);
+    otg_bridge_enter(&b, 100, 200, 0);
+    CHECK(b.unlock_pending);
+    check_unlock_mouse_blocked(&b);
+    unlock_tick_now(&b); /* Unsupported relative mode skips the unlock. */
+    CHECK(!b.unlock_pending);
+    otg_bridge_mouse_move(&b, 110, 210);
+    CHECK(last_id == AOA_HID_ID_MOUSE && last_size == 5 && report[1] == 10 && report[2] == 10);
+    otg_bridge_close(&b);
+}
+
 int main(void)
 {
     struct otg_bridge b;
@@ -172,6 +310,9 @@ int main(void)
     otg_bridge_close(&b);CHECK(closes==1);
     test_navigation_shortcuts(OTG_MOUSE_ABSOLUTE);
     test_navigation_shortcuts(OTG_MOUSE_RELATIVE);
-    puts("PASS: default USB descriptors, absolute coordinates, buttons, wheel, keyboard, Home/Back shortcuts and close lifecycle");
+    test_unlock_mouse_suppression(false);
+    test_unlock_mouse_suppression(true);
+    test_unlock_mouse_cancellation();
+    puts("PASS: default USB descriptors, absolute coordinates, buttons, wheel, keyboard, Home/Back shortcuts, unlock mouse suppression and close lifecycle");
     return 0;
 }

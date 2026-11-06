@@ -197,11 +197,14 @@ void Session::start(const ConnectionOptions &options)
     ++m_generation;
     setState(State::Starting, "otg.status.connecting");
     const bool ble = options.transport == "ble";
+    if ((options.audio || options.clipboard) &&
+        (options.scrcpyServer.isEmpty() || options.scrcpyVersion.isEmpty())) {
+        fail("otg.error.scrcpy_runtime");
+        return;
+    }
     static const QRegularExpression peerPattern("^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$");
     if ((!ble && options.serial.isEmpty()) ||
         (adbRequired(options) && (options.adb.isEmpty() || adbTarget(options).isEmpty())) ||
-        ((options.audio || options.clipboard) &&
-         (options.adb.isEmpty() || options.scrcpyServer.isEmpty() || options.scrcpyVersion.isEmpty())) ||
         (options.transport != "usb" && !ble) ||
         (ble && (!peerPattern.match(options.blePeer).hasMatch() || options.mouseMode != "absolute")) ||
         (options.middleButtonAction != "normal" && options.middleButtonAction != "home") ||
@@ -222,7 +225,7 @@ void Session::start(const ConnectionOptions &options)
         /* pkexec deliberately drops arbitrary environment variables. Keep
          * the PIN out of argv and hand it to the unprivileged child through
          * a private temporary file whose path survives the supervisor. */
-        m_unlockPinFile.remove();
+        if (!m_unlockPinFile.fileName().isEmpty()) m_unlockPinFile.remove();
         m_unlockPinFile.setFileTemplate(QDir::tempPath() + "/deskflow-otg-unlock-XXXXXX");
         const auto pin = options.unlockPin.toUtf8();
         if (!m_unlockPinFile.open() || m_unlockPinFile.write(pin) != pin.size() ||
@@ -630,7 +633,7 @@ void Session::finishStop()
         return;
     m_killBridge.stop();
     m_stoppingBleProvider = false;
-    m_unlockPinFile.remove();
+    if (!m_unlockPinFile.fileName().isEmpty()) m_unlockPinFile.remove();
     m_clipboardStatusId = m_options.clipboard ? "otg.clipboard.disconnected" : "otg.clipboard.off";
     emit clipboardChanged();
     setState(State::Idle, m_failureId.isEmpty() ? "otg.status.disconnected" : m_failureId.constData(), m_failureDetail);

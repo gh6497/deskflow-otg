@@ -40,6 +40,12 @@ BLE 必须配置显式 ADB 目标，不能以 BLE MAC 代替。Windows USB 驱�
 
 ## 锁屏状态查询（0.1.11）
 
+自动解锁从唤醒等待、上划到 PIN 和确认键发送结束期间，屏蔽来自 Deskflow 的鼠标移动、
+按键、滚轮及中/右键 Home/Back 映射，避免干扰合成上划或误触锁屏。开始时释放已有拖拽、
+清空滚轮余量；屏蔽期间的输入直接丢弃，不在结束后补发。完成后恢复鼠标输入，切出、
+输入重置或关闭会取消解锁并释放鼠标。仅等待 ADB 查询、尚未开始解锁时不屏蔽鼠标。
+此逻辑位于跨平台桥接核心，USB/BLE 共用；离线回归不代表真机解锁兼容性验收。
+
 桌面端自动解锁开启后，优先通过已授权的 ADB 显式调用伴侣应用的
 `LockStateReceiver`。手机端使用 Android `KeyguardManager.isDeviceLocked()` 返回
 `locked` / `unlocked`，Receiver 由清单中的 `android.permission.DUMP` 保护，普通应用不能伪造结果。

@@ -678,6 +678,56 @@ private slots:
         QCOMPARE(session.statusMessage(), "设备序列号、屏幕名称、主机或尺寸无效。");
         QCOMPARE(qtTrId("otg.action.connect"), "连接");
     }
+    void missingScrcpyRuntime_data()
+    {
+        QTest::addColumn<bool>("audio");
+        QTest::addColumn<bool>("clipboard");
+        QTest::addColumn<bool>("missingServer");
+        QTest::newRow("audio-server") << true << false << true;
+        QTest::newRow("audio-version") << true << false << false;
+        QTest::newRow("clipboard-server") << false << true << true;
+        QTest::newRow("clipboard-version") << false << true << false;
+        QTest::newRow("both-server") << true << true << true;
+        QTest::newRow("both-version") << true << true << false;
+    }
+    void missingScrcpyRuntime()
+    {
+        QFETCH(bool, audio);
+        QFETCH(bool, clipboard);
+        QFETCH(bool, missingServer);
+        QTest::failOnWarning(QRegularExpression("QFile::remove:.*"));
+        ConnectionOptions options;
+        options.serial = "TEST";
+        options.adb = options.bridge = peerPath();
+        options.manageServer = false;
+        options.audio = audio;
+        options.clipboard = clipboard;
+        options.scrcpyServer = missingServer ? QString() : QString("fake-server");
+        options.scrcpyVersion = missingServer ? QString("5.0.1") : QString();
+        Session session;
+        QSignalSpy logs(&session, &Session::log);
+        session.start(options);
+        QCOMPARE(session.state(), Session::State::Idle);
+        QVERIFY(session.hasFailure());
+        QCOMPARE(session.statusMessage(), qtTrId("otg.error.scrcpy_runtime"));
+        QCOMPARE(logs.size(), 1);
+    }
+    void noUnlockTemporaryFile()
+    {
+        QTest::failOnWarning(QRegularExpression("QFile::remove:.*"));
+        ConnectionOptions options;
+        Session session;
+        session.start(options); // Validation failure before any PIN file exists.
+        QCOMPARE(session.state(), Session::State::Idle);
+        options.manageServer = false;
+        options.serial = "TEST";
+        options.bridge = peerPath();
+        session.start(options);
+        QTRY_COMPARE(session.state(), Session::State::Connected);
+        session.stop();
+        QTRY_COMPARE(session.state(), Session::State::Idle);
+        QVERIFY(!session.hasFailure());
+    }
     void tlsCertificateGeneration()
     {
         QTemporaryDir directory;

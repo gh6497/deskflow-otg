@@ -97,6 +97,23 @@ else()
 endif()
 
 install(TARGETS deskflow-otg-gui BUNDLE DESTINATION . RUNTIME DESTINATION bin)
+# A build-tree GUI must find the same matching runtime pair as an installed
+# GUI. Keep the copy target incremental-build safe when only the server changes.
+if(APPLE)
+  set(OTG_GUI_BUILD_DATA_DIR "$<TARGET_FILE_DIR:deskflow-otg-gui>/../Resources/deskflow-otg")
+else()
+  set(OTG_GUI_BUILD_DATA_DIR "$<TARGET_FILE_DIR:deskflow-otg-gui>/share/deskflow-otg")
+endif()
+if(BUILD_AUDIO OR BUILD_CLIPBOARD)
+  add_custom_target(otg_gui_scrcpy_runtime ALL
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${OTG_GUI_BUILD_DATA_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SCRCPY_SERVER}"
+      "${OTG_GUI_BUILD_DATA_DIR}/scrcpy-server"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${PROJECT_BINARY_DIR}/SCRCPY_VERSION.txt"
+      "${OTG_GUI_BUILD_DATA_DIR}/SCRCPY_VERSION.txt"
+    DEPENDS deskflow-otg-gui "${SCRCPY_SERVER}" "${PROJECT_BINARY_DIR}/SCRCPY_VERSION.txt"
+    VERBATIM)
+endif()
 # Supply an explicitly signed APK; desktop builds never require an Android SDK
 # or silently ship an unsigned release/debug APK from a developer's build tree.
 set(COMPANION_APK "" CACHE FILEPATH "Signed Android companion APK to bundle with the GUI")
@@ -138,6 +155,11 @@ if(ADB_BUNDLE_DIR)
   if(NOT EXISTS "${ADB_BUNDLE_DIR}/adb${CMAKE_EXECUTABLE_SUFFIX}")
     message(FATAL_ERROR "ADB_BUNDLE_DIR must contain adb${CMAKE_EXECUTABLE_SUFFIX}")
   endif()
+  add_custom_target(otg_gui_adb_runtime ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${ADB_BUNDLE_DIR}"
+      "$<TARGET_FILE_DIR:deskflow-otg-gui>/platform-tools"
+    DEPENDS deskflow-otg-gui
+    VERBATIM)
   install(DIRECTORY "${ADB_BUNDLE_DIR}/" DESTINATION "${OTG_GUI_RUNTIME_DIR}/platform-tools"
     USE_SOURCE_PERMISSIONS)
 endif()
@@ -213,6 +235,13 @@ if(BUILD_TESTING)
   add_test(NAME usb_auto_connect COMMAND test_usb_auto_connect)
   add_test(NAME gui_window COMMAND test_window)
   add_test(NAME gui_version COMMAND deskflow-otg-gui --version)
+  add_test(NAME gui_runtime_files COMMAND "${CMAKE_COMMAND}"
+    "-DDATA_DIR=${OTG_GUI_BUILD_DATA_DIR}"
+    "-DGUI_DIR=$<TARGET_FILE_DIR:deskflow-otg-gui>"
+    "-DHAVE_SCRCPY=$<OR:$<BOOL:${BUILD_AUDIO}>,$<BOOL:${BUILD_CLIPBOARD}>>"
+    "-DSERVER=${SCRCPY_SERVER}" "-DVERSION=${SCRCPY_VERSION}"
+    "-DADB_DIR=${ADB_BUNDLE_DIR}" "-DEXE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}"
+    -P "${PROJECT_SOURCE_DIR}/tests/test_gui_runtime.cmake")
   set_tests_properties(gui_version PROPERTIES
     PASS_REGULAR_EXPRESSION "deskflow-otg-gui ${PROJECT_VERSION}")
   set_tests_properties(gui_window PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
