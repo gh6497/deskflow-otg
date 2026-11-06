@@ -319,18 +319,6 @@ static int pin_digit_usage(char digit)
     return -1;
 }
 
-static void schedule_unlock(struct otg_bridge *b)
-{
-    b->unlock_pending = true;
-    b->unlock_due_ms = bridge_now_ms() + UNLOCK_WAKE_DELAY_MS;
-    b->unlock_phase = UNLOCK_PHASE_WAIT_SWIPE;
-    b->unlock_swipe_step = 0;
-    /* Enter is widely accepted as a harmless wake-up key on Android lock
-     * screens.  The swipe and PIN are delayed for the screen animation. */
-    send_key_tap(b, HID_KEY_ENTER);
-    LOG_DBG("unlock swipe scheduled after screen entry\n");
-}
-
 /* One click produces one complete system shortcut, never a held/repeating
  * Enter/Backspace or a Meta modifier applied to later typing. Compose reports
  * without changing physical keyboard state, including a physically held Meta.
@@ -642,6 +630,27 @@ bool otg_bridge_resize(struct otg_bridge *b, int32_t width, int32_t height)
     return true;
 }
 
+static void schedule_unlock(struct otg_bridge *b)
+{
+    b->unlock_pending = true;
+    b->unlock_due_ms = bridge_now_ms() + UNLOCK_WAKE_DELAY_MS;
+    b->unlock_phase = UNLOCK_PHASE_WAIT_SWIPE;
+    b->unlock_swipe_step = 0;
+    /* ADB lock-state detection may finish after mouse input has started.
+     * Release any drag and discard wheel/navigation state before the synthetic
+     * swipe takes ownership. External mouse events are dropped until done. */
+    b->middle_button_home_down = b->right_button_back_down = false;
+    b->residual_hscroll = b->residual_vscroll = 0;
+    if (b->mouse_buttons) {
+        b->mouse_buttons = 0;
+        send_mouse_state(b, 0, 0);
+    }
+    /* Enter is widely accepted as a harmless wake-up key on Android lock
+     * screens. The swipe and PIN are delayed for the screen animation. */
+    send_key_tap(b, HID_KEY_ENTER);
+    LOG_DBG("unlock swipe scheduled after screen entry\n");
+}
+
 void otg_bridge_enter(struct otg_bridge *b, int16_t x, int16_t y, uint16_t mask)
 {
     /* Seed modifier state from the server's reported active-modifier mask;
@@ -821,7 +830,7 @@ void otg_bridge_key(struct otg_bridge *b, uint32_t keyid, bool down)
 
 void otg_bridge_mouse_button(struct otg_bridge *b, uint8_t button, bool press)
 {
-    if (!b->active) {
+    if (!b->active || b->unlock_pending) {
         return;
     }
     if (button == 2 && b->middle_button_action == OTG_MIDDLE_BUTTON_HOME) {
@@ -859,7 +868,7 @@ void otg_bridge_mouse_button(struct otg_bridge *b, uint8_t button, bool press)
 
 void otg_bridge_mouse_move(struct otg_bridge *b, int16_t x, int16_t y)
 {
-    if (!b->active) {
+    if (!b->active || b->unlock_pending) {
         return;
     }
     int32_t tx = clamp_position(x, b->screen_w);
@@ -882,7 +891,7 @@ void otg_bridge_mouse_move(struct otg_bridge *b, int16_t x, int16_t y)
 
 void otg_bridge_mouse_rel_move(struct otg_bridge *b, int16_t dx, int16_t dy)
 {
-    if (!b->active) {
+    if (!b->active || b->unlock_pending) {
         return;
     }
     /* Locked-screen DMRM has no absolute target. Accumulate within the screen
@@ -899,7 +908,7 @@ void otg_bridge_mouse_rel_move(struct otg_bridge *b, int16_t dx, int16_t dy)
 
 void otg_bridge_mouse_wheel(struct otg_bridge *b, int16_t x, int16_t y)
 {
-    if (!b->active) {
+    if (!b->active || b->unlock_pending) {
         return;
     }
     /* Mirror scrcpy's sc_hid_mouse_generate_input_from_scroll: accumulate

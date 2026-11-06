@@ -180,6 +180,8 @@ ctest --test-dir build-gui -C Release --output-on-failure
 
 On Linux and Windows, the GUI and bridge program are placed in the same output directory. On macOS, the result is an `.app` and the bridge is copied into `Contents/MacOS`. Windows still requires the vcpkg/libusb toolchain options described in this README; the GUI uses dynamic Qt and the dynamic MSVC runtime, while the bridge uses a static libusb build.
 
+The full build also copies the configured `scrcpy-server` and matching `SCRCPY_VERSION.txt` into the GUI's runtime search path when audio or clipboard is enabled. If `ADB_BUNDLE_DIR` is set, its contents are copied into `platform-tools` beside the GUI. This allows testing directly from the build directory without installing over an existing version. Keep these runtime files with the executable; `gui_runtime_files` checks their presence and consistency without accessing a phone. Missing scrcpy runtime files produce a dedicated error, not an invalid-device-parameters error.
+
 For packaging, download fixed versions and verify their SHA-256 hashes while retaining ADB licenses and required DLLs:
 
 ```bash
