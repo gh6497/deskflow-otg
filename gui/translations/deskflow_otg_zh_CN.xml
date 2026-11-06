@@ -156,8 +156,8 @@
   <message id="otg.unlock.enabled"><source>Try automatic numeric PIN unlock on entry</source><translation>进入手机时尝试自动输入数字 PIN 解锁</translation></message>
   <message id="otg.label.unlock_pin"><source>Numeric PIN (session only)</source><translation>数字 PIN（仅当前会话）</translation></message>
   <message id="otg.unlock.pin_hint"><source>4–32 digits; not saved to settings</source><translation>4–32 位数字；不会保存到设置</translation></message>
-  <message id="otg.unlock.adb_hint"><source>Automatic PIN unlock requires the companion app and authorized ADB. If ADB is unavailable, no PIN is sent.</source><translation>自动 PIN 解锁需要新版伴侣应用及已授权的 ADB。ADB 不可用时不会发送 PIN。</translation></message>
-  <message id="otg.unlock.tooltip"><source>Uses authorized ADB to check the lock state before each entry. If locked, sends wake/Enter, swipes from bottom to top, then sends the PIN and Enter. Requires ADB and absolute mouse mode. PIN is not logged or saved.</source><translation>每次进入前使用已授权 ADB 检查锁屏状态。确认锁定后发送唤醒/回车，从底部向上滑动，再发送 PIN 和回车。需要 ADB 和绝对坐标模式。PIN 不记录、不保存。</translation></message>
+  <message id="otg.unlock.adb_hint"><source>Automatic PIN unlock requires the companion app and authorized ADB. If ADB is unavailable, no PIN is sent. Mouse control of the phone is temporarily unavailable during automatic unlocking and resumes when the sequence ends.</source><translation>自动 PIN 解锁需要新版伴侣应用及已授权的 ADB。ADB 不可用时不会发送 PIN。自动解锁期间暂时无法用鼠标控制手机，解锁流程结束后自动恢复。</translation></message>
+  <message id="otg.unlock.tooltip"><source>Uses authorized ADB to check the lock state before each entry. If locked, sends wake/Enter, swipes from bottom to top, then sends the PIN and Enter. Mouse movement, clicks and scrolling to the phone are blocked during automatic unlocking and resume when the sequence ends; blocked input is discarded. Requires ADB and absolute mouse mode. PIN is not logged or saved.</source><translation>每次进入前使用已授权 ADB 检查锁屏状态。确认锁定后发送唤醒/回车，从底部向上滑动，再发送 PIN 和回车。自动解锁期间屏蔽发往手机的鼠标移动、点击和滚轮，流程结束后自动恢复；屏蔽期间的操作不会补发。需要 ADB 和绝对坐标模式。PIN 不记录、不保存。</translation></message>
   <message id="otg.status.not_connected"><source>Not connected</source><translation>未连接</translation></message>
   <message id="otg.action.connect"><source>Connect</source><translation>连接</translation></message>
   <message id="otg.action.disconnect"><source>Disconnect</source><translation>断开</translation></message>
@@ -191,6 +191,7 @@
   <message id="otg.error.deskflow_exited"><source>Deskflow exited (%1). Check permissions, port and configuration logs.</source><translation>Deskflow 已退出（%1），请查看权限、端口及配置日志。</translation></message>
   <message id="otg.status.connecting"><source>Connecting…</source><translation>正在连接…</translation></message>
   <message id="otg.error.invalid_options"><source>Invalid device serial number, screen name, host or dimensions.</source><translation>设备序列号、屏幕名称、主机或尺寸无效。</translation></message>
+  <message id="otg.error.scrcpy_runtime"><source>Audio/clipboard runtime files are missing: scrcpy-server or SCRCPY_VERSION.txt. Rebuild or reinstall the complete GUI.</source><translation>缺少音频/剪贴板运行文件：scrcpy-server 或 SCRCPY_VERSION.txt。请重新构建或安装完整 GUI。</translation></message>
   <message id="otg.error.port_in_use"><source>Port already in use. Stop the existing Deskflow server, change the port, or connect to an existing server.</source><translation>端口已被占用：停止原 Deskflow 服务、修改端口，或选择连接已有服务。</translation></message>
   <message id="otg.error.deskflow_probe"><source>Could not detect Deskflow startup arguments: %1</source><translation>无法检测 Deskflow 启动参数：%1</translation></message>
   <message id="otg.log.deskflow_probe"><source>[Deskflow argument detection]
