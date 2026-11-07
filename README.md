@@ -174,10 +174,10 @@ Install Qt 6.8+ and set `CMAKE_PREFIX_PATH` to the Qt installation prefix. Keepi
 For Windows GUI builds using `x64-windows-static`, also install `openssl:x64-windows-static-md` for the GUI's certificate generator. Qt uses the dynamic MSVC runtime; the bridge keeps its static-runtime dependencies.
 
 ```bash
-cmake -S . -B build-gui -DBUILD_GUI=ON -DCMAKE_BUILD_TYPE=Release \
+cmake -S . -B build -DBUILD_GUI=ON -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_PREFIX_PATH=/path/to/Qt/6.8.3/gcc_64
-cmake --build build-gui --config Release --parallel
-ctest --test-dir build-gui -C Release --output-on-failure
+cmake --build build --config Release --parallel
+ctest --test-dir build -C Release --output-on-failure
 ```
 
 On Linux and Windows, the GUI and bridge program are placed in the same output directory. On macOS, the result is an `.app` and the bridge is copied into `Contents/MacOS`. Windows still requires the vcpkg/libusb toolchain options described in this README; the GUI uses dynamic Qt and the dynamic MSVC runtime, while the bridge uses a static libusb build.
@@ -188,10 +188,10 @@ For packaging, download fixed versions and verify their SHA-256 hashes while ret
 
 ```bash
 python scripts/fetch_adb.py --output adb-bundle
-cmake -S . -B build-gui -DBUILD_GUI=ON \
+cmake -S . -B build -DBUILD_GUI=ON \
     -DADB_BUNDLE_DIR="$PWD/adb-bundle/platform-tools"
-cmake --build build-gui --config Release --parallel
-cmake --install build-gui --config Release --prefix "$PWD/stage"
+cmake --build build --config Release --parallel
+cmake --install build --config Release --prefix "$PWD/stage"
 python scripts/fetch_licenses.py --output stage/share/deskflow-otg/licenses
 ```
 
@@ -201,11 +201,48 @@ Tests cover device-output parsing, resolution overrides and orientation, layout 
 
 ## Building
 
+### Reproducible feature profiles
+
+The default configuration is intentionally a manual/minimal CLI configuration:
+`BUILD_GUI`, `BUILD_AUDIO`, and `BUILD_CLIPBOARD` are off, while Linux BLE
+follows `BUILD_BLE`'s platform default. These options are compile-time features;
+they cannot be added to an already-built executable. Use the fixed local
+`build/` directory for normal development. CI or
+parallel platform builds may use separate directories, but local builds should
+not accumulate `build-*` variants.
+
+For a full build containing every feature supported by the current platform,
+use `OTG_PROFILE=full`:
+
+```bash
+# Linux: GUI + audio + clipboard + Linux BLE
+cmake -S . -B build -DOTG_PROFILE=full -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+
+# macOS: GUI + clipboard (audio and Linux BLE are not supported)
+cmake -S . -B build -DOTG_PROFILE=full -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+
+# Windows: GUI + audio + clipboard + experimental Windows BLE
+cmake -S . -B build -DOTG_PROFILE=full
+cmake --build build --config Release --parallel
+ctest --test-dir build -C Release --output-on-failure
+```
+
+`build/BUILD_FEATURES.json` and the installed copy record the exact feature set.
+For a deliberately small USB-only build, reconfigure the same `build/` directory
+and explicitly disable optional features, for example
+`-DBUILD_BLE=OFF -DBUILD_GUI=OFF -DBUILD_AUDIO=OFF -DBUILD_CLIPBOARD=OFF`.
+
 ```bash
 git clone https://your-host/deskflow-otg.git
 cd deskflow-otg
-cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -DBUILD_GUI=OFF -DBUILD_AUDIO=OFF \
+    -DBUILD_CLIPBOARD=OFF -DBUILD_BLE=OFF -DCMAKE_BUILD_TYPE=Release
 cmake --build build
+ctest --test-dir build --output-on-failure
 # Output: build/deskflow-otg
 ```
 
@@ -259,7 +296,7 @@ sudo apt install ./deskflow-otg-gui-<version>-linux-amd64.deb
 You can also create a DEB from a local GUI install directory. First download ADB, build with `BUILD_GUI=ON`, and collect licenses as described above; `stage` must be the GUI install directory:
 
 ```bash
-cmake --install build-gui --prefix "$PWD/stage"
+cmake --install build --prefix "$PWD/stage"
 python3 scripts/package_deb.py --stage stage \
     --output dist/deskflow-otg-gui-0.1.0-$(dpkg --print-architecture).deb
 ```

@@ -273,10 +273,10 @@ Windows GUI 使用 `x64-windows-static` 构建时，还需安装 `openssl:x64-wi
 供客户端证书生成器匹配 Qt 的动态 MSVC 运行库；桥接仍使用原来的静态运行库依赖。
 
 ```bash
-cmake -S . -B build-gui -DBUILD_GUI=ON -DCMAKE_BUILD_TYPE=Release \
+cmake -S . -B build -DBUILD_GUI=ON -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_PREFIX_PATH=/path正式发布校验 Git 标签与版本一致。/to/Qt/6.8.3/gcc_64
-cmake --build build-gui --config Release --parallel
-ctest --test-dir build-gui -C Release --output-on-failure
+cmake --build build --config Release --parallel
+ctest --test-dir build -C Release --output-on-failure
 ```
 
 Linux/Windows GUI 与桥接程序位于同一输出目录；macOS 构建产物是 `.app`，桥接复制到
@@ -287,10 +287,10 @@ Linux/Windows GUI 与桥接程序位于同一输出目录；macOS 构建产物�
 
 ```bash
 python scripts/fetch_adb.py --output adb-bundle
-cmake -S . -B build-gui -DBUILD_GUI=ON \
+cmake -S . -B build -DBUILD_GUI=ON \
     -DADB_BUNDLE_DIR="$PWD/adb-bundle/platform-tools"
-cmake --build build-gui --config Release --parallel
-cmake --install build-gui --config Release --prefix "$PWD/stage"
+cmake --build build --config Release --parallel
+cmake --install build --config Release --prefix "$PWD/stage"
 python scripts/fetch_licenses.py --output stage/share/deskflow-otg/licenses
 ```
 
@@ -304,11 +304,44 @@ Linux 还需系统 libusb、桌面图形库，Wayland 桌面可通过 XWayland �
 
 ## 构建
 
+### 可复现的功能配置
+
+默认配置是手动/精简 CLI 配置：`BUILD_GUI`、`BUILD_AUDIO` 和
+`BUILD_CLIPBOARD` 默认关闭，Linux 的 BLE 则沿用 `BUILD_BLE` 的平台默认值。
+这些功能都是编译期功能，已经生成的可执行文件不能再补功能。每种配置必须使用
+本地开发统一使用根目录 `build/`，不要不断创建 `build-*` 变体；CI 或并行的跨平台构建
+可以使用独立目录。
+
+要构建当前平台支持的全部功能，使用 `OTG_PROFILE=full`：
+
+```bash
+# Linux：GUI + 音频 + 剪贴板 + Linux BLE
+cmake -S . -B build -DOTG_PROFILE=full -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+
+# macOS：GUI + 剪贴板（不支持音频和 Linux BLE）
+cmake -S . -B build -DOTG_PROFILE=full -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+
+# Windows：GUI + 音频 + 剪贴板 + 实验性 Windows BLE
+cmake -S . -B build -DOTG_PROFILE=full
+cmake --build build --config Release --parallel
+ctest --test-dir build -C Release --output-on-failure
+```
+
+`build/BUILD_FEATURES.json` 以及安装目录中的副本会记录最终功能集合。
+如果确实只需要精简的 USB CLI，也在同一个 `build/` 目录重新配置并显式关闭可选功能，例如
+`-DBUILD_BLE=OFF -DBUILD_GUI=OFF -DBUILD_AUDIO=OFF -DBUILD_CLIPBOARD=OFF`。
+
 ```bash
 git clone https://your-host/deskflow-otg.git
 cd deskflow-otg
-cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -DBUILD_GUI=OFF -DBUILD_AUDIO=OFF \
+    -DBUILD_CLIPBOARD=OFF -DBUILD_BLE=OFF -DCMAKE_BUILD_TYPE=Release
 cmake --build build
+ctest --test-dir build --output-on-failure
 # 产物: build/deskflow-otg
 ```
 
@@ -392,7 +425,7 @@ sudo apt install ./deskflow-otg-gui-<版本>-linux-amd64.deb
 构建 GUI 并收集许可证；`stage` 必须是 GUI 安装目录）：
 
 ```bash
-cmake --install build-gui --prefix "$PWD/stage"
+cmake --install build --prefix "$PWD/stage"
 python3 scripts/package_deb.py --stage stage \
     --output dist/deskflow-otg-gui-0.1.0-$(dpkg --print-architecture).deb
 ```
