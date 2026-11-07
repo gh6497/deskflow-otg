@@ -20,6 +20,7 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QScopeGuard>
+#include <QSignalBlocker>
 #include <QSpinBox>
 #include <QTemporaryDir>
 #include <QSystemTrayIcon>
@@ -175,6 +176,77 @@ private slots:
         QCOMPARE(sensitivity->value(), 2.0);
         QCOMPARE(port->value(), 24800);
     }
+    void dropdownsIgnoreMouseWheel_data()
+    {
+        QTest::addColumn<QString>("objectName");
+        QTest::newRow("language") << QStringLiteral("languageSelector");
+        QTest::newRow("transport") << QStringLiteral("transportSelector");
+        QTest::newRow("device") << QStringLiteral("deviceSelector");
+        QTest::newRow("mouse mode") << QStringLiteral("mouseMode");
+        QTest::newRow("middle button") << QStringLiteral("middleButtonAction");
+        QTest::newRow("right button") << QStringLiteral("rightButtonAction");
+        QTest::newRow("screen position") << QStringLiteral("screenPosition");
+        QTest::newRow("screen neighbor") << QStringLiteral("screenNeighbor");
+        QTest::newRow("TLS key length") << QStringLiteral("tlsKeyLength");
+        QTest::newRow("log filter") << QStringLiteral("logFilter");
+    }
+
+    void dropdownsIgnoreMouseWheel()
+    {
+        QFETCH(QString, objectName);
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dir.path());
+        QSettings settings;
+        settings.setValue("adb", "");
+        settings.setValue("manageServer", true);
+        settings.setValue("tls", true);
+        MainWindow window;
+        window.show();
+        QCoreApplication::processEvents();
+        auto *combo = window.findChild<QComboBox *>(objectName);
+        QVERIFY(combo);
+        auto *tabs = window.findChild<QTabWidget *>("deviceTabs");
+        QVERIFY(tabs);
+        for (int i = 0; i < tabs->count(); ++i)
+            if (tabs->widget(i)->isAncestorOf(combo)) tabs->setCurrentIndex(i);
+        QVERIFY(combo->isEnabled());
+
+        // Exercise selection without triggering device discovery or changing transport.
+        const QSignalBlocker blocker(combo);
+        const int originalIndex = combo->currentIndex();
+        const int originalCount = combo->count();
+        if (combo->count() < 2) combo->addItem(QStringLiteral("Wheel test item"));
+        for (bool focused : {false, true}) {
+            if (focused) combo->setFocus();
+            else combo->clearFocus();
+            QCOMPARE(combo->hasFocus(), focused);
+            for (int index = 0; index < combo->count(); ++index) {
+                combo->setCurrentIndex(index);
+                for (int delta : {-120, 120}) {
+                    const QPointF position(combo->rect().center());
+                    const QPointF globalPosition(combo->mapToGlobal(combo->rect().center()));
+                    QWheelEvent event(position, globalPosition, QPoint(), QPoint(0, delta),
+                                      Qt::NoButton, Qt::NoModifier, Qt::ScrollUpdate, false);
+                    QApplication::sendEvent(combo, &event);
+                    QCOMPARE(combo->currentIndex(), index);
+                    QVERIFY(!event.isAccepted());
+                }
+            }
+        }
+
+        // Ignoring the wheel must not disable intentional keyboard selection.
+        combo->setCurrentIndex(0);
+        QTest::keyClick(combo, Qt::Key_Down);
+        QCOMPARE(combo->currentIndex(), 1);
+        QTest::keyClick(combo, Qt::Key_Up);
+        QCOMPARE(combo->currentIndex(), 0);
+        while (combo->count() > originalCount) combo->removeItem(combo->count() - 1);
+        combo->setCurrentIndex(originalIndex);
+        window.findChild<QAction *>("trayQuit")->trigger();
+    }
+
     void companionApkDefaults()
     {
         QTemporaryDir dir;

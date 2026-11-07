@@ -265,6 +265,11 @@ for f in platform/linux/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only
 
 ## 可选桌面 GUI
 
+- **所有下拉框禁止通过鼠标滚轮修改值**，无论是否获得焦点；新增下拉框也必须遵守。
+  复用 `gui/main_window.cpp` 的 `NoWheelWidget<QComboBox>`（其他窗口应复用或提取同等公共实现），
+  在 `wheelEvent()` 中调用 `event->ignore()`，让父级滚动区域仍可滚动；保留点击选择和键盘切换。
+  修改或新增下拉框时，须在 `tests/test_window.cpp` 或对应窗口测试中覆盖有/无焦点、双向滚轮不改值及键盘切换。
+
 - 鼠标中键 Home 与右键 Back 为独立、默认 normal 的按设备配置，CLI 分别为
   `--middle-button-action normal|home`、`--right-button-action normal|back`。
   当前 `bridge.c` 直接发送系统 HID 快捷键 Win+Enter / Win+Backspace，无需伴侣、无障碍或ADB。
