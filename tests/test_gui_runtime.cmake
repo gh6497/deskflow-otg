@@ -1,5 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 # Inspect build artifacts only; never launch ADB or access a device.
+if(COMPANION_APK)
+  set(apk "${GUI_DIR}/deskflow-otg-companion.apk")
+  if(NOT EXISTS "${apk}")
+    message(FATAL_ERROR "GUI bundled companion APK missing: ${apk}")
+  endif()
+  file(SHA256 "${COMPANION_APK}" expected)
+  file(SHA256 "${apk}" actual)
+  if(NOT actual STREQUAL expected)
+    message(FATAL_ERROR "GUI companion APK differs from the configured bundle")
+  endif()
+endif()
 if(HAVE_SCRCPY)
   foreach(name scrcpy-server SCRCPY_VERSION.txt)
     if(NOT EXISTS "${DATA_DIR}/${name}")

@@ -284,6 +284,10 @@ for f in platform/linux/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only
   所有 ADB 命令固定 `-s` 目标，优先设备 `adbSerial`、否则 USB serial；先核对在线，禁止自动
   pair/connect、无目标回退、静默授予通知使用权或签名失败时卸载。`COMPANION_APK` 可选附带
   已签名 APK，安装在 GUI 可执行文件旁；桌面构建不要求 Android SDK，不自动选择 debug/unsigned。
+  桌面0.1.7起发布CI在独立Linux job构建伴侣release并使用固定Actions Secrets签名/验签，
+  同一APK供四个平台GUI包复用；缺签名凭据失败，不降级为debug或省略APK。PR不读取签名secrets，
+  仅测试unsigned release且不分发它。GUI默认包内APK，空/失效旧配置回退，有效自选路径保留；
+  包内默认不保存安装绝对路径，以兼容AppImage重挂载。安装仍必须用户主动点击。
   权限检查不是服务或 ROM 广播验收，AOA HID-only 路径不保证发出 accessory-detached。
   手机端 `USB_STATE`/connected 转换由 `UsbDisconnectMonitor` 纯 Java 状态机处理。
   0.1.3 按用户要求移除 1.5 秒去抖和定时器，广播回调内立即请求暂停；保留首次 sticky 基线、

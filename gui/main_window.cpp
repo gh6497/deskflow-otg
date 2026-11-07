@@ -510,7 +510,7 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     m_companionApk = new QLineEdit;
     m_companionApk->setObjectName("companionApk");
     setTranslatedProperty(m_companionApk, "placeholderText", "otg.companion.apk_hint");
-    m_companionApk->setText(settings.value("companionApk", CompanionApp::bundledApk()).toString());
+    m_companionApk->setText(CompanionApp::preferredApk(settings.value("companionApk").toString()));
     auto *browseApk = translated(new QPushButton, "text", "otg.action.browse");
     apkLayout->addWidget(m_companionApk, 1);
     apkLayout->addWidget(browseApk);
@@ -1606,7 +1606,10 @@ void MainWindow::saveSettings()
     persistDevices();
     QSettings settings;
     settings.setValue("adb", m_adb->text());
-    settings.setValue("companionApk", m_companionApk->text());
+    const auto apk = m_companionApk->text().trimmed();
+    // Do not persist an installation-specific path for the default APK (notably
+    // the temporary mount point of an AppImage). Explicit custom APKs stay saved.
+    settings.setValue("companionApk", apk == CompanionApp::bundledApk() ? QString() : apk);
     settings.setValue("audio", m_audio->isChecked());
     settings.setValue("clipboard", m_clipboard->isChecked());
     settings.setValue("autoRotate", m_autoRotate->isChecked());

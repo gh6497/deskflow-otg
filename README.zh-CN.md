@@ -157,8 +157,12 @@ USB 设备页提供「安装 / 更新 APK」「打开手机端设置」「检查
 清单 Receiver 也会处理事件。ROM 仍需允许应用运行且不能强制停止；快速拔插或重新枚举也可能暂停。
 适用于所有 USB 数据连接，不仅限于 Deskflow。
 安装需要已授权的 ADB 连接，通知使用权仍需在手机上手动开启。
-不会自动安装 APK，原有键鼠功能不依赖此应用。可以手动选择已签名 APK，或构建桌面包时通过
-`-DCOMPANION_APK=/path/to/signed.apk` 附带。授权检查不等于服务运行或拔出暂停已验收，
+不会自动安装 APK，原有键鼠功能不依赖此应用。桌面 0.1.7 起，Linux、Windows 和两种架构的
+macOS GUI 发布包均内置同一个 CI 构建并正式签名的伴侣 APK，安装路径默认使用包内文件。
+旧配置中的空路径或失效路径会回退到包内 APK，仍有效的手选 APK 路径保留。
+正式 CI 必须配置固定签名 Secrets，缺少或验签失败就停止发布，不回退到 debug/unsigned APK。
+本地构建可通过 `-DCOMPANION_APK=/path/to/signed.apk` 附带，也可在 GUI 手动选择。
+授权检查不等于服务运行或拔出暂停已验收，
 目标设备选择、打包方式和 ROM 限制见上述说明。
 
 **0.1.4** 还可显示由新版桌面 GUI 经已授权 ADB 同步的实际 Deskflow 连接状态：
@@ -324,9 +328,9 @@ Apple Silicon 编译器。构建和 socket 回归测试可用 `ctest --test-dir 
 
 #### 统一版本管理
 
-CLI 和 GUI 共用仓库根目录的 `VERSION`（当前 `0.1.6`），不单独维护版本。
+CLI 和 GUI 共用仓库根目录的 `VERSION`（当前 `0.1.7`），不单独维护版本。
 `deskflow-otg --version`、`deskflow-otg-gui --version` 和 GUI 右上角「关于」显示版本及 Git 提交号。
-开发构建使用 `0.1.6+git.<提交号>`，已跟踪文件有未提交修改时追加 `.dirty`；无 Git 信息时用 `unknown`。
+开发构建使用 `0.1.7+git.<提交号>`，已跟踪文件有未提交修改时追加 `.dirty`；无 Git 信息时用 `unknown`。
 版本信息在 CMake 配置时生成，切换提交或修改源码后应重新运行 `cmake -S . -B ...`。
 
 发布时先修改并提交 `VERSION`，再创建相同版本的 `vX.Y.Z` 标签。CI 通过

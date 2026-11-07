@@ -110,6 +110,10 @@ v1 桌面仍可显示状态但不自动播放；新版桌面使用 v2，旧 APK 
 ```
 
 APK 位于 `app/build/outputs/apk/`。
+默认 `assembleRelease` 产物未签名。桌面 0.1.7 起的正式 CI 会先测试并构建 release APK，
+再使用固定的 Actions Secrets 发布密钥签名/验签，将同一 APK 放进所有平台 GUI 包。
+本地桌面构建仍可显式指定 `COMPANION_APK`，不要求 Android SDK；
+签名配置和覆盖更新限制见[桌面打包说明](../../docs/ANDROID_COMPANION.md#ci-正式签名与各平台发布桌面-017-起)。
 
 USB 状态策略的主机回归（仅需 Python 3 与 JDK，不访问手机）：
 

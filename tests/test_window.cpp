@@ -175,6 +175,45 @@ private slots:
         QCOMPARE(sensitivity->value(), 2.0);
         QCOMPARE(port->value(), 24800);
     }
+    void companionApkDefaults()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dir.path());
+        const auto bundled = QCoreApplication::applicationDirPath() + "/deskflow-otg-companion.apk";
+        const bool existed = QFile::exists(bundled);
+        if (!existed) {
+            QFile file(bundled);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write("fake APK");
+        }
+        const auto cleanup = qScopeGuard([&] { if (!existed) QFile::remove(bundled); });
+        QSettings settings;
+        settings.setValue("adb", "");
+        settings.setValue("manageServer", false);
+        const auto custom = dir.filePath("custom.apk");
+        QFile file(custom);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("custom fake APK"); file.close();
+        for (const auto &saved : QStringList{QString(), dir.filePath("old-install/companion.apk"), custom}) {
+            settings.setValue("companionApk", saved);
+            AutoConnectTestWindow window;
+            QCOMPARE(window.findChild<QLineEdit *>("companionApk")->text(), saved == custom ? custom : bundled);
+            QVERIFY(!window.findChild<CompanionApp *>()->busy()); // No automatic install.
+            window.findChild<QAction *>("trayQuit")->trigger();
+            QCOMPARE(settings.value("companionApk").toString(), saved == custom ? custom : QString());
+        }
+        settings.remove("companionApk"); // Fresh install also defaults to the bundle.
+        AutoConnectTestWindow window;
+        QCOMPARE(window.findChild<QLineEdit *>("companionApk")->text(), bundled);
+        window.findChild<QAction *>("trayQuit")->trigger();
+        if (!existed) {
+            QVERIFY(QFile::remove(bundled));
+            QVERIFY(CompanionApp::preferredApk("").isEmpty());
+            QCOMPARE(CompanionApp::preferredApk(custom), custom);
+        }
+    }
     void companionSetup()
     {
         QTemporaryDir dir;

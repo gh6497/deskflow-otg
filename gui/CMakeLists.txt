@@ -125,7 +125,8 @@ if(COMPANION_APK)
   add_custom_target(otg_companion_apk ALL
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${companion_apk}"
       "$<TARGET_FILE_DIR:deskflow-otg-gui>/deskflow-otg-companion.apk"
-    DEPENDS deskflow-otg-gui "${companion_apk}")
+    DEPENDS deskflow-otg-gui "${companion_apk}"
+    VERBATIM)
   install(FILES "${companion_apk}" DESTINATION "${OTG_GUI_RUNTIME_DIR}" RENAME deskflow-otg-companion.apk)
 endif()
 if(APPLE)
@@ -241,6 +242,7 @@ if(BUILD_TESTING)
     "-DHAVE_SCRCPY=$<OR:$<BOOL:${BUILD_AUDIO}>,$<BOOL:${BUILD_CLIPBOARD}>>"
     "-DSERVER=${SCRCPY_SERVER}" "-DVERSION=${SCRCPY_VERSION}"
     "-DADB_DIR=${ADB_BUNDLE_DIR}" "-DEXE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}"
+    "-DCOMPANION_APK=${companion_apk}"
     -P "${PROJECT_SOURCE_DIR}/tests/test_gui_runtime.cmake")
   set_tests_properties(gui_version PROPERTIES
     PASS_REGULAR_EXPRESSION "deskflow-otg-gui ${PROJECT_VERSION}")

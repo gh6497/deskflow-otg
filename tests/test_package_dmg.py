@@ -25,6 +25,7 @@ class PackageDmgTest(unittest.TestCase):
             app = stage / "deskflow-otg-gui.app"
             for relative in ("Contents/MacOS/deskflow-otg-gui",
                              "Contents/MacOS/deskflow-otg",
+                             "Contents/MacOS/deskflow-otg-companion.apk",
                              "Contents/MacOS/platform-tools/adb"):
                 file = app / relative
                 file.parent.mkdir(parents=True, exist_ok=True)
@@ -49,6 +50,8 @@ class PackageDmgTest(unittest.TestCase):
                 self.assertEqual((image / "Applications").readlink(), pathlib.Path("/Applications"))
                 installed = image / app.name
                 self.assertTrue((installed / "Contents/MacOS/deskflow-otg").is_file())
+                self.assertEqual((installed / "Contents/MacOS/deskflow-otg-companion.apk").read_text(),
+                                 "binary")
                 bundled_resources = installed / "Contents/Resources/deskflow-otg"
                 self.assertEqual((bundled_resources / "LICENSE").read_text(), "project license")
                 self.assertEqual((bundled_resources / "licenses/libusb-LGPL-2.1.txt").read_text(),
