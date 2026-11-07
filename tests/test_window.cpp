@@ -116,6 +116,7 @@ private slots:
         QTest::qWait(20); // Initial no-ADB device discovery.
         auto *button = window.findChild<QPushButton *>("transferFiles"); QVERIFY(button);
         QVERIFY(!button->isEnabled());
+        window.findChild<QCheckBox *>("adbEnabled")->setChecked(true);
         auto *adb = window.findChild<QLineEdit *>("adbExecutable");
         auto *target = window.findChild<QLineEdit *>("adbSerial");
         adb->setText(QCoreApplication::applicationDirPath() + "/test_transfer_peer"
@@ -316,8 +317,10 @@ private slots:
             auto *sidebar = window.findChild<QListWidget *>("deviceSidebar");
             auto *connectButton = window.findChild<QPushButton *>("connectButton");
             auto *app = window.findChild<CompanionApp *>();
-            QVERIFY(install && open && check && status && serial && target && adb && sidebar && app);
+            auto *adbEnabled = window.findChild<QCheckBox *>("adbEnabled");
+            QVERIFY(install && open && check && status && serial && target && adb && sidebar && app && adbEnabled);
             QVERIFY(!install->isEnabled());
+            adbEnabled->setChecked(true);
             adb->setText(QCoreApplication::applicationDirPath() + "/test_peer"
 #ifdef Q_OS_WIN
                          ".exe"
@@ -569,12 +572,23 @@ private slots:
         QSettings().setValue("language", "zh_CN");
         AutoConnectTestWindow window;
         window.show();
+        auto *adbEnabled = window.findChild<QCheckBox *>("adbEnabled");
         auto *audio = window.findChild<QCheckBox *>("audioEnabled");
         auto *clipboard = window.findChild<QCheckBox *>("clipboardEnabled");
         auto *autoRotate = window.findChild<QCheckBox *>("autoRotate");
+        auto *unlock = window.findChild<QCheckBox *>("unlockEnabled");
+        auto *pin = window.findChild<QLineEdit *>("unlockPin");
         auto *tabs = window.findChild<QTabWidget *>("deviceTabs");
         auto *transport = window.findChild<QComboBox *>("transportSelector");
-        QVERIFY(audio && clipboard && autoRotate && tabs && transport);
+        QVERIFY(adbEnabled && audio && clipboard && autoRotate && unlock && pin && tabs && transport);
+        QVERIFY(!adbEnabled->isChecked());
+        QVERIFY(!audio->isEnabled());
+        adbEnabled->setChecked(true);
+        QVERIFY(!pin->isEnabled());
+        unlock->setChecked(true);
+        QVERIFY(pin->isEnabled());
+        pin->setText("1234");
+        QCOMPARE(pin->text(), QStringLiteral("1234"));
         QVERIFY(autoRotate->isVisible());
         QVERIFY(!autoRotate->isChecked());
         QVERIFY(!autoRotate->isEnabled());
@@ -590,13 +604,13 @@ private slots:
         clipboard->setChecked(false);
         QVERIFY(!autoRotate->isEnabled());
 #endif
-        QCOMPARE(audio->text(), "转发音频（需要 ADB）");
+        QCOMPARE(audio->text(), "转发音频");
         auto *language = window.findChild<QComboBox *>("languageSelector");
         QVERIFY(language);
         language->setCurrentIndex(language->findData("en"));
-        QCOMPARE(audio->text(), "Forward audio (requires ADB)");
+        QCOMPARE(audio->text(), "Forward audio");
         language->setCurrentIndex(language->findData("zh_CN"));
-        QCOMPARE(audio->text(), "转发音频（需要 ADB）");
+        QCOMPARE(audio->text(), "转发音频");
         QVERIFY(tabs->widget(0)->isAncestorOf(audio));
         QCOMPARE(audio->parentWidget(), clipboard->parentWidget());
         QVERIFY(!tabs->widget(2)->isAncestorOf(audio));
@@ -608,8 +622,13 @@ private slots:
         const int ble = transport->findData("ble");
         if (ble >= 0) {
             transport->setCurrentIndex(ble);
+#ifdef OTG_GUI_HAVE_AUDIO
+            QVERIFY(!audio->isHidden());
+            QVERIFY(audio->isEnabled());
+#else
             QVERIFY(audio->isHidden());
             QVERIFY(!audio->isEnabled());
+#endif
             transport->setCurrentIndex(0);
 #ifdef OTG_GUI_HAVE_AUDIO
             QVERIFY(!audio->isHidden());
@@ -647,6 +666,7 @@ private slots:
             auto *audio = window.findChild<QCheckBox *>("audioEnabled");
             auto *connectButton = window.findChild<QPushButton *>("connectButton");
             QVERIFY(manager && list && tabs && serial && alias && width && audio);
+            window.findChild<QCheckBox *>("adbEnabled")->setChecked(true);
             QCOMPARE(list->count(), 1);
             serial->setText("A"); alias->setText("Redmi K20 Pro"); width->setValue(1234);
             window.findChild<QPushButton *>("addDeviceButton")->click();
@@ -866,6 +886,7 @@ private slots:
         clear->click(); // Clearing an empty log is harmless.
         QVERIFY(log->toPlainText().isEmpty());
         window.findChild<QLineEdit *>("usbSerial")->setText("TEST123");
+        QTRY_VERIFY(window.findChild<QPushButton *>("connectButton")->isEnabled());
         window.findChild<QPushButton *>("connectButton")->click();
         QTRY_COMPARE(session->state(), Session::State::Connected);
         session->log("first line\nsecond line");
@@ -953,6 +974,7 @@ private slots:
             multiplier->setValue(2.0);
             window.findChild<QComboBox *>("rightButtonAction")->setCurrentIndex(1);
             enabled->setChecked(true);
+            QTRY_VERIFY(button->isEnabled());
             button->click();
             QTRY_COMPARE(session->state(), Session::State::Connected);
             QCOMPARE(settings.beginReadArray("rememberedDevices"), 1);
@@ -1212,6 +1234,7 @@ private slots:
             ;
         QSettings settings;
         settings.setValue("adb", peer);
+        settings.setValue("adbEnabled", true);
         settings.setValue("deskflow", peer);
         settings.setValue("language", "zh_CN");
         MainWindow window;

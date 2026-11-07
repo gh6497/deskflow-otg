@@ -39,8 +39,9 @@ cmake --build build-clipboard --parallel
 Linux/Windows 可以叠加 `-DBUILD_AUDIO=ON`；macOS 只提供 POSIX 剪贴板会话，不提供音频。
 跨平台构建列入 CI，但本地验证不等于 Windows/macOS 或 Android 真机验收。
 
-GUI 在当前设备页勾选「通过 Deskflow 共享文本剪贴板（需要 ADB）」，并显示就绪、服务端禁用、
-暂不可用等独立状态。程序随安装包携带匹配版本的 Android Server，不要求安装完整 scrcpy。
+GUI 在当前设备页的「ADB 增强功能」中启用该设备的 ADB，然后勾选「共享文本剪贴板」；
+剪贴板会显示就绪、服务端禁用、暂不可用等独立状态。程序随安装包携带匹配版本的 Android
+Server，不要求安装完整 scrcpy。未启用 ADB 的设备不能打开剪贴板选项。
 开发构建的 GUI 也需要按原有安装目录布局提供 server 和 `SCRCPY_VERSION.txt`。
 
 音频与剪贴板共用「音频/剪贴板 ADB 序列号」和 ADB 可执行程序配置。USB 模式留空时使用

@@ -52,6 +52,7 @@ private:
     void updateTray();
     void refreshDevices();
     void readDevice();
+    void readDisplayFromAdb();
     void connectDevice();
     void saveSettings();
     QVariantMap deviceProfile() const;
@@ -75,6 +76,7 @@ private:
     void regenerateTlsCertificate();
     void setupCompanion(CompanionApp::Action action);
     void updateCompanionStatus();
+    QString adbTargetForCurrentDevice() const;
     void appendLog(const QString &text, const QString &id = {});
     void refreshLog();
     QWidget *pathField(QLineEdit *&field, const char *placeholderId);
@@ -117,6 +119,10 @@ private:
     QComboBox *m_devices, *m_direction, *m_mouseMode, *m_middleButtonAction, *m_rightButtonAction;
     QCheckBox *m_unlockEnabled;
     QLineEdit *m_unlockPin;
+    QCheckBox *m_adbEnabled;
+    QLabel *m_adbStatus;
+    QPushButton *m_adbTest, *m_adbReadDisplay;
+    QWidget *m_adbBox;
     QComboBox *m_transport;
     QLineEdit *m_adapter, *m_blePeer;
     QCheckBox *m_bleIsolate;
@@ -141,7 +147,7 @@ private:
     QPlainTextEdit *m_log;
     QComboBox *m_logFilter;
     QList<QPair<QString, QString>> m_logHistory;
-    QFormLayout *m_deviceForm, *m_displayForm, *m_featuresForm, *m_programForm;
+    QFormLayout *m_deviceForm, *m_displayForm, *m_adbForm, *m_featuresForm, *m_programForm;
     QList<AndroidDevice> m_deviceList;
     bool m_scanning = false;
     bool m_uiReady = false;

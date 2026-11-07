@@ -908,10 +908,6 @@ int main(int argc, char **argv)
         fprintf(stderr, "ERROR: --adb-serial requires an ADB feature (audio, clipboard or unlock)\n");
         return 2;
     }
-    if (opts.audio && strcmp(opts.transport, "usb") != 0) {
-        fprintf(stderr, "ERROR: --audio currently requires --transport usb\n");
-        return 2;
-    }
 #ifndef OTG_HAVE_AUDIO
     if (opts.audio) {
         fprintf(stderr, "ERROR: audio support was not built; configure with -DBUILD_AUDIO=ON\n");

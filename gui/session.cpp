@@ -135,6 +135,10 @@ void Session::setState(State state, const char *id, const QString &detail)
 
 void Session::syncCompanionStatus()
 {
+    if (!m_options.adbEnabled) {
+        m_companionStatus.update({}, {}, QStringLiteral("disconnected"), true);
+        return;
+    }
     // BLE has no implicit ADB identity. Never use its MAC as an ADB target.
     const auto target = !m_options.adbSerial.isEmpty() ? m_options.adbSerial :
         m_options.transport == "usb" ? m_options.serial : QString();
@@ -158,15 +162,24 @@ static bool adbDeviceState(const QString &output)
 
 /* Keep the ADB boundary in one place.  HID itself never needs ADB, while
  * these three bridge features do: scrcpy audio/clipboard and PIN unlock. */
-static bool adbRequired(const ConnectionOptions &options)
+static bool adbRequested(const ConnectionOptions &options)
 {
     return options.audio || options.clipboard || options.unlockAdb;
+}
+
+static bool adbRequired(const ConnectionOptions &options)
+{
+    return options.adbEnabled && adbRequested(options);
 }
 
 static QString adbTarget(const ConnectionOptions &options)
 {
     if (!options.adbSerial.trimmed().isEmpty()) return options.adbSerial.trimmed();
+#ifdef Q_OS_WIN
+    return {};
+#else
     return options.transport == "usb" ? options.serial.trimmed() : QString();
+#endif
 }
 
 static QStringList auxiliarySignature(const ConnectionOptions &options)
@@ -176,6 +189,8 @@ static QStringList auxiliarySignature(const ConnectionOptions &options)
      * consumed by the bridge's ADB path must therefore invalidate a retained
      * provider; otherwise a later session silently reuses the old target. */
     return {options.adb, options.adbSerial, options.scrcpyServer, options.scrcpyVersion,
+            options.audio ? QStringLiteral("audio") : QStringLiteral("no-audio"),
+            options.clipboard ? QStringLiteral("clipboard") : QStringLiteral("no-clipboard"),
             options.unlockAdb ? QStringLiteral("unlock") : QStringLiteral("no-unlock"),
             options.unlockPin};
 }
@@ -197,6 +212,10 @@ void Session::start(const ConnectionOptions &options)
     ++m_generation;
     setState(State::Starting, "otg.status.connecting");
     const bool ble = options.transport == "ble";
+    if (adbRequested(options) && !options.adbEnabled) {
+        fail("otg.error.adb_disabled");
+        return;
+    }
     if ((options.audio || options.clipboard) &&
         (options.scrcpyServer.isEmpty() || options.scrcpyVersion.isEmpty())) {
         fail("otg.error.scrcpy_runtime");
@@ -319,7 +338,7 @@ void Session::prepareBle(bool started, int attempts)
 
 void Session::startConnection()
 {
-    const bool needsAdb = adbRequired(m_options) || !m_options.adbSerial.trimmed().isEmpty();
+    const bool needsAdb = adbRequired(m_options);
     if (needsAdb && !m_adbServerStarted) {
         m_adbServerStarted = true;
         const auto generation = m_generation;
