@@ -19,6 +19,7 @@ class DebPackageTest(unittest.TestCase):
                 (stage / "bin").mkdir(parents=True)
                 for name in ("deskflow-otg-gui", "deskflow-otg"):
                     (stage / "bin" / name).write_text("mock binary\n")
+                (stage / "bin/deskflow-otg-companion.apk").write_bytes(b"mock companion APK")
                 metadata = stage / "share/deskflow-otg"
                 metadata.mkdir(parents=True)
                 (metadata / "BUILD_FEATURES.json").write_text('{"ble":%s}' % str(ble).lower())
@@ -33,6 +34,8 @@ class DebPackageTest(unittest.TestCase):
                 extracted = root / "extracted"
                 subprocess.run(["dpkg-deb", "--extract", str(package), str(extracted)], check=True)
                 self.assertTrue((extracted / "usr/bin/deskflow-otg").is_symlink())
+                self.assertEqual((extracted / "opt/deskflow-otg/bin/deskflow-otg-companion.apk").read_bytes(),
+                                 b"mock companion APK")
                 unit = extracted / "usr/lib/systemd/user/deskflow-otg-ble@.service"
                 self.assertEqual(unit.exists(), ble)
                 if ble:

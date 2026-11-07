@@ -13,6 +13,7 @@ class WindowsPackageTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.stage = pathlib.Path(self.temp.name) / 'stage'
         for name in ('bin/deskflow-otg-gui.exe', 'bin/deskflow-otg.exe',
+                     'bin/deskflow-otg-companion.apk',
                      'bin/platform-tools/adb.exe', 'bin/platform-tools/AdbWinApi.dll',
                      'bin/plugins/platforms/qwindows.dll',
                      'share/deskflow-otg/LICENSE', 'share/deskflow-otg/README.md',

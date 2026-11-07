@@ -104,7 +104,10 @@ BLE 必须配置显式 ADB 目标，不能以 BLE MAC 代替。Windows USB 驱�
 2. 核对设备页的「ADB 目标」：非空时优先使用它（支持 `host:port` / `[IPv6]:port`），
    留空才使用当前设备的 USB 序列号。每条操作都使用 `adb -s`，不会自动选择其他手机，
    不自动 pair/connect、不回退 USB、不 disconnect/kill-server。
-3. 选择**已签名**的伴侣 APK，或使用桌面包附带的 APK。点击「安装 / 更新 APK」。
+3. 桌面 0.1.7 起的 GUI 发布包默认选择包内的**已签名**伴侣 APK，也可手动选择其他 APK。
+   旧配置中的空路径或失效路径会回退到当前包内 APK；仍有效的自选路径保留。
+   默认包内路径不会按绝对路径保存，避免 AppImage 重挂载或便携包移动后指向旧位置。
+   点击「安装 / 更新 APK」才会安装，启动 GUI 或回填路径本身不触发 ADB 安装。
    使用 `install -r --user current` 保留应用数据；签名不匹配、降级或手机拒绝安装时报告错误，
    **不会先卸载旧应用**，不使用 `-d`、`-g`。
 4. 点击「打开手机端设置」，启动固定包 `com.github.gh6497.deskflowotg` 的 `MainActivity`。
@@ -163,7 +166,7 @@ USB 断开广播，应用也收不到。该现象与播放器是否响应 `pause
 
 ## 桌面打包
 
-桌面 GUI 不强制依赖 Android SDK。发布者先构建并签名 APK，再显式提供：
+桌面 GUI 的本地构建不强制依赖 Android SDK。发布者可先构建并签名 APK，再显式提供：
 
 ```bash
 cmake -S . -B build-gui -DBUILD_GUI=ON \
@@ -176,8 +179,37 @@ cmake --install build-gui --prefix "$PWD/stage"
 CMake 将文件复制到 GUI 可执行文件旁，统一命名 `deskflow-otg-companion.apk`，
 并安装到 Linux/Windows `bin/` 或 macOS `.app/Contents/MacOS/`，沿用现有桌面包收集流程。
 CMake 只检查文件路径及后缀，不验证 Android 签名；签名有效性由发布者检查、手机安装器验证。
-不传 `COMPANION_APK` 的普通桌面构建/CI 不附带 APK，GUI 仍允许手动选择；
+不传 `COMPANION_APK` 的普通本地桌面构建不附带 APK，GUI 仍允许手动选择；
 不自动打包工作目录的 debug 或 unsigned APK，不引入签名私钥。
+
+### CI 正式签名与各平台发布（桌面 0.1.7 起）
+
+`.github/workflows/build.yml` 先在独立 Linux job 使用 JDK 17、SDK 36 和 build-tools 36.0.0
+运行伴侣应用的 release 单元测试并构建 release APK。标签发布及手动运行时，
+`scripts/sign_companion_apk.py` 从 GitHub Actions Secrets 读取固定发布密钥，先 `zipalign`、
+再 `apksigner sign`，最后 `apksigner verify`。通过后仅上传已签名 APK 作为同次运行的 artifact，
+Linux x86_64、Windows x64、macOS Intel / Apple Silicon 的 GUI 构建均下载它并传入 `COMPANION_APK`。
+DEB、AppImage、Windows 安装器/便携 ZIP、macOS DMG/压缩包沿用同一桌面 staging 内容；
+构建目录、安装目录及安装器/镜像冒烟检查验证 APK 与输入相同。纯 CLI 包不包含 APK。
+伴侣 App 继续独立使用现有版本 0.1.11，不随桌面 0.1.7 降级或改版本码。
+
+需要由仓库维护者配置以下四个 **Actions repository secrets**：
+
+- `ANDROID_KEYSTORE_BASE64`：固定发布 keystore（JKS 或 PKCS12）的 Base64 编码；编码不是加密。
+- `ANDROID_KEYSTORE_PASSWORD`：keystore 密码。
+- `ANDROID_KEY_ALIAS`：该 keystore 中发布密钥的 alias。
+- `ANDROID_KEY_PASSWORD`：发布私钥密码；PKCS12 通常与 keystore 密码相同。
+
+这是 **Android 应用签名**，不是桌面安装器代码签名，也不是 APK 的 SHA-256 校验和。
+必须安全备份并在后续版本沿用同一密钥；覆盖已有 App 还要求与已安装 APK 的签名一致。
+已有 debug/其他签名安装不会被自动卸载，也不会通过更换签名绕过 Android 的更新校验。
+本流程不会自动创建临时发布密钥，不把 keystore/密码写入仓库或 artifact；
+临时 keystore 为私有权限，签名完成或失败后删除。不要在聊天、工作流日志或命令参数里粘贴密码。
+
+缺少/错误的签名凭据、错误包名、debuggable APK 或签名校验失败都会阻止正式打包，
+不会退回 debug/unsigned，也不会悄悄省略 APK。PR（包括同仓库 PR）只构建并测试 unsigned release，
+不读取发布 secrets、不向桌面包分发 unsigned APK；因此 PR 桌面打包检查允许不带 APK。
+实际正式发布仍需配置上述 secrets 并运行标签工作流验证，主机 fake 测试不等于真实发布签名或真机安装验收。
 
 ## 验证边界
 

@@ -13,6 +13,7 @@ public:
     bool busy() const { return m_busy; }
     void start(Action action, const QString &adb, const QString &serial, const QString &apk = {});
     static QString bundledApk();
+    static QString preferredApk(const QString &savedPath);
 signals:
     void completed(const QString &statusId, const QString &detail);
 private:

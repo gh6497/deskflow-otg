@@ -15,7 +15,47 @@ permissions:
   contents: read
 
 jobs:
+  companion:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install fixed Android SDK
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Test signing helper
+        run: python -m unittest discover -s tests -p test_sign_companion_apk.py
+      - name: Build and test release APK
+        working-directory: android/deskflow-otg
+        run: ./gradlew --no-daemon :app:testReleaseUnitTest :app:assembleRelease
+      # PR code must never receive signing credentials (including same-repo PRs).
+      # Unsigned test artifacts are not distributed to desktop packages.
+      - name: Sign and verify companion APK
+        if: github.event_name != 'pull_request'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: python scripts/sign_companion_apk.py --input android/deskflow-otg/app/build/outputs/apk/release/app-release-unsigned.apk --output companion-bundle/deskflow-otg-companion.apk
+      - name: Share signed APK with desktop builds
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: companion-signed
+          path: companion-bundle/deskflow-otg-companion.apk
+          if-no-files-found: error
+
   build:
+    needs: companion
+    env:
+      COMPANION_APK: ${{ github.event_name != 'pull_request' && format('{0}/companion-bundle/deskflow-otg-companion.apk', github.workspace) || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -34,6 +74,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
+      - name: Download signed companion APK
+        if: github.event_name != 'pull_request'
+        uses: actions/download-artifact@v4
+        with:
+          name: companion-signed
+          path: companion-bundle
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
@@ -52,13 +98,13 @@ jobs:
         run: python scripts/fetch_adb.py --output adb-bundle
       - name: Configure
         if: runner.os != 'Windows'
-        run: cmake -S . -B build -DBUILD_GUI=ON -DBUILD_CLIPBOARD=ON -DOTG_RELEASE_TAG="${{ github.ref_type == 'tag' && github.ref_name || '' }}" -DADB_BUNDLE_DIR="$PWD/adb-bundle/platform-tools" -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-Wall -Wextra -Werror" -DCMAKE_CXX_FLAGS="-Wall -Wextra -Werror"
+        run: cmake -S . -B build -DBUILD_GUI=ON -DBUILD_CLIPBOARD=ON -DOTG_RELEASE_TAG="${{ github.ref_type == 'tag' && github.ref_name || '' }}" -DADB_BUNDLE_DIR="$PWD/adb-bundle/platform-tools" -DCOMPANION_APK="$COMPANION_APK" -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-Wall -Wextra -Werror" -DCMAKE_CXX_FLAGS="-Wall -Wextra -Werror"
       - name: Enable Linux audio
         if: runner.os == 'Linux'
         run: cmake -S . -B build -DBUILD_AUDIO=ON -DSCRCPY_VERSION=5.0.1
       - name: Configure Windows with vcpkg
         if: runner.os == 'Windows'
-        run: cmake -S . -B build -DBUILD_GUI=ON -DBUILD_BLE_WIN=ON -DBUILD_AUDIO=ON -DBUILD_CLIPBOARD=ON -DOTG_RELEASE_TAG="${{ github.ref_type == 'tag' && github.ref_name || '' }}" -DADB_BUNDLE_DIR="$pwd/adb-bundle/platform-tools" -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static
+        run: cmake -S . -B build -DBUILD_GUI=ON -DBUILD_BLE_WIN=ON -DBUILD_AUDIO=ON -DBUILD_CLIPBOARD=ON -DOTG_RELEASE_TAG="${{ github.ref_type == 'tag' && github.ref_name || '' }}" -DADB_BUNDLE_DIR="$pwd/adb-bundle/platform-tools" -DCOMPANION_APK="$env:COMPANION_APK" -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static
       - name: Build
         run: cmake --build build --config Release --parallel
       - name: Test
@@ -86,6 +132,9 @@ jobs:
         run: cmake --install build --config Release --prefix "${{ github.workspace }}/stage"
       - name: Include dependency licenses
         run: python scripts/fetch_licenses.py --output stage/share/deskflow-otg/licenses
+      - name: Check installed companion APK matches the signed artifact
+        if: github.event_name != 'pull_request'
+        run: cmake "-DGUI_DIR=${{ github.workspace }}/stage/${{ runner.os == 'macOS' && 'deskflow-otg-gui.app/Contents/MacOS' || 'bin' }}" "-DCOMPANION_APK=${{ env.COMPANION_APK }}" -P tests/test_gui_runtime.cmake
       - name: Check Linux theme deployment
         if: runner.os == 'Linux'
         run: |
@@ -125,6 +174,10 @@ jobs:
           foreach ($file in @('bin/deskflow-otg-gui.exe', 'bin/deskflow-otg.exe', 'bin/platform-tools/adb.exe', 'share/deskflow-otg/licenses/libusb-LGPL-2.1.txt')) {
             if (-not (Test-Path (Join-Path $installDir $file))) { throw "Missing installed file: $file" }
           }
+          if ($env:COMPANION_APK) {
+            $installedApk = Join-Path $installDir 'bin/deskflow-otg-companion.apk'
+            if ((Get-FileHash $installedApk).Hash -ne (Get-FileHash $env:COMPANION_APK).Hash) { throw 'Installed APK mismatch' }
+          }
           $process = Start-Process -FilePath (Join-Path $installDir 'Uninstall.exe') -ArgumentList '/S' -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Uninstaller failed: $($process.ExitCode)" }
           if (Test-Path (Join-Path $installDir 'bin/deskflow-otg-gui.exe')) { throw 'Uninstaller left GUI behind' }
@@ -141,6 +194,9 @@ jobs:
           test -L "$mount_dir/Applications"
           test -x "$mount_dir/deskflow-otg-gui.app/Contents/MacOS/deskflow-otg"
           test -x "$mount_dir/deskflow-otg-gui.app/Contents/MacOS/platform-tools/adb"
+          if [ -n "$COMPANION_APK" ]; then
+            cmp "$COMPANION_APK" "$mount_dir/deskflow-otg-gui.app/Contents/MacOS/deskflow-otg-companion.apk"
+          fi
           test -f "$mount_dir/deskflow-otg-gui.app/Contents/Resources/deskflow-otg/licenses/libusb-LGPL-2.1.txt"
       - name: Package Debian (Linux)
         if: startsWith(github.ref, 'refs/tags/v') && runner.os == 'Linux'
@@ -149,6 +205,7 @@ jobs:
           python scripts/package_deb.py --stage stage --version "${GITHUB_REF_NAME#v}" --output "dist/deskflow-otg-gui-${GITHUB_REF_NAME#v}-linux-amd64.deb"
           dpkg-deb --field "dist/deskflow-otg-gui-${GITHUB_REF_NAME#v}-linux-amd64.deb" Package Version Architecture Depends
           dpkg-deb --contents "dist/deskflow-otg-gui-${GITHUB_REF_NAME#v}-linux-amd64.deb" | grep 'opt/deskflow-otg/bin/deskflow-otg-gui'
+          dpkg-deb --fsys-tarfile "dist/deskflow-otg-gui-${GITHUB_REF_NAME#v}-linux-amd64.deb" | tar -xOf - ./opt/deskflow-otg/bin/deskflow-otg-companion.apk | cmp "$COMPANION_APK" -
       - name: Download verified appimagetool (Linux)
         if: runner.os == 'Linux'
         shell: bash
@@ -167,6 +224,9 @@ jobs:
           test -x squashfs-root/AppRun
           test -f squashfs-root/usr/bin/deskflow-otg-gui
           test -f squashfs-root/usr/lib/libusb-1.0.so.0
+          if [ -n "$COMPANION_APK" ]; then
+            cmp "$COMPANION_APK" squashfs-root/usr/bin/deskflow-otg-companion.apk
+          fi
       - name: Package (Linux / macOS)
         if: startsWith(github.ref, 'refs/tags/v') && runner.os != 'Windows'
         shell: bash

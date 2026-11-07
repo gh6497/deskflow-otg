@@ -17,6 +17,18 @@ QString CompanionApp::bundledApk()
     return QFileInfo(path).isFile() && QFileInfo(path).isReadable() ? path : QString();
 }
 
+QString CompanionApp::preferredApk(const QString &savedPath)
+{
+    const auto path = savedPath.trimmed();
+    const QFileInfo file(path);
+    if (!path.isEmpty() && file.isFile() && file.isReadable() &&
+        file.suffix().compare("apk", Qt::CaseInsensitive) == 0)
+        return path;
+    // Old installations saved an empty path; portable/AppImage paths may also
+    // disappear after an upgrade. Resolve the current bundle at every launch.
+    return bundledApk();
+}
+
 void CompanionApp::finish(const char *statusId, const QString &detail)
 {
     m_busy = false;
