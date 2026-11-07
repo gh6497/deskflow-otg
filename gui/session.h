@@ -48,6 +48,10 @@ struct ConnectionOptions {
     bool audio = false;
     bool clipboard = false;
     bool autoRotate = false;
+    // Non-GUI callers historically enabled ADB implicitly by selecting an
+    // auxiliary feature. The GUI always overrides this from the device
+    // profile, so retain that API behavior for CLI/test integrations.
+    bool adbEnabled = true;
 };
 
 // Only owned bridge/server processes are stopped. A resident BLE service is

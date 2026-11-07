@@ -58,8 +58,12 @@ libusb 可用的驱动）**。很多手机在关闭 USB 调试时会以 MTP/WPD 
 
 - `deskflow-otg` 的 HID 注入不依赖 ADB；Windows 驱动问题不能通过启动或重启
   ADB daemon 修复。
-- GUI 的“刷新设备”、自动读取分辨率和方向仍使用 ADB，因此这些 GUI 功能需要
-  USB 调试和可用的 ADB 驱动；也可以手动填写 USB 序列号和屏幕尺寸。
+- GUI 的 USB 设备刷新和自动连接使用 `usb-scan`，不要求 ADB。启用设备页的
+  “ADB 增强功能”后，可以预先填写无线 ADB `host:port`，在手机插入 USB 之前读取
+  屏幕尺寸和方向；也可以关闭 ADB 后手动填写 USB 序列号和屏幕尺寸。
+- Windows 下 ADB target 与 USB serial 是两个独立身份：无线 ADB 只用于屏幕信息、音频、
+  剪贴板等辅助能力，USB serial 只用于 AOA HID。Windows 不会把 USB serial 自动当成
+  ADB target。
 - 即使手动模式不需要 ADB，USB HID 初始化仍需要手机接口能被 libusb/WinUSB 打开。
 - `-s` 只能选择 libusb 扫描到的 USB 序列号，不能把网络 ADB 地址或无法读取的
   MTP/ADB 标识强行变成 AOA 设备。

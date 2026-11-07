@@ -64,6 +64,11 @@ QString defaultTlsClientCertificate()
     return QDir(directory).filePath(QStringLiteral("tls/client.pem"));
 }
 
+bool isWirelessAdbTarget(const QString &target)
+{
+    return QRegularExpression("^(?:\\[[^\\]]+\\]|[^:]+):[0-9]+$").match(target).hasMatch();
+}
+
 } // namespace
 
 void MainWindow::setTranslatedProperty(QObject *object, const char *property, const char *id)
@@ -377,10 +382,13 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     addTranslatedRow(deviceForm, "otg.label.usb_serial", m_serial);
     m_adbSerial = new QLineEdit;
     m_adbSerial->setObjectName("adbSerial");
+#ifdef Q_OS_WIN
+    setTranslatedProperty(m_adbSerial, "placeholderText", "otg.adb_serial.windows_placeholder");
+#else
     setTranslatedProperty(m_adbSerial, "placeholderText", "otg.adb_serial.placeholder");
+#endif
     setTranslatedProperty(m_adbSerial, "toolTip", "otg.adb_serial.tooltip");
-    addTranslatedRow(deviceForm, "otg.label.adb_serial", m_adbSerial);
-    m_deviceStatus = translated(new QLabel, "text", "otg.device.debugging_required");
+    m_deviceStatus = translated(new QLabel, "text", "otg.device.manual_hint");
     m_deviceStatus->setWordWrap(true);
     deviceForm->addRow(m_deviceStatus);
     m_autoConnectEnabled = translated(new QCheckBox, "text", "otg.auto_connect.enabled");
@@ -388,6 +396,74 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     setTranslatedProperty(m_autoConnectEnabled, "toolTip", "otg.auto_connect.tooltip");
     deviceForm->addRow(m_autoConnectEnabled);
     formLayout->addWidget(deviceBox);
+
+    auto *adbBox = translated(new QGroupBox, "title", "otg.section.adb");
+    m_adbBox = adbBox;
+    auto *adbForm = new QFormLayout(adbBox);
+    m_adbForm = adbForm;
+    adbForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    m_adbEnabled = translated(new QCheckBox, "text", "otg.adb.enabled");
+    m_adbEnabled->setObjectName("adbEnabled");
+    setTranslatedProperty(m_adbEnabled, "toolTip", "otg.adb.enabled.tooltip");
+    adbForm->addRow(m_adbEnabled);
+    auto *adbTargetLabel = translated(new QLabel, "text", "otg.label.adb_serial");
+#ifdef Q_OS_WIN
+    setTranslatedProperty(adbTargetLabel, "text", "otg.label.adb_wireless");
+#endif
+    adbForm->addRow(adbTargetLabel, m_adbSerial);
+    auto *adbActions = new QWidget;
+    auto *adbActionsLayout = new QHBoxLayout(adbActions);
+    adbActionsLayout->setContentsMargins(0, 0, 0, 0);
+    m_adbTest = translated(new QPushButton, "text", "otg.adb.test");
+    m_adbTest->setObjectName("adbTest");
+    m_adbReadDisplay = translated(new QPushButton, "text", "otg.adb.read_display");
+    m_adbReadDisplay->setObjectName("adbReadDisplay");
+    adbActionsLayout->addWidget(m_adbTest);
+    adbActionsLayout->addWidget(m_adbReadDisplay);
+    adbActionsLayout->addStretch();
+    adbForm->addRow(adbActions);
+    m_adbStatus = new QLabel;
+    m_adbStatus->setObjectName("adbStatus");
+    m_adbStatus->setWordWrap(true);
+    adbForm->addRow(m_adbStatus);
+
+    m_audio = translated(new QCheckBox, "text", "otg.audio.enabled");
+    m_audio->setObjectName("audioEnabled");
+    setTranslatedProperty(m_audio, "toolTip", "otg.audio.tooltip");
+    adbForm->addRow(m_audio);
+
+    m_clipboard = translated(new QCheckBox, "text", "otg.clipboard.enabled");
+    m_clipboard->setObjectName("clipboardEnabled");
+    setTranslatedProperty(m_clipboard, "toolTip", "otg.clipboard.tooltip");
+    adbForm->addRow(m_clipboard);
+
+    m_clipboardStatus = new QLabel;
+    m_clipboardStatus->setObjectName("clipboardStatus");
+    m_clipboardStatus->setWordWrap(true);
+    adbForm->addRow(m_clipboardStatus);
+
+    m_autoRotate = translated(new QCheckBox, "text", "otg.display.auto_rotate");
+    m_autoRotate->setObjectName("autoRotate");
+    setTranslatedProperty(m_autoRotate, "toolTip", "otg.display.auto_rotate.tooltip");
+    adbForm->addRow(m_autoRotate);
+
+    m_unlockEnabled = translated(new QCheckBox, "text", "otg.unlock.enabled");
+    m_unlockEnabled->setObjectName("unlockEnabled");
+    setTranslatedProperty(m_unlockEnabled, "toolTip", "otg.unlock.tooltip");
+    adbForm->addRow(m_unlockEnabled);
+    m_unlockPin = new QLineEdit;
+    m_unlockPin->setObjectName("unlockPin");
+    m_unlockPin->setEchoMode(QLineEdit::Password);
+    m_unlockPin->setMaxLength(32);
+    m_unlockPin->setValidator(new QRegularExpressionValidator(QRegularExpression("[0-9]{0,32}"), m_unlockPin));
+    setTranslatedProperty(m_unlockPin, "placeholderText", "otg.unlock.pin_hint");
+    setTranslatedProperty(m_unlockPin, "toolTip", "otg.unlock.tooltip");
+    addTranslatedRow(adbForm, "otg.label.unlock_pin", m_unlockPin);
+    auto *unlockHint = translated(new QLabel, "text", "otg.unlock.adb_hint");
+    unlockHint->setWordWrap(true);
+    adbForm->addRow(unlockHint);
+    connect(m_unlockEnabled, &QCheckBox::toggled, this, [this] { updateEnabled(); });
+    formLayout->addWidget(adbBox);
 
     auto *displayBox = translated(new QGroupBox, "title", "otg.section.display");
     auto *displayForm = new QFormLayout(displayBox);
@@ -435,10 +511,6 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     m_phone->setObjectName("screenName");
     addTranslatedRow(displayForm, "otg.label.phone_name", m_phone);
 
-    m_autoRotate = translated(new QCheckBox, "text", "otg.display.auto_rotate");
-    m_autoRotate->setObjectName("autoRotate");
-    setTranslatedProperty(m_autoRotate, "toolTip", "otg.display.auto_rotate.tooltip");
-    displayForm->addRow(m_autoRotate);
     formLayout->addWidget(displayBox);
 
     auto *featuresBox = translated(new QGroupBox, "title", "otg.section.features");
@@ -466,37 +538,6 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     setTranslatedProperty(m_rightButtonAction, "toolTip", "otg.right_button.tooltip");
     addTranslatedRow(featuresForm, "otg.label.right_button_action", m_rightButtonAction);
 
-    m_unlockEnabled = translated(new QCheckBox, "text", "otg.unlock.enabled");
-    m_unlockEnabled->setObjectName("unlockEnabled");
-    setTranslatedProperty(m_unlockEnabled, "toolTip", "otg.unlock.tooltip");
-    featuresForm->addRow(m_unlockEnabled);
-    m_unlockPin = new QLineEdit;
-    m_unlockPin->setObjectName("unlockPin");
-    m_unlockPin->setEchoMode(QLineEdit::Password);
-    m_unlockPin->setMaxLength(32);
-    m_unlockPin->setValidator(new QRegularExpressionValidator(QRegularExpression("[0-9]{0,32}"), m_unlockPin));
-    setTranslatedProperty(m_unlockPin, "placeholderText", "otg.unlock.pin_hint");
-    setTranslatedProperty(m_unlockPin, "toolTip", "otg.unlock.tooltip");
-    addTranslatedRow(featuresForm, "otg.label.unlock_pin", m_unlockPin);
-    auto *unlockHint = translated(new QLabel, "text", "otg.unlock.adb_hint");
-    unlockHint->setWordWrap(true);
-    featuresForm->addRow(unlockHint);
-    connect(m_unlockEnabled, &QCheckBox::toggled, this, [this] { updateEnabled(); });
-
-    m_audio = translated(new QCheckBox, "text", "otg.audio.enabled");
-    m_audio->setObjectName("audioEnabled");
-    setTranslatedProperty(m_audio, "toolTip", "otg.audio.tooltip");
-    featuresForm->addRow(m_audio);
-
-    m_clipboard = translated(new QCheckBox, "text", "otg.clipboard.enabled");
-    m_clipboard->setObjectName("clipboardEnabled");
-    setTranslatedProperty(m_clipboard, "toolTip", "otg.clipboard.tooltip");
-    featuresForm->addRow(m_clipboard);
-
-    m_clipboardStatus = new QLabel;
-    m_clipboardStatus->setObjectName("clipboardStatus");
-    m_clipboardStatus->setWordWrap(true);
-    featuresForm->addRow(m_clipboardStatus);
     formLayout->addWidget(featuresBox);
 
     auto *companionBox = translated(new QGroupBox, "title", "otg.companion.title");
@@ -660,8 +701,7 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     buttons->addWidget(m_transferFiles);
     connect(m_transferFiles, &QPushButton::clicked, this, [this] {
         if (m_transferDialog) { m_transferDialog->show(); m_transferDialog->raise(); return; }
-        const auto target = !m_adbSerial->text().trimmed().isEmpty() ? m_adbSerial->text().trimmed()
-            : m_transport->currentData() == "usb" ? m_serial->text().trimmed() : QString();
+        const auto target = adbTargetForCurrentDevice();
         auto *dialog = new TransferDialog(m_adb->text().trimmed(), target, this);
         dialog->setAttribute(Qt::WA_DeleteOnClose);
         m_transferDialog = dialog;
@@ -699,12 +739,17 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
         configuredAdb = findAdb();
     m_adb->setText(configuredAdb);
     m_adbSerial->setText(settings.value("adbSerial").toString());
+    m_adbEnabled->setChecked(settings.value("adbEnabled", false).toBool());
     m_audio->setChecked(settings.value("audio", false).toBool());
     m_clipboard->setChecked(settings.value("clipboard", false).toBool());
     m_autoRotate->setChecked(settings.value("autoRotate", false).toBool());
     connect(m_audio, &QCheckBox::toggled, this, [this] { updateEnabled(); });
     connect(m_clipboard, &QCheckBox::toggled, this, [this] { updateEnabled(); });
     connect(m_autoRotate, &QCheckBox::toggled, this, [this] { updateEnabled(); });
+    connect(m_adbEnabled, &QCheckBox::toggled, this, [this] {
+        if (!m_loadingDevice) { storeDevice(); persistDevices(); }
+        updateEnabled();
+    });
     m_deskflow->setText(settings.value("deskflow", findDeskflow()).toString());
     m_serial->setText(settings.value("serial").toString());
     m_transport->setCurrentIndex(qMax(0, m_transport->findData(settings.value("transport", "usb"))));
@@ -837,6 +882,32 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
 #endif
         updateEnabled();
     });
+    connect(m_adbTest, &QPushButton::clicked, this, [this] {
+        if (!m_adbEnabled->isChecked() || m_adb->text().trimmed().isEmpty() ||
+            adbTargetForCurrentDevice().isEmpty() || m_scanning)
+            return;
+        m_scanning = true;
+        updateEnabled();
+        const auto adb = m_adb->text().trimmed();
+        const auto target = adbTargetForCurrentDevice();
+        runCommand(this, adb, {"start-server"}, [this, adb, target](bool started, const QString &startOutput) {
+            if (!started) {
+                m_scanning = false;
+                m_adbStatus->setText(qtTrId("otg.adb.status.failed"));
+                appendLog("[ADB] start-server: " + startOutput);
+                updateEnabled();
+                return;
+            }
+            runCommand(this, adb, {"-s", target, "get-state"}, [this, target](bool ok, const QString &output) {
+                m_scanning = false;
+                const bool ready = ok && output.trimmed() == "device";
+                m_adbStatus->setText(qtTrId(ready ? "otg.adb.status.ready" : "otg.adb.status.failed"));
+                appendLog(QStringLiteral("[ADB] get-state %1: %2").arg(target, output.trimmed()));
+                updateEnabled();
+            });
+        });
+    });
+    connect(m_adbReadDisplay, &QPushButton::clicked, this, &MainWindow::readDisplayFromAdb);
     connect(m_connect, &QPushButton::clicked, this, &MainWindow::connectDevice);
     connect(m_disconnect, &QPushButton::clicked, this, [this] { m_connections.stop(m_selectedId); });
     connect(&m_connections, &ConnectionManager::log, this, [this](const QString &id, const QString &message) {
@@ -997,6 +1068,7 @@ void MainWindow::addDevice()
     profile["alias"] = name;
     profile["serial"] = "";
     profile["adbSerial"] = "";
+    profile["adbEnabled"] = false;
     profile["audio"] = false;
     profile["clipboard"] = false;
     profile["autoRotate"] = false;
@@ -1139,21 +1211,22 @@ ConnectionOptions MainWindow::connectionOptions(const QVariantMap &profile) cons
     options.phone = profile.value("phone", "android").toString();
     options.serial = profile.value("serial").toString();
     options.adbSerial = profile.value("adbSerial").toString().trimmed();
+    options.adbEnabled = profile.value("adbEnabled", false).toBool();
     options.transport = profile.value("transport", "usb").toString();
 #ifdef OTG_GUI_HAVE_AUDIO
-    options.audio = options.transport == "usb" && profile.value("audio", false).toBool();
+    options.audio = options.adbEnabled && profile.value("audio", false).toBool();
 #else
     options.audio = false;
 #endif
 #ifdef OTG_GUI_HAVE_CLIPBOARD
-    options.clipboard = profile.value("clipboard", false).toBool();
+    options.clipboard = options.adbEnabled && profile.value("clipboard", false).toBool();
 #endif
     options.autoRotate = options.transport == "usb" &&
-        (options.audio || options.clipboard) && profile.value("autoRotate", false).toBool();
+        options.adbEnabled && (options.audio || options.clipboard) && profile.value("autoRotate", false).toBool();
     options.mouseMode = options.transport == "ble" ? "absolute" : profile.value("mouseMode", "absolute").toString();
     options.middleButtonAction = profile.value("middleButtonAction", "normal").toString();
     options.rightButtonAction = profile.value("rightButtonAction", "normal").toString();
-    options.unlockPin = profile.value("unlockEnabled", false).toBool() ?
+    options.unlockPin = options.adbEnabled && profile.value("unlockEnabled", false).toBool() ?
         profile.value("unlockPin").toString() : QString();
     options.unlockAdb = !options.unlockPin.isEmpty();
     options.blePeer = profile.value("blePeer").toString();
@@ -1202,26 +1275,28 @@ void MainWindow::updateEnabled()
     m_deviceForm->setRowVisible(m_serial, !ble);
     // File sharing and companion status may use an explicit wireless ADB target
     // even with BLE HID, independently of the optional clipboard build feature.
-    const bool adbFeatures = true;
-    m_deviceForm->setRowVisible(m_adbSerial, adbFeatures);
+    const bool adbFeatures = m_adbEnabled->isChecked();
+    m_adbBox->setVisible(true);
     m_deviceForm->setRowVisible(m_autoConnectEnabled, !ble);
-    m_programForm->setRowVisible(m_adb->parentWidget(), adbFeatures);
+    m_programForm->setRowVisible(m_adb->parentWidget(), true);
 #ifdef OTG_GUI_HAVE_CLIPBOARD
-    m_featuresForm->setRowVisible(m_clipboard, true);
-    m_featuresForm->setRowVisible(m_clipboardStatus, true);
+    m_adbForm->setRowVisible(m_clipboard, true);
+    m_adbForm->setRowVisible(m_clipboardStatus, true);
 #else
-    m_featuresForm->setRowVisible(m_clipboard, false);
-    m_featuresForm->setRowVisible(m_clipboardStatus, false);
+    m_adbForm->setRowVisible(m_clipboard, false);
+    m_adbForm->setRowVisible(m_clipboardStatus, false);
 #endif
     m_clipboardStatus->setText(idle ? qtTrId(m_clipboard->isChecked() ?
         "otg.clipboard.disconnected" : "otg.clipboard.off") : m_session->clipboardStatusMessage());
 #ifdef OTG_GUI_HAVE_AUDIO
-    m_featuresForm->setRowVisible(m_audio, !ble);
+    // Audio is currently USB-only, but keep the option visible in the
+    // ADB-enhancement section for BLE so its unavailable state is explicit.
+    m_adbForm->setRowVisible(m_audio, true);
 #else
-    m_featuresForm->setRowVisible(m_audio, false);
+    m_adbForm->setRowVisible(m_audio, false);
 #endif
     m_featuresForm->setRowVisible(m_mouseMode, !ble);
-    m_displayForm->setRowVisible(m_autoRotate, !ble);
+    m_adbForm->setRowVisible(m_autoRotate, !ble);
     m_companionBox->setVisible(!ble);
     m_autoConnect.setReady(!m_closing && !m_companion.busy());
     if (m_closing)
@@ -1255,25 +1330,34 @@ void MainWindow::updateEnabled()
     m_computer->setEnabled(m_manage->isChecked());
     m_phone->setEnabled(sharedIdle || !m_manage->isChecked());
     m_serial->setEnabled(!ble);
+    m_adbEnabled->setEnabled(true);
     m_adbSerial->setEnabled(adbFeatures);
     m_devices->setEnabled(!ble);
     m_refresh->setEnabled(!ble);
-    m_adb->setEnabled(adbFeatures);
-    m_audio->setEnabled(!ble);
-    m_autoRotate->setEnabled(!ble && (m_audio->isChecked() || m_clipboard->isChecked()) && idle);
+    m_adb->setEnabled(true);
+    m_adbTest->setEnabled(adbFeatures && !m_adb->text().trimmed().isEmpty() &&
+                          !adbTargetForCurrentDevice().isEmpty() && idle);
+    m_adbReadDisplay->setEnabled(adbFeatures && !m_adb->text().trimmed().isEmpty() &&
+                                 !adbTargetForCurrentDevice().isEmpty() && idle);
+    m_adbStatus->setText(!adbFeatures ? qtTrId("otg.adb.status.off") :
+                         adbTargetForCurrentDevice().isEmpty() ? qtTrId("otg.adb.status.target_missing") :
+                         qtTrId("otg.adb.status.ready_hint"));
+    m_audio->setEnabled(adbFeatures);
+    m_clipboard->setEnabled(adbFeatures);
+    m_autoRotate->setEnabled(adbFeatures && !ble && (m_audio->isChecked() || m_clipboard->isChecked()) && idle);
     m_autoConnectEnabled->setEnabled(!ble);
     m_adapter->setEnabled(linuxBle);
     m_blePeer->setEnabled(ble);
     m_bleIsolate->setEnabled(linuxBle);
     m_stopBleService->setEnabled((linuxBle || m_session->hasBleProvider()) && !m_stoppingBleService);
     m_mouseMode->setEnabled(!ble);
-    m_unlockEnabled->setEnabled(true);
-    m_unlockPin->setEnabled(m_unlockEnabled->isChecked());
-    const bool companionTarget = !m_adb->text().trimmed().isEmpty() &&
-        (!m_adbSerial->text().trimmed().isEmpty() || !m_serial->text().trimmed().isEmpty());
-    m_transferFiles->setEnabled(!m_closing && !m_companion.busy() &&
+    m_unlockEnabled->setEnabled(adbFeatures);
+    m_unlockPin->setEnabled(adbFeatures && m_unlockEnabled->isChecked());
+    const bool companionTarget = adbFeatures && !m_adb->text().trimmed().isEmpty() &&
+        !adbTargetForCurrentDevice().isEmpty();
+    m_transferFiles->setEnabled(adbFeatures && !m_closing && !m_companion.busy() &&
         !m_adb->text().trimmed().isEmpty() &&
-        (!m_adbSerial->text().trimmed().isEmpty() || (!ble && !m_serial->text().trimmed().isEmpty())));
+        !adbTargetForCurrentDevice().isEmpty());
     m_companionInstall->setEnabled(companionTarget);
     m_companionOpen->setEnabled(companionTarget);
     m_companionCheck->setEnabled(companionTarget);
@@ -1312,14 +1396,23 @@ void MainWindow::updateCompanionStatus()
     m_companionStatus->setText(qtTrId(id.toLatin1().constData()));
 }
 
+QString MainWindow::adbTargetForCurrentDevice() const
+{
+    const auto explicitTarget = m_adbSerial->text().trimmed();
+    if (!explicitTarget.isEmpty()) return explicitTarget;
+#ifndef Q_OS_WIN
+    if (m_transport->currentData() == "usb") return m_serial->text().trimmed();
+#endif
+    return {};
+}
+
 void MainWindow::setupCompanion(CompanionApp::Action action)
 {
     if (m_closing || m_scanning || m_companion.busy() || m_transport->currentData() != "usb" ||
         m_connections.state(m_selectedId) != Session::State::Idle) return;
     saveSettings();
     m_companionDeviceId = m_selectedId;
-    const auto target = m_adbSerial->text().trimmed().isEmpty() ?
-        m_serial->text().trimmed() : m_adbSerial->text().trimmed();
+    const auto target = adbTargetForCurrentDevice();
     m_companion.start(action, m_adb->text().trimmed(), target, m_companionApk->text().trimmed());
     updateEnabled();
 }
@@ -1376,7 +1469,13 @@ void MainWindow::refreshDevices()
 {
     if (m_transport->currentData() != "usb" || m_scanning || m_connections.state(m_selectedId) != Session::State::Idle || m_closing)
         return;
+    const bool useUsbScan = !m_adbEnabled->isChecked();
 #ifdef Q_OS_WIN
+    const bool platformUsbScan = true;
+#else
+    const bool platformUsbScan = false;
+#endif
+    if (useUsbScan || platformUsbScan)
     {
     // Windows ADB may not expose the USB descriptor serial (and can list the
     // device with an unusable placeholder).  The bridge already has the
@@ -1423,7 +1522,6 @@ void MainWindow::refreshDevices()
     });
     return;
     }
-#endif
     if (m_adb->text().trimmed().isEmpty()) {
         setTranslatedProperty(m_deviceStatus, "text", "otg.device.adb_not_found");
         return;
@@ -1464,6 +1562,87 @@ void MainWindow::refreshDevices()
     });
 }
 
+void MainWindow::readDisplayFromAdb()
+{
+    if (!m_adbEnabled->isChecked() || m_adb->text().trimmed().isEmpty() ||
+        adbTargetForCurrentDevice().isEmpty() || m_scanning || m_closing)
+        return;
+    m_scanning = true;
+    ++m_request;
+    const auto request = m_request;
+    const auto adb = m_adb->text().trimmed();
+    const auto target = adbTargetForCurrentDevice();
+    setTranslatedProperty(m_deviceStatus, "text", "otg.device.reading");
+    m_adbStatus->setText(qtTrId("otg.adb.status.checking"));
+    updateEnabled();
+    runCommand(this, adb, {"start-server"}, [this, request, adb, target](bool started, const QString &startOutput) {
+        if (request != m_request) return;
+        if (!started) {
+            m_scanning = false;
+            m_adbStatus->setText(qtTrId("otg.adb.status.failed"));
+            appendLog("[ADB] start-server: " + startOutput);
+            updateEnabled();
+            return;
+        }
+        const auto readDisplay = [this, request, adb, target] {
+            runCommand(this, adb, {"-s", target, "shell", "wm", "size"},
+                       [this, request, adb, target](bool sizeOk, const QString &text) {
+                if (request != m_request) return;
+                const QSize size = sizeOk ? parseScreenSize(text) : QSize();
+                if (!size.isValid()) {
+                    m_scanning = false;
+                    m_adbStatus->setText(qtTrId("otg.adb.status.failed"));
+                    setTranslatedProperty(m_deviceStatus, "text", "otg.device.size_failed");
+                    appendLog("[ADB wm size] " + text);
+                    updateEnabled();
+                    return;
+                }
+                runCommand(this, adb, {"-s", target, "shell", "dumpsys", "input"},
+                           [this, request, size](bool rotationOk, const QString &rotationText) {
+                    if (request != m_request) return;
+                    const int rotation = rotationOk ? parseRotation(rotationText) : -1;
+                    QSize oriented = size;
+                    if (rotation == 1 || rotation == 3) oriented.transpose();
+                    m_width->setValue(oriented.width());
+                    m_height->setValue(oriented.height());
+                    m_scanning = false;
+                    m_adbStatus->setText(qtTrId("otg.adb.status.ready"));
+                    setTranslatedProperty(m_deviceStatus, "text", rotation < 0 ?
+                        "otg.device.orientation_unknown" : "otg.device.ready");
+                    updateEnabled();
+                });
+            });
+        };
+        runCommand(this, adb, {"-s", target, "get-state"},
+                   [this, request, adb, target, readDisplay](bool ok, const QString &state) {
+            if (request != m_request) return;
+            if (ok && state.trimmed() == "device") {
+                readDisplay();
+                return;
+            }
+            if (!isWirelessAdbTarget(target)) {
+                m_scanning = false;
+                m_adbStatus->setText(qtTrId("otg.adb.status.failed"));
+                appendLog(QStringLiteral("[ADB] target %1 is not ready: %2").arg(target, state.trimmed()));
+                updateEnabled();
+                return;
+            }
+            runCommand(this, adb, {"connect", target},
+                       [this, request, adb, target, readDisplay](bool connected, const QString &output) {
+                if (request != m_request) return;
+                appendLog(QStringLiteral("[ADB] connect %1: %2 (%3)").arg(target, connected ? "ok" : "failed", output.trimmed()));
+                if (!connected) {
+                    m_scanning = false;
+                    m_adbStatus->setText(qtTrId("otg.adb.status.failed"));
+                    updateEnabled();
+                    return;
+                }
+                readDisplay();
+            });
+        });
+    });
+}
+
 void MainWindow::readDevice()
 {
     const auto request = ++m_request;
@@ -1483,11 +1662,25 @@ void MainWindow::readDevice()
         return;
     }
     m_serial->setText(device.serial);
+    if (!m_adbEnabled->isChecked()) {
+        m_scanning = false;
+        setTranslatedProperty(m_deviceStatus, "text", "otg.device.manual_hint");
+        updateEnabled();
+        return;
+    }
+#ifdef Q_OS_WIN
+    if (m_adbSerial->text().trimmed().isEmpty()) {
+        m_scanning = false;
+        m_adbStatus->setText(qtTrId("otg.adb.status.target_missing"));
+        setTranslatedProperty(m_deviceStatus, "text", "otg.device.manual_hint");
+        updateEnabled();
+        return;
+    }
+#endif
     m_scanning = true;
     updateEnabled();
     const QString adb = m_adb->text();
-    const QString target = !m_adbSerial->text().trimmed().isEmpty() ?
-        m_adbSerial->text().trimmed() : device.serial;
+    const QString target = adbTargetForCurrentDevice();
     setTranslatedProperty(m_deviceStatus, "text", "otg.device.reading");
     const auto readDisplay = [this, request, device, adb, target] {
         runCommand(this, adb, {"-s", target, "shell", "wm", "size"},
@@ -1596,6 +1789,7 @@ QVariantMap MainWindow::deviceProfile() const
 {
     return {{"serial", m_serial->text().trimmed()},
             {"adbSerial", m_adbSerial->text().trimmed()},
+            {"adbEnabled", m_adbEnabled->isChecked()},
             {"alias", m_alias->text().trimmed()},
             {"transport", m_transport->currentData()}, {"bleAdapter", m_adapter->text()},
             {"blePeer", m_blePeer->text().trimmed().toUpper()}, {"bleIsolate", m_bleIsolate->isChecked()},
@@ -1624,6 +1818,7 @@ void MainWindow::applyDeviceProfile(const QVariantMap &profile)
     m_devices->setCurrentIndex(0);
     m_serial->setText(profile.value("serial").toString());
     m_adbSerial->setText(profile.value("adbSerial").toString());
+    m_adbEnabled->setChecked(profile.value("adbEnabled", false).toBool());
     m_width->setValue(profile.value("originalWidth", 1080).toInt());
     m_height->setValue(profile.value("originalHeight", 1920).toInt());
     m_sensitivity->setValue(profile.value("sensitivityMultiplier", 1.0).toDouble());
@@ -1726,6 +1921,8 @@ void MainWindow::saveSettings()
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
+    if (m_closing)
+        ++m_request; // Invalidate outstanding discovery/ADB callbacks before child teardown.
     saveSettings();
     if (!m_closing && m_tray->isVisible() && trayAvailable()) {
         event->ignore();
