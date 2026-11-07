@@ -44,10 +44,10 @@
 
 namespace {
 
-template <typename SpinBox>
-class NoWheelSpinBox : public SpinBox {
+template <typename Widget>
+class NoWheelWidget : public Widget {
 public:
-    using SpinBox::SpinBox;
+    using Widget::Widget;
 
 protected:
     void wheelEvent(QWheelEvent *event) override
@@ -247,7 +247,7 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     auto *headingRow = new QHBoxLayout;
     headingRow->addWidget(heading, 1);
     headingRow->addWidget(translated(new QLabel, "text", "otg.label.language"));
-    m_language = new QComboBox;
+    m_language = new NoWheelWidget<QComboBox>;
     m_language->setObjectName("languageSelector");
     m_language->addItem(qtTrId("otg.language.chinese"), "zh_CN");
     m_language->addItem(qtTrId("otg.language.english"), "en");
@@ -319,7 +319,7 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     m_alias = new QLineEdit;
     m_alias->setObjectName("deviceAlias");
     addTranslatedRow(deviceForm, "otg.multi.alias", m_alias);
-    m_transport = new QComboBox;
+    m_transport = new NoWheelWidget<QComboBox>;
     m_transport->setObjectName("transportSelector");
     m_transport->addItem(qtTrId("otg.transport.usb"), "usb");
 #if defined(Q_OS_LINUX) && defined(OTG_GUI_HAVE_BLE)
@@ -365,7 +365,8 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     auto *deviceRow = new QWidget;
     auto *deviceLayout = new QHBoxLayout(deviceRow);
     deviceLayout->setContentsMargins(0, 0, 0, 0);
-    m_devices = new QComboBox;
+    m_devices = new NoWheelWidget<QComboBox>;
+    m_devices->setObjectName("deviceSelector");
     m_devices->addItem(qtTrId("otg.device.manual"), -1);
     m_refresh = translated(new QPushButton, "text", "otg.action.refresh");
     deviceLayout->addWidget(m_devices, 1);
@@ -396,8 +397,8 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     auto *sizeRow = new QWidget;
     auto *sizeLayout = new QHBoxLayout(sizeRow);
     sizeLayout->setContentsMargins(0, 0, 0, 0);
-    m_width = new NoWheelSpinBox<QSpinBox>;
-    m_height = new NoWheelSpinBox<QSpinBox>;
+    m_width = new NoWheelWidget<QSpinBox>;
+    m_height = new NoWheelWidget<QSpinBox>;
     m_width->setObjectName("screenWidth");
     m_height->setObjectName("screenHeight");
     m_width->setRange(1, 32767);
@@ -416,7 +417,7 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     });
     addTranslatedRow(displayForm, "otg.label.original_size", sizeRow);
 
-    m_sensitivity = new NoWheelSpinBox<QDoubleSpinBox>;
+    m_sensitivity = new NoWheelWidget<QDoubleSpinBox>;
     m_sensitivity->setObjectName("sensitivityMultiplier");
     m_sensitivity->setRange(1.0, 10.0);
     m_sensitivity->setDecimals(2);
@@ -445,20 +446,20 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     m_featuresForm = featuresForm;
     featuresForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
 
-    m_mouseMode = new QComboBox;
+    m_mouseMode = new NoWheelWidget<QComboBox>;
     m_mouseMode->setObjectName("mouseMode");
     m_mouseMode->addItem(qtTrId("otg.mouse.absolute"), "absolute");
     m_mouseMode->addItem(qtTrId("otg.mouse.relative"), "relative");
     addTranslatedRow(featuresForm, "otg.label.mouse_mode", m_mouseMode);
 
-    m_middleButtonAction = new QComboBox;
+    m_middleButtonAction = new NoWheelWidget<QComboBox>;
     m_middleButtonAction->setObjectName("middleButtonAction");
     m_middleButtonAction->addItem(qtTrId("otg.middle_button.normal"), "normal");
     m_middleButtonAction->addItem(qtTrId("otg.middle_button.home"), "home");
     setTranslatedProperty(m_middleButtonAction, "toolTip", "otg.middle_button.tooltip");
     addTranslatedRow(featuresForm, "otg.label.middle_button_action", m_middleButtonAction);
 
-    m_rightButtonAction = new QComboBox;
+    m_rightButtonAction = new NoWheelWidget<QComboBox>;
     m_rightButtonAction->setObjectName("rightButtonAction");
     m_rightButtonAction->addItem(qtTrId("otg.right_button.normal"), "normal");
     m_rightButtonAction->addItem(qtTrId("otg.right_button.back"), "back");
@@ -549,7 +550,8 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     auto *serverForm = new QFormLayout(serverBox);
     m_manage = translated(new QCheckBox, "text", "otg.server.manage");
     serverForm->addRow(m_manage);
-    m_direction = new QComboBox;
+    m_direction = new NoWheelWidget<QComboBox>;
+    m_direction->setObjectName("screenPosition");
     m_direction->addItem(qtTrId("otg.position.right"), "right");
     m_direction->addItem(qtTrId("otg.position.left"), "left");
     m_direction->addItem(qtTrId("otg.position.up"), "up");
@@ -559,7 +561,7 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     m_layoutCanvas = new ScreenLayoutPreview;
     m_layoutCanvas->setObjectName("screenLayoutCanvas");
     layoutForm->addRow(m_layoutCanvas);
-    m_neighbor = new QComboBox;
+    m_neighbor = new NoWheelWidget<QComboBox>;
     m_neighbor->setObjectName("screenNeighbor");
     addTranslatedRow(layoutForm, "otg.multi.neighbor", m_neighbor);
     addTranslatedRow(layoutForm, "otg.label.position", m_direction);
@@ -573,7 +575,7 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     layoutForm->addRow(layoutHint);
     m_computer = new QLineEdit;
     m_host = new QLineEdit;
-    m_port = new NoWheelSpinBox<QSpinBox>;
+    m_port = new NoWheelWidget<QSpinBox>;
     m_port->setObjectName("serverPort");
     m_port->setRange(1, 65535);
     addTranslatedRow(serverForm, "otg.label.computer_name", m_computer);
@@ -604,7 +606,7 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     auto *tlsKeyRow = new QWidget;
     auto *tlsKeyLayout = new QHBoxLayout(tlsKeyRow);
     tlsKeyLayout->setContentsMargins(0, 0, 0, 0);
-    m_tlsKeyLength = new QComboBox;
+    m_tlsKeyLength = new NoWheelWidget<QComboBox>;
     m_tlsKeyLength->setObjectName("tlsKeyLength");
     m_tlsKeyLength->addItem(QStringLiteral("2048"), 2048);
     m_tlsKeyLength->addItem(QStringLiteral("4096"), 4096);
@@ -674,7 +676,7 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     rightLayout->addLayout(buttons);
     auto *logHeader = new QHBoxLayout;
     logHeader->addWidget(translated(new QLabel, "text", "otg.log.title"), 1);
-    m_logFilter = new QComboBox;
+    m_logFilter = new NoWheelWidget<QComboBox>;
     m_logFilter->setObjectName("logFilter");
     logHeader->addWidget(m_logFilter);
     auto *clearLog = translated(new QPushButton, "text", "otg.action.clear_log");
