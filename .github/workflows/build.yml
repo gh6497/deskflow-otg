@@ -27,6 +27,11 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          # The legacy SDK "tools" package was removed from current
+          # repositories. setup-android defaults to installing it, so request
+          # only the still-supported platform tools explicitly.
+          packages: platform-tools
       - name: Install fixed Android SDK
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
       - name: Test signing helper
