@@ -12,6 +12,7 @@ struct AndroidDevice {
 };
 
 QList<AndroidDevice> parseDevices(const QString &text);
+QList<AndroidDevice> parseUsbScanDevices(const QString &text);
 QSize parseScreenSize(const QString &text);
 int parseRotation(const QString &text);
 bool validScreenName(const QString &name);

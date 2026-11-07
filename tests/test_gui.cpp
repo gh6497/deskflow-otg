@@ -857,6 +857,15 @@ private slots:
         QCOMPARE(devices[0].model, "Pixel 8");
         QCOMPARE(devices[1].state, "unauthorized");
     }
+    void usbScanDevices()
+    {
+        const auto devices = parseUsbScanDevices(
+            R"({"version":1,"devices":[{"id":"1:2","vid":1234,"pid":5678,"serial":"USB123"},{"id":"1:3","serial":""}]})");
+        QCOMPARE(devices.size(), 1);
+        QCOMPARE(devices[0].serial, "USB123");
+        QCOMPARE(devices[0].state, "device");
+        QVERIFY(parseUsbScanDevices("not json").isEmpty());
+    }
     void dimensions()
     {
         QCOMPARE(parseScreenSize("Physical size: 1080x2400\r\nOverride size: 720x1600\r\n"), QSize(720, 1600));
