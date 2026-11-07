@@ -5,9 +5,12 @@ cmake-build-*/
 **/.gradle/
 **/local.properties
 stage/
+stage-*/
 dist/
+dist-*/
 squashfs-root/
 adb-bundle/
+adb-bundle-*/
 .cache/
 *.o
 *.a
