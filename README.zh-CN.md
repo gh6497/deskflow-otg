@@ -9,9 +9,9 @@ USB HID 数据通道**不需要 adb、不需要开启 USB 调试**（和 `scrcpy
 但 Windows 仍需将手机 USB 接口绑定到 libusb 可用的驱动。Windows 的识别限制和排查
 步骤见 [Windows USB OTG 设备识别](docs/WINDOWS_USB.md)。
 
-提供命令行和可选的 **Qt 桌面 GUI**。GUI 可以通过 ADB 自动识别设备序列号、宽高和
-方向，配置并启动已安装的 Deskflow，再一键连接手机。只有 ADB 读取设备与尺寸需要 USB 调试；
-手动填写设备信息、已记住手机的 USB 自动连接均不需要。详见[桌面 GUI](#桌面-gui)。
+提供命令行和可选的 **Qt 桌面 GUI**。GUI 可按设备选择是否启用 ADB 增强功能，用于自动识别
+屏幕宽高和方向，配置并启动已安装的 Deskflow，再一键连接手机。只有启用的 ADB 增强功能
+需要 USB 调试；手动填写设备信息、已记住手机的 USB 自动连接均不需要。详见[桌面 GUI](#桌面-gui)。
 
 ```
 ┌─────────────────────────────── 主机电脑 ───────────────────────────────┐
@@ -42,7 +42,7 @@ USB HID 数据通道**不需要 adb、不需要开启 USB 调试**（和 `scrcpy
 
 两者串起来就是：`主机键盘鼠标 → deskflow → 本程序 → AOA HID → 手机`。
 
-Linux/Windows 实验性音频模式沿用 scrcpy 的 Android Server：AOA HID 仍传键鼠，ADB 独立
+Linux/Windows 实验性音频模式沿用 scrcpy 的 Android Server：AOA HID/BLE HID 负责键鼠，ADB 独立
 转发 Android 音频到主机（Linux 使用 ALSA，Windows 使用 WASAPI）。构建和使用见[音频转发](docs/AUDIO.md)；不启用
 `--audio` 时原有无需 USB 调试的 HID 模式不变。
 
@@ -51,7 +51,8 @@ Linux/Windows 实验性音频模式沿用 scrcpy 的 Android Server：AOA HID �
 `-DBUILD_CLIPBOARD=ON` 编译后，在 GUI 按设备开启或使用 `--clipboard`；默认关闭，
 与音频独立启用，但共用同一设备的 ADB/server 会话。开启后后台手机复制也可能更新共享剪贴板。
 音频 ADB 可通过 `--adb-serial` 独立指定无线调试 transport（例如 `192.168.1.20:5555`），
-而 `--serial` 继续只用于 USB AOA HID，适用于 Windows 上 ADB USB 驱动与 WinUSB 无法同时使用的情况。
+而 `--serial` 继续只用于 USB AOA HID，适用于 Windows 上 ADB USB 驱动与 WinUSB 无法同时使用的情况；
+BLE 连接方式必须为同一台手机填写显式无线 ADB target。
 
 Linux 另提供 **Bluetooth LE HID** 传输，可不接 USB 控制手机。CLI 与 GUI 使用同一
 `deskflow-otg` 程序，常驻 GATT 服务和桥接会话是不同进程，不是额外的可执行程序。
@@ -128,13 +129,16 @@ Linux 安装包会纳入构建所用 Qt 自带的 GTK 与桌面门户主题插�
 ### 使用流程
 
 1. 启动 `bin/deskflow-otg-gui`（Windows 为 `.exe`）；macOS 打开 `deskflow-otg-gui.app`。
-2. 手机通过 USB 连接，开启 USB 调试并授权，点击「刷新设备」。启动 GUI 时也会自动读取。
-   列表显示型号、ADB 序列号和在线/授权状态，不选择无线 ADB 或模拟器。
-3. 选择手机，自动读取 `wm size`，优先采用 Override size，并根据屏幕方向交换宽高。
-   方向无法识别时会提示手动调整。识别结果作为「原始屏幕尺寸」，可设置「灵敏度倍率」
-   （1～10×）等比例缩小虚拟尺寸，界面实时显示实际虚拟尺寸；启用「跟随屏幕旋转」后，音频或
-   剪贴板使用的 ADB 会监测方向变化并在连接中动态更新屏幕尺寸，不重启音频、剪贴板或 HID
-   会话。该选项默认关闭；未启用时仍需断开、刷新或交换宽高后重新连接。
+2. 在设备页按设备选择是否「启用 ADB 增强功能」。没有 USB 调试的手机保持关闭；此时设备发现
+   使用 `usb-scan`，屏幕尺寸手动填写，HID 仍可正常使用。启用后，Linux/macOS 可使用 USB ADB
+   发现设备及读取屏幕信息；ADB 可执行文件路径仍是全局设置。
+3. 选择手机。启用 ADB 增强功能后，GUI 读取 `wm size`，优先采用 Override size，并根据屏幕
+   方向交换宽高；关闭 ADB 时手动填写尺寸。Windows 的 USB/HID 设备发现始终使用 `usb-scan`，
+   也可以在插入 USB 前，在 ADB 增强功能区域填写无线 ADB `host:port` 读取屏幕尺寸。
+   识别结果作为「原始屏幕尺寸」，可设置「灵敏度倍率」（1～10×）等比例缩小虚拟尺寸，界面实时
+   显示实际虚拟尺寸；启用「跟随屏幕旋转」后，音频或剪贴板使用的 ADB 会监测方向变化并在连接中
+   动态更新屏幕尺寸，不重启音频、剪贴板或 HID 会话。该选项默认关闭；未启用时仍需断开、刷新
+   或交换宽高后重新连接。
 4. 勾选「自动配置并启动本机 Deskflow」，选择手机在电脑的左、右、上、下哪一侧。
    自动查找常见安装位置；未找到时指定 **deskflow-core / deskflow-server 可执行程序**，
    不是 Deskflow 的 GUI 程序。macOS 通常位于 `/Applications/Deskflow.app/Contents/MacOS/`。
@@ -144,10 +148,11 @@ Linux 安装包会纳入构建所用 Qt 自带的 GTK 与桌面门户主题插�
 7. 将鼠标移回电脑后，选择托盘菜单「退出」，GUI 会先释放桥接键鼠，再停止自己启动的 server。
    如果桌面不支持系统托盘，关闭窗口仍会停止连接并退出。
 
-ADB 只有一个设备时自动选中；多设备时手动选择。GUI 查询 ADB 设备路径，再将序列号交给
-桥接核心与实际 USB 描述符精确匹配，不回退到任意设备。若厂商的 ADB 与 USB 标识不同，
-根据桥接日志列出的候选 USB 序列号手动修正。未开启 USB 调试时可选择手动模式填写序列号和宽高。
-Windows 原生 ADB USB 后端可能返回 `unknown` 路径，此时继续读取尺寸，并由桥接核心核对 USB 标识。
+启用 ADB 增强功能时，ADB 只有一个设备会自动选中；多设备时手动选择。GUI 查询 ADB 设备路径，
+再将序列号交给桥接核心与实际 USB 描述符精确匹配，不回退到任意设备。若厂商的 ADB 与 USB
+标识不同，根据桥接日志列出的候选 USB 序列号手动修正。关闭 ADB 时使用 `usb-scan`，也可手动
+填写序列号和宽高。Windows 原生 ADB USB 后端可能返回 `unknown` 路径，此时继续读取尺寸，并由
+桥接核心核对 USB 标识。
 
 ### Android 伴侣应用（可选）
 
@@ -207,7 +212,8 @@ Windows 空闲 BLE provider 也保留其目标占用。Linux 常驻服务仍遵�
 1. 填写 Windows 报告的目标手机 BLE 地址与屏幕宽高；地址不是电脑适配器地址。
    `BluetoothLE#BluetoothLE<电脑地址>-<手机地址>` 中取最后一段手机地址。
 2. 配置自动启动或已有 Deskflow 服务，点击「连接」，再从手机蓝牙设置配对/连接电脑。
-   无需 ADB 或 USB 调试；使用默认蓝牙适配器和绝对指针，不提供 Linux 隔离或常驻服务操作。
+   HID 键鼠无需 ADB 或 USB 调试；若启用音频、剪贴板等 ADB 增强功能，则需为同一台手机配置
+   ADB target。使用默认蓝牙适配器和绝对指针，不提供 Linux 隔离或常驻服务操作。
 3. 手机身份、配对和键鼠订阅就绪，且 Deskflow 完整握手后才显示「已连接」。同进程内
    手机或 Deskflow 掉线会等待重新连接；配对等待期间可点「断开」取消。
 4. 点击「断开」只关闭 Deskflow 会话：丢弃未发送动作、等待释放报告处理后，保留同一
@@ -222,7 +228,7 @@ Windows 空闲 BLE provider 也保留其目标占用。Linux 常驻服务仍遵�
 
 ### 插入 USB 自动连接（无需 USB 调试）
 
-启用音频或剪贴板时，USB 可见可能早于 ADB 恢复。桥接在 scrcpy-server 上传失败后会在
+启用音频或剪贴板时，传输启动后 ADB 可能尚未恢复。桥接在 scrcpy-server 上传失败后会在
 总计约 5 秒的窗口内重试，不重复注册 HID、不更换 ADB 目标、不重启 ADB server；仍失败时
 沿用下述失败策略。纯键鼠连接不调用 ADB。
 
@@ -274,7 +280,7 @@ Windows GUI 使用 `x64-windows-static` 构建时，还需安装 `openssl:x64-wi
 
 ```bash
 cmake -S . -B build -DBUILD_GUI=ON -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_PREFIX_PATH=/path正式发布校验 Git 标签与版本一致。/to/Qt/6.8.3/gcc_64
+    -DCMAKE_PREFIX_PATH=/path/to/Qt/6.8.3/gcc_64
 cmake --build build --config Release --parallel
 ctest --test-dir build -C Release --output-on-failure
 ```
@@ -630,7 +636,8 @@ CLI 的 `--ble-service` 以前台普通用户运行。首次会话注册 GATT，
 #### GUI 与安装包
 
 1. Linux BLE 构建的 GUI 在「连接方式」选择「低功耗蓝牙」，填写 `hci0` 等适配器名称、
-   手机身份地址及屏幕尺寸。无需 ADB；USB 自动连接在蓝牙模式暂停。
+   手机身份地址及屏幕尺寸。HID 键鼠无需 ADB；启用音频、剪贴板等 ADB 增强功能时，需配置
+   同一台手机的 ADB target。USB 自动连接在蓝牙模式暂停。
 2. 点击连接，GUI 检查同用户服务：空闲则复用，不存在则后台启动同一程序的 `--ble-service`。
    其他会话占用或旧版协议不兼容会报错，不会终止旧进程。首次配对/连接通过系统蓝牙设置完成。
 3. 手机被当作音频设备时，可显式选中「临时使用仅 BLE 模式」。确认该适配器的所有连接将
