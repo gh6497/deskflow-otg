@@ -1374,6 +1374,54 @@ void MainWindow::refreshDevices()
 {
     if (m_transport->currentData() != "usb" || m_scanning || m_connections.state(m_selectedId) != Session::State::Idle || m_closing)
         return;
+#ifdef Q_OS_WIN
+    {
+    // Windows ADB may not expose the USB descriptor serial (and can list the
+    // device with an unusable placeholder).  The bridge already has the
+    // libusb access needed to enumerate the physical attachment, so use its
+    // authoritative USB snapshot for device discovery.
+    const auto bridge = bridgeExecutable();
+    if (bridge.isEmpty()) {
+        setTranslatedProperty(m_deviceStatus, "text", "otg.device.adb_not_found");
+        return;
+    }
+    m_scanning = true;
+    updateEnabled();
+    const auto request = ++m_request;
+    const QString previous = m_serial->text();
+    runCommand(this, bridge, {"--usb-scan"},
+               [this, request, previous](bool ok, const QString &output) {
+        if (request != m_request)
+            return;
+        m_scanning = false;
+        if (!ok) {
+            setTranslatedProperty(m_deviceStatus, "text", "otg.device.adb_failed");
+            appendLog("[USB scan] " + output);
+            updateEnabled();
+            return;
+        }
+        m_deviceList = parseUsbScanDevices(output);
+        {
+            QSignalBlocker blocker(m_devices);
+            m_devices->clear();
+            m_devices->addItem(qtTrId("otg.device.manual"), -1);
+            int selected = 0;
+            for (int i = 0; i < m_deviceList.size(); ++i) {
+                const auto &device = m_deviceList[i];
+                m_devices->addItem(device.serial, i);
+                if (device.serial == previous)
+                    selected = i + 1;
+            }
+            if (!selected && m_deviceList.size() == 1)
+                selected = 1;
+            m_devices->setCurrentIndex(selected);
+        }
+        readDevice();
+        retranslateUi();
+    });
+    return;
+    }
+#endif
     if (m_adb->text().trimmed().isEmpty()) {
         setTranslatedProperty(m_deviceStatus, "text", "otg.device.adb_not_found");
         return;
@@ -1436,39 +1484,34 @@ void MainWindow::readDevice()
     m_scanning = true;
     updateEnabled();
     const QString adb = m_adb->text();
+    const QString target = !m_adbSerial->text().trimmed().isEmpty() ?
+        m_adbSerial->text().trimmed() : device.serial;
     setTranslatedProperty(m_deviceStatus, "text", "otg.device.reading");
-    runCommand(this, adb, {"-s", device.serial, "get-devpath"},
-               [this, request, device, adb](bool ok, const QString &path) {
-        if (request != m_request)
-            return;
-        const QString transportPath = path.trimmed();
-        // Windows' native ADB USB backend registers transports with a null
-        // devpath. adb reports "unknown" in that case. AOA will still require
-        // an exact match against the physical USB descriptor before opening.
-        const bool pathUnavailable = transportPath == "unknown";
-        if (!ok || (!transportPath.startsWith("usb:") && !pathUnavailable)) {
-            m_scanning = false;
-            m_serial->clear();
-            setTranslatedProperty(m_deviceStatus, "text", "otg.device.usb_unconfirmed");
-            appendLog("[ADB transport] " + path);
-            updateEnabled();
-            return;
-        }
-        if (pathUnavailable)
-            appendLog(qtTrId("otg.log.usb_path_unavailable"));
-        runCommand(this, adb, {"-s", device.serial, "shell", "wm", "size"},
-                   [this, request, device, adb](bool sizeOk, const QString &text) {
-            if (request != m_request)
-                return;
+    const auto readDisplay = [this, request, device, adb, target] {
+        runCommand(this, adb, {"-s", target, "shell", "wm", "size"},
+                   [this, request, device, adb, target](bool sizeOk, const QString &text) {
+         if (request != m_request)
+             return;
             const QSize size = sizeOk ? parseScreenSize(text) : QSize();
             if (!size.isValid()) {
+#ifdef Q_OS_WIN
+                // ADB is optional for USB HID.  In particular, a stale or
+                // offline TCP target must not prevent a libusb-discovered
+                // device from connecting.  Keep the user-selected size.
+                appendLog("[ADB wm size] " + text);
+                m_scanning = false;
+                setTranslatedProperty(m_deviceStatus, "text", "otg.device.ready");
+                updateEnabled();
+                return;
+#else
                 m_scanning = false;
                 setTranslatedProperty(m_deviceStatus, "text", "otg.device.size_failed");
                 appendLog("[ADB wm size] " + text);
                 updateEnabled();
                 return;
+#endif
             }
-            runCommand(this, adb, {"-s", device.serial, "shell", "dumpsys", "input"},
+            runCommand(this, adb, {"-s", target, "shell", "dumpsys", "input"},
                        [this, request, size](bool rotationOk, const QString &text) {
                 if (request != m_request)
                     return;
@@ -1485,7 +1528,43 @@ void MainWindow::readDevice()
                 updateEnabled();
             });
         });
+    };
+#ifdef Q_OS_WIN
+    // --usb-scan already verified the physical USB attachment.  Do not ask
+    // ADB for get-devpath: its serial namespace may differ from libusb's
+    // descriptor serial.  For a wireless ADB target, connect it first so
+    // optional display/audio features can use the same target later.
+    const QRegularExpression wirelessTarget("^(?:\\[[^\\]]+\\]|[^:]+):[0-9]+$");
+    if (wirelessTarget.match(target).hasMatch()) {
+        appendLog(QStringLiteral("[ADB] connect %1").arg(target));
+        runCommand(this, adb, {"connect", target},
+                   [this, target, readDisplay](bool ok, const QString &output) {
+            appendLog(QStringLiteral("[ADB] connect %1: %2 (%3)")
+                          .arg(target, ok ? "ok" : "failed", output.trimmed()));
+            readDisplay();
+        });
+    } else {
+        readDisplay();
+    }
+#else
+    runCommand(this, adb, {"-s", target, "get-devpath"},
+               [this, request, readDisplay](bool ok, const QString &path) {
+        if (request != m_request)
+            return;
+        const QString transportPath = path.trimmed();
+        if (!ok || (!transportPath.startsWith("usb:") && transportPath != "unknown")) {
+            m_scanning = false;
+            m_serial->clear();
+            setTranslatedProperty(m_deviceStatus, "text", "otg.device.usb_unconfirmed");
+            appendLog("[ADB transport] " + path);
+            updateEnabled();
+            return;
+        }
+        if (transportPath == "unknown")
+            appendLog(qtTrId("otg.log.usb_path_unavailable"));
+        readDisplay();
     });
+#endif
 }
 
 void MainWindow::connectDevice()

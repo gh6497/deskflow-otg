@@ -2,6 +2,9 @@
 #include "device_info.h"
 
 #include <QRegularExpression>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QMap>
 #include <QSet>
 #include <QPoint>
@@ -27,6 +30,25 @@ QList<AndroidDevice> parseDevices(const QString &text)
                 device.model = field.mid(6).replace('_', ' ');
         }
         result.append(device);
+    }
+    return result;
+}
+
+QList<AndroidDevice> parseUsbScanDevices(const QString &text)
+{
+    QList<AndroidDevice> result;
+    QJsonParseError error;
+    const auto document = QJsonDocument::fromJson(text.toUtf8(), &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject())
+        return result;
+    const auto devices = document.object().value("devices").toArray();
+    for (const auto &value : devices) {
+        const auto object = value.toObject();
+        const auto serial = object.value("serial").toString().trimmed();
+        // A device whose descriptor cannot be read is not a usable target.
+        if (serial.isEmpty())
+            continue;
+        result.append(AndroidDevice{serial, {}, "device"});
     }
     return result;
 }
