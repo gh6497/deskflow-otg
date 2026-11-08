@@ -5,6 +5,7 @@
 #include "connection_manager.h"
 #include "companion_app.h"
 #include "tls_certificate.h"
+#include "wireless_adb_dialog.h"
 #include <QTemporaryDir>
 #include "i18n.h"
 #include <QFile>
@@ -807,7 +808,7 @@ private slots:
         // Include indirect ID references in property bindings, states and arrays.
         QSet<QString> references;
         const QRegularExpression pattern("\"(otg\\.[a-z0-9_.]+)\"");
-        for (const char *name : {"main_window.cpp", "session.cpp", "process_utils.cpp", "deskflow_server.cpp", "connection_manager.cpp", "companion_app.cpp", "companion_transfer.cpp", "transfer_dialog.cpp"}) {
+        for (const char *name : {"main_window.cpp", "session.cpp", "process_utils.cpp", "deskflow_server.cpp", "connection_manager.cpp", "companion_app.cpp", "companion_transfer.cpp", "wireless_adb_dialog.cpp", "transfer_dialog.cpp"}) {
             QFile source(QString(":/i18n-test/gui/") + name + ".txt");
             QVERIFY(source.open(QIODevice::ReadOnly));
             auto matches = pattern.globalMatch(QString::fromUtf8(source.readAll()));
@@ -856,6 +857,28 @@ private slots:
         QCOMPARE(devices[0].serial, "ABC");
         QCOMPARE(devices[0].model, "Pixel 8");
         QCOMPARE(devices[1].state, "unauthorized");
+    }
+
+    void wirelessMdnsServices()
+    {
+        const auto services = parseWirelessAdbServices(
+            "List of discovered mdns services\n"
+            "adb-demo._adb-tls-pairing._tcp\n"
+            "192.0.2.10:37123\n"
+            "adb-demo._adb-tls-connect._tcp\n"
+            "192.0.2.10:39833\n"
+            "adb-demo._adb-tls-connect._tcp 192.0.2.10:39833\n");
+        QCOMPARE(services.size(), 2);
+        QCOMPARE(services[0].target, "192.0.2.10:37123");
+        QVERIFY(services[0].pairing);
+        QCOMPARE(services[1].target, "192.0.2.10:39833");
+        QVERIFY(!services[1].pairing);
+
+        const auto ipv6 = parseWirelessAdbServices(
+            "adb-demo._adb-tls-connect._tcp\n[2001:db8::10]:39833\n");
+        QCOMPARE(ipv6.size(), 1);
+        QCOMPARE(ipv6.first().target, "[2001:db8::10]:39833");
+        QVERIFY(!ipv6.first().pairing);
     }
     void usbScanDevices()
     {

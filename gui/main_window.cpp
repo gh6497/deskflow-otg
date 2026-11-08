@@ -6,6 +6,7 @@
 #include "build_version.h"
 #include "screen_layout_preview.h"
 #include "tls_certificate.h"
+#include "wireless_adb_dialog.h"
 
 #include <QCheckBox>
 #include <QAction>
@@ -418,6 +419,9 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     m_adbTest->setObjectName("adbTest");
     m_adbReadDisplay = translated(new QPushButton, "text", "otg.adb.read_display");
     m_adbReadDisplay->setObjectName("adbReadDisplay");
+    m_adbWirelessSetup = translated(new QPushButton, "text", "otg.adb.wireless_setup");
+    m_adbWirelessSetup->setObjectName("adbWirelessSetup");
+    adbActionsLayout->addWidget(m_adbWirelessSetup);
     adbActionsLayout->addWidget(m_adbTest);
     adbActionsLayout->addWidget(m_adbReadDisplay);
     adbActionsLayout->addStretch();
@@ -908,6 +912,7 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
         });
     });
     connect(m_adbReadDisplay, &QPushButton::clicked, this, &MainWindow::readDisplayFromAdb);
+    connect(m_adbWirelessSetup, &QPushButton::clicked, this, &MainWindow::setupWirelessAdb);
     connect(m_connect, &QPushButton::clicked, this, &MainWindow::connectDevice);
     connect(m_disconnect, &QPushButton::clicked, this, [this] { m_connections.stop(m_selectedId); });
     connect(&m_connections, &ConnectionManager::log, this, [this](const QString &id, const QString &message) {
@@ -1336,9 +1341,10 @@ void MainWindow::updateEnabled()
     m_refresh->setEnabled(!ble);
     m_adb->setEnabled(true);
     m_adbTest->setEnabled(adbFeatures && !m_adb->text().trimmed().isEmpty() &&
-                          !adbTargetForCurrentDevice().isEmpty() && idle);
+                           !adbTargetForCurrentDevice().isEmpty() && idle);
     m_adbReadDisplay->setEnabled(adbFeatures && !m_adb->text().trimmed().isEmpty() &&
                                  !adbTargetForCurrentDevice().isEmpty() && idle);
+    m_adbWirelessSetup->setEnabled(!m_wirelessAdbDialog && !m_adb->text().trimmed().isEmpty() && idle);
     m_adbStatus->setText(!adbFeatures ? qtTrId("otg.adb.status.off") :
                          adbTargetForCurrentDevice().isEmpty() ? qtTrId("otg.adb.status.target_missing") :
                          qtTrId("otg.adb.status.ready_hint"));
@@ -1414,6 +1420,42 @@ void MainWindow::setupCompanion(CompanionApp::Action action)
     m_companionDeviceId = m_selectedId;
     const auto target = adbTargetForCurrentDevice();
     m_companion.start(action, m_adb->text().trimmed(), target, m_companionApk->text().trimmed());
+    updateEnabled();
+}
+
+void MainWindow::setupWirelessAdb()
+{
+    if (m_closing || m_scanning || m_companion.busy() ||
+        m_connections.state(m_selectedId) != Session::State::Idle || m_wirelessAdbDialog)
+        return;
+    const auto adb = m_adb->text().trimmed();
+    if (adb.isEmpty()) {
+        m_adbStatus->setText(qtTrId("otg.wireless.status.adb_missing"));
+        return;
+    }
+
+    auto *dialog = new WirelessAdbDialog(adb, this);
+    m_wirelessAdbDialog = dialog;
+    connect(dialog, &WirelessAdbDialog::logMessage, this, [this](const QString &message) {
+        appendLog(message);
+    });
+    connect(dialog, &WirelessAdbDialog::targetReady, this, [this](const QString &target) {
+        m_adbSerial->setText(target);
+        m_adbEnabled->setChecked(true);
+        m_adbStatus->setText(qtTrId("otg.adb.status.ready"));
+        saveSettings();
+        appendLog(qtTrId("otg.wireless.log.saved").arg(target));
+        updateEnabled();
+    });
+    connect(dialog, &QDialog::finished, this, [this](int) {
+        m_wirelessAdbDialog = nullptr;
+        if (!m_closing)
+            updateEnabled();
+    });
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->show();
+    dialog->raise();
+    dialog->activateWindow();
     updateEnabled();
 }
 

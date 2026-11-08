@@ -32,7 +32,7 @@ class CompanionSigningTest(unittest.TestCase):
         patch = mock.patch.dict(os.environ, env)
         patch.start()
         self.addCleanup(patch.stop)
-        self.badging = "package: name='com.github.gh6497.deskflowotg' versionCode='13' versionName='0.1.11'\n"
+        self.badging = "package: name='com.github.gh6497.deskflowotg' versionCode='14' versionName='0.1.12'\n"
         self.commands = []
 
     def sdk(self, command, **kwargs):

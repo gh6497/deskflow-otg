@@ -16,6 +16,10 @@ LAYOUTS = {
     "activity_main": {
         "connection_status": "TextView",
         "notification_status": "TextView",
+        "wireless_adb_addresses": "TextView",
+        "wireless_adb_settings": "Button",
+        "wireless_adb_wifi_settings": "Button",
+        "wireless_adb_copy_address": "Button",
         "notification_settings": "Button",
         "autoplay_enabled": "Switch",
         "autoplay_target": "TextView",
