@@ -44,6 +44,45 @@
             android:layout_marginTop="24dp"
             android:textSize="15sp" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="@string/wireless_adb_title"
+            android:textSize="18sp" />
+
+        <TextView
+            android:id="@+id/wireless_adb_addresses"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/wireless_adb_addresses_loading"
+            android:textIsSelectable="true" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/wireless_adb_help" />
+
+        <Button
+            android:id="@+id/wireless_adb_settings"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/open_wireless_adb_settings" />
+
+        <Button
+            android:id="@+id/wireless_adb_wifi_settings"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/open_wifi_settings" />
+
+        <Button
+            android:id="@+id/wireless_adb_copy_address"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/copy_wireless_adb_address" />
+
         <Button
             android:id="@+id/notification_settings"
             android:layout_width="match_parent"

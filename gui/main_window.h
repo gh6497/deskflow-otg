@@ -25,6 +25,7 @@ class QListWidget;
 class QTabWidget;
 class ScreenLayoutPreview;
 class TransferDialog;
+class WirelessAdbDialog;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -75,6 +76,7 @@ private:
     void updateAutoConnect();
     void regenerateTlsCertificate();
     void setupCompanion(CompanionApp::Action action);
+    void setupWirelessAdb();
     void updateCompanionStatus();
     QString adbTargetForCurrentDevice() const;
     void appendLog(const QString &text, const QString &id = {});
@@ -111,6 +113,7 @@ private:
     QPushButton *m_companionInstall, *m_companionOpen, *m_companionCheck;
     QPushButton *m_transferFiles;
     QPointer<TransferDialog> m_transferDialog;
+    QPointer<WirelessAdbDialog> m_wirelessAdbDialog;
     QMap<QString, QVariantMap> m_profiles;
     QVariantMap m_pendingProfile;
     QSystemTrayIcon *m_tray = nullptr;
@@ -121,7 +124,7 @@ private:
     QLineEdit *m_unlockPin;
     QCheckBox *m_adbEnabled;
     QLabel *m_adbStatus;
-    QPushButton *m_adbTest, *m_adbReadDisplay;
+    QPushButton *m_adbTest, *m_adbReadDisplay, *m_adbWirelessSetup;
     QWidget *m_adbBox;
     QComboBox *m_transport;
     QLineEdit *m_adapter, *m_blePeer;

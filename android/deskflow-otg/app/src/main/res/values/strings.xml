@@ -5,6 +5,16 @@
     <string name="status_access_enabled">Status: Media control access enabled. USB disconnect events immediately request pause.</string>
     <string name="status_access_required">Status: Please enable notification access first.</string>
     <string name="open_notification_access_settings">Open notification access settings</string>
+    <string name="wireless_adb_title">Wireless ADB helper</string>
+    <string name="wireless_adb_addresses_loading">Reading network addresses…</string>
+    <string name="wireless_adb_addresses">Phone IPv4 address: %1$s</string>
+    <string name="wireless_adb_no_address">No active IPv4 address was found.</string>
+    <string name="wireless_adb_help">On the same Wi-Fi network, open Wireless debugging, choose Pair using pairing code, and enter the address and code in the desktop helper. The app cannot read or bypass the system pairing code.</string>
+    <string name="open_wireless_adb_settings">Open Wireless debugging</string>
+    <string name="open_wifi_settings">Open Wi-Fi settings</string>
+    <string name="copy_wireless_adb_address">Copy address</string>
+    <string name="wireless_adb_address_copied">Address copied</string>
+    <string name="wireless_adb_wifi_required">Connect the phone to Wi-Fi first</string>
     <string name="connection_unknown">Deskflow: Status unknown</string>
     <string name="connection_connecting">Deskflow: Connecting</string>
     <string name="connection_connected">Deskflow: Connected</string>

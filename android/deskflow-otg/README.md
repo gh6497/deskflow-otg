@@ -138,6 +138,10 @@ adb shell am start -a android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
 不再依赖拔出后的 ADB 连接仍然可用。打包与限制见
 [桌面 GUI 接入说明](../../docs/ANDROID_COMPANION.md)。
 
+应用首页还提供「无线 ADB 助手」：显示手机当前 IPv4 地址、复制地址、打开 Wi-Fi 设置和
+系统「无线调试」页面。配对地址、连接地址和一次性配对码仍由桌面 GUI 的无线 ADB 向导处理；
+普通应用不能读取或绕过系统配对码。
+
 ## 生效条件：自启动与电池策略
 
 拔线暂停要求 **通知使用权已开启，且应用未被 ROM 强制停止或拦截后台广播**。请在手机上完成：

@@ -177,6 +177,66 @@ private slots:
         QCOMPARE(sensitivity->value(), 2.0);
         QCOMPARE(port->value(), 24800);
     }
+
+    void wirelessAdbSetup()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dir.path());
+        QSettings settings;
+        settings.setValue("adb", "");
+        settings.setValue("manageServer", false);
+
+        AutoConnectTestWindow window;
+        window.show();
+        auto *adb = window.findChild<QLineEdit *>("adbExecutable");
+        auto *setup = window.findChild<QPushButton *>("adbWirelessSetup");
+        QVERIFY(adb && setup);
+        adb->setText(QCoreApplication::applicationDirPath() + "/test_peer"
+#ifdef Q_OS_WIN
+                     ".exe"
+#endif
+        );
+        QVERIFY(setup->isEnabled());
+        setup->click();
+
+        auto *dialog = window.findChild<QDialog *>("wirelessAdbDialog");
+        auto *pairing = window.findChild<QComboBox *>("wirelessPairingTarget");
+        auto *code = window.findChild<QLineEdit *>("wirelessPairingCode");
+        auto *pair = window.findChild<QPushButton *>("wirelessPair");
+        auto *connection = window.findChild<QComboBox *>("wirelessConnectionTarget");
+        auto *connect = window.findChild<QPushButton *>("wirelessConnect");
+        auto *target = window.findChild<QLineEdit *>("adbSerial");
+        auto *enabled = window.findChild<QCheckBox *>("adbEnabled");
+        QVERIFY(dialog && pairing && code && pair && connection && connect && target && enabled);
+        QTRY_COMPARE(pairing->count(), 1);
+        QTRY_COMPARE(connection->count(), 1);
+        QCOMPARE(pairing->currentText(), "192.0.2.10:37123");
+        QCOMPARE(connection->currentText(), "192.0.2.10:39833");
+        const auto sendWheel = [](QWidget *widget) {
+            const QPointF position(widget->rect().center());
+            const QPointF globalPosition(widget->mapToGlobal(widget->rect().center()));
+            QWheelEvent event(position, globalPosition, QPoint(), QPoint(0, 120),
+                              Qt::NoButton, Qt::NoModifier, Qt::ScrollUpdate, false);
+            QApplication::sendEvent(widget, &event);
+        };
+        const int pairingIndex = pairing->currentIndex();
+        const int connectionIndex = connection->currentIndex();
+        sendWheel(pairing);
+        sendWheel(connection);
+        QCOMPARE(pairing->currentIndex(), pairingIndex);
+        QCOMPARE(connection->currentIndex(), connectionIndex);
+
+        code->setText("123456");
+        pair->click();
+        QTRY_VERIFY(pair->isEnabled());
+        QTRY_VERIFY(connect->isEnabled());
+        connect->click();
+        QTRY_COMPARE(target->text(), "192.0.2.10:39833");
+        QVERIFY(enabled->isChecked());
+        dialog->close();
+    }
     void dropdownsIgnoreMouseWheel_data()
     {
         QTest::addColumn<QString>("objectName");

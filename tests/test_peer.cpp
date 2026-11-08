@@ -23,6 +23,25 @@ int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
     const auto args = app.arguments();
+    if (args.contains("mdns") || args.contains("pair") || args.contains("connect")) {
+        const auto mode = qEnvironmentVariable("OTG_TEST_WIRELESS_ADB");
+        if (args.contains("mdns")) {
+            output("List of discovered mdns services\n"
+                   "adb-test._adb-tls-pairing._tcp\n"
+                   "192.0.2.10:37123\n"
+                   "adb-test._adb-tls-connect._tcp\n"
+                   "192.0.2.10:39833\n");
+            return 0;
+        }
+        if (args.contains("pair")) {
+            if (mode == "pair-failure") return 1;
+            output("Successfully paired to 192.0.2.10:37123\n");
+            return 0;
+        }
+        if (mode == "connect-failure") return 1;
+        output("connected to 192.0.2.10:39833\n");
+        return 0;
+    }
     if (args.contains("start-server") || args.contains("get-state") || args.contains("install") ||
         args.contains("com.github.gh6497.deskflowotg") || args.contains("enabled_notification_listeners") ||
         args.contains("com.github.gh6497.deskflowotg/.MainActivity") ||

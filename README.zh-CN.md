@@ -53,6 +53,8 @@ Linux/Windows 实验性音频模式沿用 scrcpy 的 Android Server：AOA HID/BL
 音频 ADB 可通过 `--adb-serial` 独立指定无线调试 transport（例如 `192.168.1.20:5555`），
 而 `--serial` 继续只用于 USB AOA HID，适用于 Windows 上 ADB USB 驱动与 WinUSB 无法同时使用的情况；
 BLE 连接方式必须为同一台手机填写显式无线 ADB target。
+Windows GUI 的「无线 ADB 配置助手」可以发现 mDNS 配对/连接服务，执行 `adb pair` 和 `adb connect`，
+并保存选定的 `host:port` 目标。配对仍需输入 Android 系统显示的一次性配对码，伴侣 App 不能读取或绕过该配对码。
 
 Linux 另提供 **Bluetooth LE HID** 传输，可不接 USB 控制手机。CLI 与 GUI 使用同一
 `deskflow-otg` 程序，常驻 GATT 服务和桥接会话是不同进程，不是额外的可执行程序。
@@ -134,7 +136,8 @@ Linux 安装包会纳入构建所用 Qt 自带的 GTK 与桌面门户主题插�
    发现设备及读取屏幕信息；ADB 可执行文件路径仍是全局设置。
 3. 选择手机。启用 ADB 增强功能后，GUI 读取 `wm size`，优先采用 Override size，并根据屏幕
    方向交换宽高；关闭 ADB 时手动填写尺寸。Windows 的 USB/HID 设备发现始终使用 `usb-scan`，
-   也可以在插入 USB 前，在 ADB 增强功能区域填写无线 ADB `host:port` 读取屏幕尺寸。
+   也可以在插入 USB 前，在 ADB 增强功能区域填写无线 ADB `host:port`，或使用「无线 ADB 配置助手」
+   完成配对和连接后读取屏幕尺寸。
    识别结果作为「原始屏幕尺寸」，可设置「灵敏度倍率」（1～10×）等比例缩小虚拟尺寸，界面实时
    显示实际虚拟尺寸；启用「跟随屏幕旋转」后，音频或剪贴板使用的 ADB 会监测方向变化并在连接中
    动态更新屏幕尺寸，不重启音频、剪贴板或 HID 会话。该选项默认关闭；未启用时仍需断开、刷新
@@ -157,7 +160,9 @@ Linux 安装包会纳入构建所用 Qt 自带的 GTK 与桌面门户主题插�
 ### Android 伴侣应用（可选）
 
 USB 设备页提供「安装 / 更新 APK」「打开手机端设置」「检查授权状态」，用于接入
-[Android 伴侣应用](docs/ANDROID_COMPANION.md)。0.1.10 同时监听 USB 连接状态和 accessory 拔出，
+[Android 伴侣应用](docs/ANDROID_COMPANION.md)。伴侣应用首页还提供「无线 ADB 助手」，可打开 Android
+的无线调试/Wi-Fi 设置，并显示或复制手机 IPv4 地址。0.1.12 同时监听 USB 连接状态和 accessory 拔出，
+并提供锁屏状态查询和无线 ADB 辅助入口。
 收到断开事件就立即请求暂停所有播放/缓冲中的媒体会话，不增加等待；即使通知监听服务暂时未绑定，
 清单 Receiver 也会处理事件。ROM 仍需允许应用运行且不能强制停止；快速拔插或重新枚举也可能暂停。
 适用于所有 USB 数据连接，不仅限于 Deskflow。

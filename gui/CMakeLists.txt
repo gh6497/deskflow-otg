@@ -10,6 +10,7 @@ add_library(otg_gui_support STATIC
   companion_app.cpp companion_app.h
   companion_status_sync.cpp companion_status_sync.h
   companion_transfer.cpp companion_transfer.h
+  wireless_adb_dialog.cpp wireless_adb_dialog.h
   transfer_dialog.cpp transfer_dialog.h
   usb_auto_connect.cpp usb_auto_connect.h
   tls_certificate.cpp tls_certificate.h
@@ -194,7 +195,7 @@ if(BUILD_TESTING)
   # Copy reference inputs as text: adding .cpp directly to a resource would mark
   # those shared sources HEADER_FILE_ONLY and remove them from other targets.
   set(i18n_test_sources)
-  foreach(name main_window.cpp session.cpp process_utils.cpp deskflow_server.cpp connection_manager.cpp companion_app.cpp companion_transfer.cpp transfer_dialog.cpp)
+  foreach(name main_window.cpp session.cpp process_utils.cpp deskflow_server.cpp connection_manager.cpp companion_app.cpp companion_transfer.cpp wireless_adb_dialog.cpp transfer_dialog.cpp)
     set(input "${CMAKE_CURRENT_BINARY_DIR}/i18n-test/${name}.txt")
     configure_file("${name}" "${input}" COPYONLY)
     list(APPEND i18n_test_sources "${input}")

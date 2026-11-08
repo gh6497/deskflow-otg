@@ -14,7 +14,8 @@ PACKAGE = Path("com/github/gh6497/deskflowotg")
 def main():
     if not shutil.which("javac") or not shutil.which("java"):
         return 77
-    # Manifest is part of the security boundary; no general storage/network permission.
+    # Manifest is part of the security boundary; only passive network-state
+    # inspection is needed by the wireless ADB helper.
     manifest = ET.parse(APP / "main/AndroidManifest.xml").getroot()
     android = "{http://schemas.android.com/apk/res/android}"
     provider = next(p for p in manifest.findall("application/provider")
@@ -22,7 +23,8 @@ def main():
     assert provider.get(android + "readPermission") == "android.permission.DUMP"
     assert provider.get(android + "writePermission") == "android.permission.DUMP"
     assert provider.get(android + "grantUriPermissions") == "false"
-    assert not manifest.findall("uses-permission")
+    permissions = [p.get(android + "name") for p in manifest.findall("uses-permission")]
+    assert permissions == ["android.permission.ACCESS_NETWORK_STATE"]
     for language in ("values", "values-zh-rCN"):
         resources = ET.parse(APP / f"main/res/{language}/strings.xml").getroot()
         names = [s.get("name") for s in resources if s.get("translatable") != "false"]

@@ -38,7 +38,27 @@ BLE 必须配置显式 ADB 目标，不能以 BLE MAC 代替。Windows USB 驱�
 无线 ADB；Linux / Windows / macOS 共用 Qt 实现，无新增平台专用依赖。CLI 暂不提供状态同步。
 无 ADB 时手机显示未知，原有无需调试的 AOA HID 及拔线立即暂停逻辑保持不变。
 
-## 锁屏状态查询（0.1.11）
+## 无线 ADB 配置助手
+
+Windows 的 AOA HID 通常使用 WinUSB，而同一 USB 接口不能同时作为 USB ADB 使用。桌面 GUI 的
+「无线 ADB 配置助手」和伴侣 App 共同提供不更换 ADB USB 驱动的配置流程：
+
+1. 在手机伴侣 App 首页点击「打开无线调试」，或手动进入开发者选项中的无线调试页面。
+2. 在系统页面选择「使用配对码配对」。桌面向导点击「刷新服务」，从 mDNS 列出配对地址；
+   如果网络不支持 mDNS，也可以手动填写手机显示的地址。
+3. 将系统显示的一次性六位配对码输入桌面向导，执行 `adb pair`。
+4. 配对成功后刷新连接服务，执行 `adb connect`，桌面会把 `host:port` 保存到当前设备的
+   ADB 目标字段，并用 `adb -s TARGET get-state` 校验目标在线。
+
+伴侣 App 只负责打开系统设置、显示/复制手机 IPv4 地址和提供操作说明；它不能读取配对码、
+开启开发者选项或在后台替用户配对。配对码不保存、不写入日志，桌面始终使用用户选定的明确
+ADB 目标，不自动选择其他手机。手机和电脑必须在同一局域网，Windows 防火墙或路由器隔离
+可能导致 mDNS 发现失败，此时使用手动地址。
+
+配置完成后，Windows USB 只负责 AOA HID，ADB 通过无线目标工作；GUI 仍分别使用 USB 序列号
+和 `host:port`，可在切换 WinUSB 后继续安装/检查伴侣 App、读取屏幕、转发音频或共享剪贴板。
+
+## 锁屏状态查询（0.1.12）
 
 自动解锁从唤醒等待、上划到 PIN 和确认键发送结束期间，屏蔽来自 Deskflow 的鼠标移动、
 按键、滚轮及中/右键 Home/Back 映射，避免干扰合成上划或误触锁屏。开始时释放已有拖拽、
@@ -99,11 +119,11 @@ BLE 必须配置显式 ADB 目标，不能以 BLE MAC 代替。Windows USB 驱�
 
 在「设备配置」中选择 USB 连接，找到「Android 伴侣应用（可选）」：
 
-1. 手机需 Android 10+。先开启并授权 USB 调试，或自行配对、连接无线 ADB。
+1. 手机需 Android 10+。先开启并授权 USB 调试，或使用前面的无线 ADB 配置助手完成配对、连接。
    「共享服务」里的 ADB 程序必须可用。
 2. 核对设备页的「ADB 目标」：非空时优先使用它（支持 `host:port` / `[IPv6]:port`），
-   留空才使用当前设备的 USB 序列号。每条操作都使用 `adb -s`，不会自动选择其他手机，
-   不自动 pair/connect、不回退 USB、不 disconnect/kill-server。
+   留空才使用当前设备的 USB 序列号。伴侣安装、打开和检查操作都使用 `adb -s`，不会自动选择其他手机，
+   不会隐式 pair/connect、不回退 USB、不 disconnect/kill-server；无线 ADB 向导仅在用户点击并填写配对码后执行配对/连接。
 3. 桌面 0.1.7 起的 GUI 发布包默认选择包内的**已签名**伴侣 APK，也可手动选择其他 APK。
    旧配置中的空路径或失效路径会回退到当前包内 APK；仍有效的自选路径保留。
    默认包内路径不会按绝对路径保存，避免 AppImage 重挂载或便携包移动后指向旧位置。
@@ -191,7 +211,7 @@ CMake 只检查文件路径及后缀，不验证 Android 签名；签名有效�
 Linux x86_64、Windows x64、macOS Intel / Apple Silicon 的 GUI 构建均下载它并传入 `COMPANION_APK`。
 DEB、AppImage、Windows 安装器/便携 ZIP、macOS DMG/压缩包沿用同一桌面 staging 内容；
 构建目录、安装目录及安装器/镜像冒烟检查验证 APK 与输入相同。纯 CLI 包不包含 APK。
-伴侣 App 继续独立使用现有版本 0.1.11，不随桌面 0.1.7 降级或改版本码。
+伴侣 App 当前版本为 0.1.12，不随桌面版本降级或改版本码。
 
 需要由仓库维护者配置以下四个 **Actions repository secrets**：
 

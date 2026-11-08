@@ -4,6 +4,16 @@
     <string name="status_access_enabled">状态：已启用媒体控制权限，收到 USB 断开事件即请求暂停</string>
     <string name="status_access_required">状态：请先启用通知使用权</string>
     <string name="open_notification_access_settings">打开通知使用权设置</string>
+    <string name="wireless_adb_title">无线 ADB 助手</string>
+    <string name="wireless_adb_addresses_loading">正在读取网络地址…</string>
+    <string name="wireless_adb_addresses">手机 IPv4 地址：%1$s</string>
+    <string name="wireless_adb_no_address">没有找到活动的 IPv4 地址。</string>
+    <string name="wireless_adb_help">请让手机和电脑连接到同一 Wi-Fi，在手机中打开“无线调试”并选择“使用配对码配对”，然后将地址和配对码输入桌面端助手。应用无法读取或绕过系统配对码。</string>
+    <string name="open_wireless_adb_settings">打开无线调试</string>
+    <string name="open_wifi_settings">打开 Wi-Fi 设置</string>
+    <string name="copy_wireless_adb_address">复制地址</string>
+    <string name="wireless_adb_address_copied">地址已复制</string>
+    <string name="wireless_adb_wifi_required">请先让手机连接 Wi-Fi</string>
     <string name="connection_unknown">Deskflow：状态未知</string>
     <string name="connection_connecting">Deskflow：正在连接</string>
     <string name="connection_connected">Deskflow：已连接</string>
