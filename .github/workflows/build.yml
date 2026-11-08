@@ -5,6 +5,8 @@ on:
     tags:
       - 'v*'
   pull_request:
+    branches-ignore:
+      - 'doc/**'
   workflow_dispatch:
 
 concurrency:
@@ -16,6 +18,7 @@ permissions:
 
 jobs:
   companion:
+    if: ${{ !startsWith(github.ref_name, 'doc/') && !startsWith(github.head_ref, 'doc/') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -58,6 +61,7 @@ jobs:
           if-no-files-found: error
 
   build:
+    if: ${{ !startsWith(github.ref_name, 'doc/') && !startsWith(github.head_ref, 'doc/') }}
     needs: companion
     env:
       COMPANION_APK: ${{ github.event_name != 'pull_request' && format('{0}/companion-bundle/deskflow-otg-companion.apk', github.workspace) || '' }}
@@ -262,7 +266,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: ${{ !startsWith(github.ref_name, 'doc/') && !startsWith(github.head_ref, 'doc/') && startsWith(github.ref, 'refs/tags/v') }}
     needs: build
     runs-on: ubuntu-latest
     permissions:
