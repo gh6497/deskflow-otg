@@ -12,10 +12,25 @@
 #include <QTimer>
 #include <memory>
 
+namespace {
+class CommandProcess final : public QProcess {
+public:
+    using QProcess::QProcess;
+    ~CommandProcess() override
+    {
+        // QProcess's destructor can emit finished()/readyRead() while killing
+        // the child. A QWidget owner's QPointer is still valid at that point,
+        // even though its controls (and derived members) may already be gone.
+        // Stop our callbacks before entering QProcess's blocking destructor.
+        disconnect();
+    }
+};
+}
+
 void runCommand(QObject *owner, const QString &program, const QStringList &args,
                 CommandResult done, int timeoutMs)
 {
-    auto *process = new QProcess(owner);
+    auto *process = new CommandProcess(owner);
     auto *timer = new QTimer(process);
     timer->setSingleShot(true);
     process->setProcessChannelMode(QProcess::MergedChannels);
