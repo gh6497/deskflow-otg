@@ -12,6 +12,24 @@
         android:layout_height="wrap_content"
         android:text="@string/transfer_phone_help" />
 
+    <Switch
+        android:id="@+id/transfer_auto_public"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/transfer_auto_public" />
+
+    <TextView
+        android:id="@+id/transfer_destination"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/transfer_destination_private" />
+
+    <Button
+        android:id="@+id/transfer_choose_folder"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/transfer_choose_folder" />
+
     <Button
         android:id="@+id/transfer_refresh"
         android:layout_width="match_parent"

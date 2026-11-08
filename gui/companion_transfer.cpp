@@ -347,8 +347,8 @@ void CompanionTransfer::receipt()
         const auto obj = doc.object();
         SharedFile f;
         if (!ok || obj.value("version").toInt() != 1) { finish(false, "otg.transfer.failed"); return; }
-        if (obj.value("pending").toBool() && ++m_receiptAttempts < 20) {
-            m_receiptTimer.start(250); return;
+        if (obj.value("pending").toBool() && ++m_receiptAttempts < 120) {
+            m_receiptTimer.start(500); return;
         }
         if (!entry(obj.value("file").toObject(), f) || f.id != m_uploadId || f.size != m_size ||
             f.sha256 != m_hash.result().toHex()) { finish(false, "otg.transfer.failed"); return; }

@@ -36,6 +36,16 @@
     <string name="share_queued">Ready. On your computer open Files &amp; sharing, refresh, select these files and receive. Only an already-authorized ADB computer can read them. Unsent items can be deleted in this app.</string>
     <string name="transfer_title">Files &amp; sharing</string>
     <string name="transfer_phone_help">Files received from an authorized ADB computer remain private until you save them with the system picker. They are never opened automatically. Delete saved or unsent items to free space (32 files / 2 GiB total).</string>
+    <string name="transfer_auto_public">Automatically save computer files to public storage</string>
+    <string name="transfer_destination_private">Destination: private inbox (use Save as… manually)</string>
+    <string name="transfer_destination_media_only">Destination: media files use the media library; choose a folder for other files</string>
+    <string name="transfer_destination_folder">Destination folder: selected public folder</string>
+    <string name="transfer_choose_folder">Choose public folder for other files</string>
+    <string name="transfer_choose_folder_first">Choose a public folder before enabling automatic public storage</string>
+    <string name="transfer_folder_failed">Could not keep permission for that folder. Choose it again.</string>
+    <string name="transfer_public_saved">saved to public storage</string>
+    <string name="transfer_public_saving">saving to public storage…</string>
+    <string name="transfer_public_failed">public save failed; private copy kept</string>
     <string name="transfer_refresh">Refresh</string>
     <string name="transfer_empty">No pending files.</string>
     <string name="transfer_incoming">Received: %1$s (%2$d B)</string>

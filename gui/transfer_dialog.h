@@ -6,6 +6,7 @@ class QListWidget;
 class QPushButton;
 class QLabel;
 class QProgressBar;
+class FileDropWidget;
 
 class TransferDialog : public QDialog {
     Q_OBJECT
@@ -26,4 +27,5 @@ private:
     QPushButton *m_refresh, *m_receive, *m_send, *m_cancel;
     QLabel *m_hint, *m_status, *m_current;
     QProgressBar *m_progress;
+    FileDropWidget *m_dropWidget;
 };

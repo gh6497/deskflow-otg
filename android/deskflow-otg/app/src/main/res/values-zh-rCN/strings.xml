@@ -35,6 +35,16 @@
     <string name="share_queued">已准备好。请在电脑打开「文件与分享」，刷新后选择并接收。仅已授权的 ADB 电脑可读取。未发送内容可在本应用中删除。</string>
     <string name="transfer_title">文件与分享</string>
     <string name="transfer_phone_help">从已授权 ADB 电脑接收的文件先保存在应用私有空间，点击「另存为」通过系统选择器保存，不自动打开。请删除已保存或不再分享的内容以释放空间（最多 32 个文件、共 2 GiB）。</string>
+    <string name="transfer_auto_public">自动将电脑文件保存到公共存储</string>
+    <string name="transfer_destination_private">保存位置：应用私有收件箱（需手动“另存为”）</string>
+    <string name="transfer_destination_media_only">保存位置：图片、视频和音频进入媒体库；其他文件请先选择目录</string>
+    <string name="transfer_destination_folder">公共目录：已选择用户授权的目录</string>
+    <string name="transfer_choose_folder">选择其他文件的公共目录</string>
+    <string name="transfer_choose_folder_first">请先选择公共目录，再开启自动保存到公共存储</string>
+    <string name="transfer_folder_failed">无法保留该目录权限，请重新选择。</string>
+    <string name="transfer_public_saved">已保存到公共存储</string>
+    <string name="transfer_public_saving">正在保存到公共存储…</string>
+    <string name="transfer_public_failed">保存到公共目录失败，已保留私有副本</string>
     <string name="transfer_refresh">刷新</string>
     <string name="transfer_empty">暂无待处理文件。</string>
     <string name="transfer_incoming">已接收：%1$s（%2$d 字节）</string>

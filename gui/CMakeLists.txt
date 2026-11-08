@@ -10,6 +10,7 @@ add_library(otg_gui_support STATIC
   companion_app.cpp companion_app.h
   companion_status_sync.cpp companion_status_sync.h
   companion_transfer.cpp companion_transfer.h
+  file_drop_widget.cpp file_drop_widget.h
   wireless_adb_dialog.cpp wireless_adb_dialog.h
   transfer_dialog.cpp transfer_dialog.h
   usb_auto_connect.cpp usb_auto_connect.h

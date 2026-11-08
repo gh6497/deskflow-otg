@@ -9,16 +9,19 @@ public final class TransferStore {
     public static final int MAX_FILES = 32;
     public static final long MAX_TOTAL = 2L * TransferWire.MAX_FILE;
     public static final class Entry {
-        public final String id, name, direction, sha256;
+        public final String id, name, direction, sha256, publicState;
         public final long size;
         Entry(String id, Properties p) throws IOException {
             this.id = id;
             name = p.getProperty("name"); direction = p.getProperty("direction");
             sha256 = p.getProperty("sha256");
+            publicState = p.getProperty("publicState", "private");
             try { size = Long.parseLong(p.getProperty("size", "-1")); }
             catch (NumberFormatException e) { throw new IOException(e); }
             if (name == null || !("in".equals(direction) || "out".equals(direction))
                     || sha256 == null || !sha256.matches("[0-9a-f]{64}")
+                    || !("private".equals(publicState) || "publishing".equals(publicState)
+                    || "published".equals(publicState) || "failed".equals(publicState))
                     || size < 0 || size > TransferWire.MAX_FILE) throw new IOException("Invalid entry");
         }
     }
@@ -112,6 +115,7 @@ public final class TransferStore {
             p.setProperty("direction", direction);
             p.setProperty("size", Long.toString(data.length()));
             p.setProperty("sha256", TransferWire.hex(hash));
+            p.setProperty("publicState", "private");
             try (FileOutputStream out = new FileOutputStream(new File(temp, "metadata"))) {
                 p.store(out, "deskflow-otg transfer v1"); out.getFD().sync();
             }
@@ -125,5 +129,44 @@ public final class TransferStore {
             synchronized (this) { --reserved; reservedBytes -= reservation; }
             if (created && !committed) removeDirectory(temp);
         }
+    }
+
+    public synchronized void setPublicState(String id, String direction, String state)
+            throws IOException {
+        if (!validId(id) || !("private".equals(state) || "publishing".equals(state)
+                || "published".equals(state) || "failed".equals(state)))
+            throw new IOException("Invalid public state");
+        if (!get(id).direction.equals(direction)) throw new IOException("Wrong transfer direction");
+        File metadata = new File(new File(root, id), "metadata");
+        Properties p = new Properties();
+        try (InputStream in = new FileInputStream(metadata)) { p.load(in); }
+        p.setProperty("publicState", state);
+        try (FileOutputStream out = new FileOutputStream(metadata)) {
+            p.store(out, "deskflow-otg transfer v1"); out.getFD().sync();
+        }
+    }
+
+    public synchronized void writeReceipt(Entry entry) throws IOException {
+        File receipts = new File(root, "receipts");
+        if (!receipts.isDirectory() && !receipts.mkdirs())
+            throw new IOException("Cannot create transfer receipts");
+        Properties p = new Properties();
+        p.setProperty("name", entry.name);
+        p.setProperty("direction", "in");
+        p.setProperty("size", Long.toString(entry.size));
+        p.setProperty("sha256", entry.sha256);
+        p.setProperty("publicState", "published");
+        try (FileOutputStream out = new FileOutputStream(new File(receipts, entry.id))) {
+            p.store(out, "deskflow-otg transfer receipt v1"); out.getFD().sync();
+        }
+    }
+
+    public synchronized Entry getReceipt(String id) throws IOException {
+        if (!validId(id)) throw new IOException("Invalid receipt id");
+        File file = new File(new File(root, "receipts"), id);
+        if (!file.isFile()) throw new FileNotFoundException(file.getPath());
+        Properties p = new Properties();
+        try (InputStream in = new FileInputStream(file)) { p.load(in); }
+        return new Entry(id, p);
     }
 }

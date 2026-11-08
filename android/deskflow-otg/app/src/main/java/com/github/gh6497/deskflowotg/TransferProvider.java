@@ -6,6 +6,7 @@ import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.*;
+import android.util.Log;
 import org.json.*;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -17,6 +18,7 @@ import java.util.concurrent.atomic.AtomicLong;
 /** Only the already-authorized ADB shell (DUMP) may access this provider. No LAN listener. */
 public final class TransferProvider extends ContentProvider {
     public static final String AUTHORITY = "com.github.gh6497.deskflowotg.transfer";
+    private static final String TAG = "DeskflowTransfer";
     private static TransferStore store;
     private final AtomicBoolean receiving = new AtomicBoolean();
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
@@ -62,8 +64,16 @@ public final class TransferProvider extends ContentProvider {
                 return ParcelFileDescriptor.open(s.file(id, "out"), ParcelFileDescriptor.MODE_READ_ONLY);
             if ("r".equals(mode) && "receipt".equals(path.get(0))) {
                 try {
+                    return document(new JSONObject().put("version", 1)
+                            .put("file", json(s.getReceipt(id))));
+                } catch (FileNotFoundException ignored) { }
+                try {
                     TransferStore.Entry e = s.get(id);
                     if (!"in".equals(e.direction)) throw new IOException("Wrong direction");
+                    if ("publishing".equals(e.publicState))
+                        return document(new JSONObject().put("version", 1).put("pending", true));
+                    if ("failed".equals(e.publicState))
+                        return document(new JSONObject().put("version", 1).put("failed", true));
                     return document(new JSONObject().put("version", 1).put("file", json(e)));
                 } catch (FileNotFoundException e) {
                     return document(new JSONObject().put("version", 1).put("pending", true));
@@ -76,6 +86,8 @@ public final class TransferProvider extends ContentProvider {
             catch (IOException e) { receiving.set(false); throw e; }
             AtomicLong last = new AtomicLong(SystemClock.elapsedRealtime());
             long started = last.get();
+            final boolean autoPublic = TransferSettings.autoPublic(getContext());
+            final String publicTree = TransferSettings.treeUri(getContext());
             ScheduledFuture<?> watchdog = timer.scheduleWithFixedDelay(() -> {
                 long now = SystemClock.elapsedRealtime();
                 if (now - last.get() > 30000 || now - started > 15 * 60 * 1000) {
@@ -85,8 +97,22 @@ public final class TransferProvider extends ContentProvider {
             worker.execute(() -> {
                 try (InputStream input = new ParcelFileDescriptor.AutoCloseInputStream(pipe[0])) {
                     TransferWire.Header header = TransferWire.readHeader(input);
-                    s.stage(id, header.name, "in", input, header.size, true,
+                    TransferStore.Entry entry = s.stage(id, header.name, "in", input, header.size, true,
                             bytes -> last.set(SystemClock.elapsedRealtime()));
+                    if (autoPublic) {
+                        s.setPublicState(id, "in", "publishing");
+                        try {
+                            TransferPublisher.publish(getContext(), entry, s.file(id, "in"),
+                                    publicTree);
+                            s.writeReceipt(entry);
+                            s.delete(id, "in");
+                        } catch (IOException | RuntimeException exception) {
+                            Log.w(TAG, "public publish failed: "
+                                    + exception);
+                            try { s.setPublicState(id, "in", "failed"); }
+                            catch (IOException ignored) { }
+                        }
+                    }
                 } catch (IOException | RuntimeException ignored) {
                     // No receipt is committed on failure. Never log content or source URIs.
                 } finally {

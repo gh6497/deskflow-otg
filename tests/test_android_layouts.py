@@ -28,6 +28,9 @@ LAYOUTS = {
     },
     "activity_transfer": {
         "transfer_status": "TextView",
+        "transfer_auto_public": "Switch",
+        "transfer_destination": "TextView",
+        "transfer_choose_folder": "Button",
         "transfer_refresh": "Button",
         "transfer_rows": "LinearLayout",
     },

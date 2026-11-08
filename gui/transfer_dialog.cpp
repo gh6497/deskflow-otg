@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "transfer_dialog.h"
+#include "file_drop_widget.h"
 #include <QEvent>
 #include <QFileDialog>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
+#include <QMessageBox>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QStandardPaths>
@@ -18,6 +20,12 @@ TransferDialog::TransferDialog(const QString &adb, const QString &target, QWidge
     auto *layout = new QVBoxLayout(this);
     m_hint = new QLabel; m_hint->setWordWrap(true); layout->addWidget(m_hint);
     auto *targetLabel = new QLabel(target); targetLabel->setTextFormat(Qt::PlainText); layout->addWidget(targetLabel);
+    m_dropWidget = new FileDropWidget;
+    auto *dropLayout = new QVBoxLayout(m_dropWidget);
+    auto *dropLabel = new QLabel; dropLabel->setObjectName("transferDropLabel");
+    dropLabel->setAlignment(Qt::AlignCenter); dropLabel->setWordWrap(true);
+    dropLayout->addWidget(dropLabel);
+    layout->addWidget(m_dropWidget);
     m_files = new QListWidget; m_files->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_files->setObjectName("sharedFiles"); layout->addWidget(m_files);
     auto *buttons = new QHBoxLayout;
@@ -43,6 +51,14 @@ TransferDialog::TransferDialog(const QString &adb, const QString &target, QWidge
     connect(m_send, &QPushButton::clicked, this, [this] {
         const auto paths = QFileDialog::getOpenFileNames(this, qtTrId("otg.transfer.send"));
         if (!paths.isEmpty()) { m_transfer.send(paths); enabled(); }
+    });
+    connect(m_dropWidget, &FileDropWidget::filesDropped, this, [this](const QStringList &paths) {
+        if (m_transfer.busy()) return;
+        const QString message = qtTrId("otg.transfer.drop_confirm").arg(paths.size());
+        if (QMessageBox::question(this, qtTrId("otg.transfer.title"), message,
+                                  QMessageBox::Yes | QMessageBox::No) == QMessageBox::Yes) {
+            m_transfer.send(paths); enabled();
+        }
     });
     connect(m_cancel, &QPushButton::clicked, &m_transfer, &CompanionTransfer::cancel);
     connect(m_files, &QListWidget::itemSelectionChanged, this, &TransferDialog::enabled);
@@ -78,7 +94,7 @@ void TransferDialog::enabled()
     const bool idle = !m_transfer.busy();
     m_refresh->setEnabled(idle); m_send->setEnabled(idle);
     m_receive->setEnabled(idle && !m_files->selectedItems().isEmpty());
-    m_cancel->setEnabled(!idle); m_files->setEnabled(idle);
+    m_cancel->setEnabled(!idle); m_files->setEnabled(idle); m_dropWidget->setEnabled(idle);
     m_status->setText(idle ? qtTrId(m_statusId.toLatin1().constData()) : qtTrId("otg.transfer.working"));
 }
 void TransferDialog::translate()
@@ -89,6 +105,8 @@ void TransferDialog::translate()
     m_receive->setText(qtTrId("otg.transfer.receive"));
     m_send->setText(qtTrId("otg.transfer.send"));
     m_cancel->setText(qtTrId("otg.transfer.cancel"));
+    if (auto *label = findChild<QLabel *>("transferDropLabel"))
+        label->setText(qtTrId("otg.transfer.drop"));
     m_status->setText(qtTrId(m_statusId.toLatin1().constData()));
     enabled();
 }
