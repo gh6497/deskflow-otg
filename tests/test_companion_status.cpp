@@ -172,6 +172,7 @@ private slots:
         ConnectionOptions options;
         options.manageServer = false;
         options.serial = "USB123";
+        options.adbSerial = "192.0.2.1:5555"; // Windows requires an explicit ADB identity.
         options.adb = options.bridge = peer();
         options.audio = true;
         options.scrcpyServer = "fake-server";

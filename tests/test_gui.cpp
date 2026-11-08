@@ -228,6 +228,7 @@ private slots:
         ConnectionOptions options;
         options.manageServer = false; options.bridge = options.adb = peerPath();
         options.serial = "rotation-phone";
+        options.adbSerial = "192.0.2.1:5555"; // Windows requires an explicit ADB identity.
         options.scrcpyServer = "fake-server"; options.scrcpyVersion = "5.0.1";
         options.audio = audio; options.clipboard = clipboard; options.autoRotate = audio || clipboard;
         Session session;

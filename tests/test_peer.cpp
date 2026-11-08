@@ -127,23 +127,24 @@ int main(int argc, char **argv)
                 log.write("scan\n");
         }
         const auto path = qEnvironmentVariable("OTG_TEST_USB_SNAPSHOT");
+        QByteArray data;
         if (!path.isEmpty()) {
             QFile file(path);
             if (!file.open(QIODevice::ReadOnly))
                 return 7;
-            const auto data = file.readAll();
-            const int delay = qEnvironmentVariableIntValue("OTG_TEST_USB_SCAN_DELAY");
-            if (delay > 0) {
-                QTimer::singleShot(delay, &app, [data, &app] {
-                    output(data.constData());
-                    app.quit();
-                });
-                return app.exec();
-            }
-            output(data.constData());
+            data = file.readAll();
         } else {
-            output("{\"version\":1,\"devices\":[{\"id\":\"1:2\",\"serial\":\"TEST123\"}]}\n");
+            data = "{\"version\":1,\"devices\":[{\"id\":\"1:2\",\"serial\":\"TEST123\"}]}\n";
         }
+        const int delay = qEnvironmentVariableIntValue("OTG_TEST_USB_SCAN_DELAY");
+        if (delay > 0) {
+            QTimer::singleShot(delay, &app, [data, &app] {
+                output(data.constData());
+                app.quit();
+            });
+            return app.exec();
+        }
+        output(data.constData());
         return 0;
     }
     if (args.contains("devices")) {

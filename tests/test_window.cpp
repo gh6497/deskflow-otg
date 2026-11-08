@@ -5,6 +5,7 @@
 #include "system_theme.h"
 #include "tls_certificate.h"
 #include "transfer_dialog.h"
+#include "process_utils.h"
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
@@ -18,6 +19,7 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QSettings>
 #include <QScopeGuard>
 #include <QSignalBlocker>
@@ -31,6 +33,7 @@
 #include <QWheelEvent>
 #include <QTcpServer>
 #include <QtTest>
+#include <memory>
 
 class TrayTestWindow : public MainWindow {
 public:
@@ -54,6 +57,40 @@ protected:
 class WindowTest : public QObject {
     Q_OBJECT
 private slots:
+    void commandOwnerDestruction_data()
+    {
+        QTest::addColumn<bool>("started");
+        QTest::newRow("starting") << false;
+        QTest::newRow("running") << true;
+    }
+    void commandOwnerDestruction()
+    {
+        QFETCH(bool, started);
+        // QWidget destroys its children before QObject clears QPointer guards.
+        // A QProcess destroyed after a control can still emit finished(). Its
+        // completion callback must not run against the partially destroyed UI.
+        auto owner = std::make_unique<QWidget>();
+        auto *control = new QObject(owner.get());
+        bool controlDestroyed = false, callback = false;
+        connect(control, &QObject::destroyed, this, [&] { controlDestroyed = true; });
+        runCommand(owner.get(), QCoreApplication::applicationDirPath() + "/test_peer"
+#ifdef Q_OS_WIN
+                   ".exe"
+#endif
+                   , {"--gui", "--serial", "slow"},
+                   [&](bool, const QString &) { callback = true; });
+        auto *process = owner->findChild<QProcess *>();
+        QVERIFY(process);
+        if (started) QVERIFY(process->waitForStarted());
+        QPointer<QProcess> child(process);
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression("QProcess: Destroyed while process .* is still running\\."));
+        owner.reset();
+        QVERIFY(controlDestroyed);
+        QVERIFY(!child);
+        QVERIFY(!callback);
+        QCoreApplication::processEvents();
+        QVERIFY(!callback);
+    }
     void rightButtonSettings()
     {
         QTemporaryDir dir;
@@ -121,7 +158,7 @@ private slots:
         QFile manifest(dir.filePath("manifest.json")); QVERIFY(manifest.open(QIODevice::WriteOnly));
         manifest.write("{\"version\":1,\"files\":[]}"); manifest.close();
         AutoConnectTestWindow window; window.show();
-        QTest::qWait(20); // Initial no-ADB device discovery.
+        QTRY_COMPARE(window.findChild<QLineEdit *>("usbSerial")->text(), QString("TEST123"));
         auto *button = window.findChild<QPushButton *>("transferFiles"); QVERIFY(button);
         QVERIFY(!button->isEnabled());
         window.findChild<QCheckBox *>("adbEnabled")->setChecked(true);
@@ -198,6 +235,7 @@ private slots:
 
         AutoConnectTestWindow window;
         window.show();
+        QTRY_COMPARE(window.findChild<QLineEdit *>("usbSerial")->text(), QString("TEST123"));
         auto *adb = window.findChild<QLineEdit *>("adbExecutable");
         auto *setup = window.findChild<QPushButton *>("adbWirelessSetup");
         QVERIFY(adb && setup);
@@ -367,14 +405,16 @@ private slots:
         const auto logPath = dir.filePath("adb.jsonl");
         qputenv("OTG_TEST_COMPANION_LOG", logPath.toUtf8());
         qputenv("OTG_TEST_COMPANION_DELAY", "80");
+        qputenv("OTG_TEST_USB_SCAN_DELAY", "250"); // Discovery need not finish within 20 ms.
         const auto cleanup = qScopeGuard([] {
             qunsetenv("OTG_TEST_COMPANION_LOG"); qunsetenv("OTG_TEST_COMPANION_DELAY");
+            qunsetenv("OTG_TEST_USB_SCAN_DELAY");
         });
         QString apk;
         {
             AutoConnectTestWindow window;
             window.show();
-            QTest::qWait(20); // Let startup's no-ADB refresh finish.
+            QTRY_COMPARE(window.findChild<QLineEdit *>("usbSerial")->text(), QString("TEST123"));
             auto *install = window.findChild<QPushButton *>("companionInstall");
             auto *open = window.findChild<QPushButton *>("companionOpen");
             auto *check = window.findChild<QPushButton *>("companionCheck");
@@ -422,7 +462,16 @@ private slots:
                 QVERIFY(!install->isVisible());
                 transport->setCurrentIndex(transport->findData("usb"));
             }
-            target->clear(); // Manual USB serial fallback, never an unqualified adb command.
+            target->clear();
+#ifdef Q_OS_WIN
+            // Windows requires an explicit ADB target, even for USB HID.
+            QVERIFY(!open->isEnabled());
+            const QString nextTarget = "192.0.2.20:5555";
+            target->setText(nextTarget);
+#else
+            const QString nextTarget = "USB-ONLY"; // POSIX USB serial fallback.
+#endif
+            QVERIFY(open->isEnabled());
             open->click(); QTRY_VERIFY(!app->busy());
             QCOMPARE(status->text(), qtTrId("otg.companion.opened"));
             const auto capture = qEnvironmentVariable("OTG_TEST_COMPANION_SCREENSHOT");
@@ -439,7 +488,7 @@ private slots:
             for (int i = 0; i < lines.size(); ++i) {
                 const auto args = QJsonDocument::fromJson(lines[i]).array();
                 QCOMPARE(args[0].toString(), "-s");
-                QCOMPARE(args[1].toString(), i < 5 ? "192.0.2.10:5555" : "USB-ONLY");
+                QCOMPARE(args[1].toString(), i < 5 ? QString("192.0.2.10:5555") : nextTarget);
             }
         }
         AutoConnectTestWindow restored;
@@ -457,8 +506,11 @@ private slots:
         settings.setValue("manageServer", false);
         settings.setValue("language", "zh_CN");
         const auto path = dir.filePath(QString::fromUtf8("客户端/client.pem"));
+        qputenv("OTG_TEST_USB_SCAN_DELAY", "250");
+        const auto cleanup = qScopeGuard([] { qunsetenv("OTG_TEST_USB_SCAN_DELAY"); });
         {
             AutoConnectTestWindow window;
+            QTRY_COMPARE(window.findChild<QLineEdit *>("usbSerial")->text(), QString("TEST123"));
             auto *tls = window.findChild<QCheckBox *>("tlsEnabled");
             auto *certificate = window.findChild<QLineEdit *>("tlsCertificate");
             auto *fingerprint = window.findChild<QLineEdit *>("tlsFingerprint");
@@ -532,7 +584,9 @@ private slots:
             // Exercise connection gating with a fake bridge, never USB hardware.
             window.findChild<QLineEdit *>("usbSerial")->setText("TLS-client");
             auto *manager = window.findChild<ConnectionManager *>();
-            window.findChild<QPushButton *>("connectButton")->click();
+            auto *connectButton = window.findChild<QPushButton *>("connectButton");
+            QVERIFY(connectButton->isEnabled());
+            connectButton->click();
             QTRY_COMPARE(manager->state("initial"), Session::State::Connected);
             QVERIFY(!generate->isEnabled());
             QVERIFY(!browse->isEnabled());
@@ -1303,9 +1357,12 @@ private slots:
         QSettings settings;
         settings.setValue("adb", peer);
         settings.setValue("adbEnabled", true);
+        settings.setValue("adbSerial", "TEST123"); // Explicit ADB target on Windows.
         settings.setValue("deskflow", peer);
         settings.setValue("language", "zh_CN");
-        MainWindow window;
+        // Windows discovers USB through the bridge, not through `adb devices`.
+        AutoConnectTestWindow window;
+        window.available = false;
         window.show();
         auto *width = window.findChild<QSpinBox *>("screenWidth");
         auto *height = window.findChild<QSpinBox *>("screenHeight");
@@ -1376,7 +1433,8 @@ private slots:
         QCOMPARE(settings.value("sensitivityMultiplier").toDouble(), 1.5);
         QCOMPARE(settings.value("width").toInt(), 720);
         QCOMPARE(settings.value("height").toInt(), 1560);
-        MainWindow restored;
+        AutoConnectTestWindow restored;
+        restored.available = false;
         QCOMPARE(restored.findChild<QSpinBox *>("screenWidth")->value(), 1080);
         QCOMPARE(restored.findChild<QDoubleSpinBox *>("sensitivityMultiplier")->value(), 1.5);
         QVERIFY(restored.findChild<QLabel *>("virtualScreenSize")->text().startsWith("720 × 1560"));
