@@ -2,7 +2,8 @@
 package com.github.gh6497.deskflowotg;
 
 import android.app.*;
-import android.content.Intent;
+import android.content.*;
+import android.net.Uri;
 import android.os.*;
 import android.view.View;
 import android.widget.*;
@@ -15,15 +16,40 @@ public final class TransferActivity extends Activity {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private LinearLayout rows;
     private TextView status;
+    private TextView destination;
+    private Switch autoPublic;
     private String savingId;
     private boolean busy;
+    private boolean enablePublicAfterFolder;
     @Override protected void onCreate(Bundle saved) {
         super.onCreate(saved);
         if (saved != null) savingId = saved.getString("savingId");
         setContentView(R.layout.activity_transfer);
         status = findViewById(R.id.transfer_status);
+        destination = findViewById(R.id.transfer_destination);
         rows = findViewById(R.id.transfer_rows);
+        autoPublic = findViewById(R.id.transfer_auto_public);
+        if (TransferSettings.autoPublic(this)
+                && !TransferSettings.hasTreePermission(this))
+            TransferSettings.setAutoPublic(this, false);
+        if (!TransferSettings.treeUri(this).isEmpty()
+                && !TransferSettings.hasTreePermission(this))
+            TransferSettings.setTreeUri(this, "");
+        autoPublic.setChecked(TransferSettings.autoPublic(this));
+        autoPublic.setOnCheckedChangeListener((button, checked) -> {
+            if (checked && TransferSettings.treeUri(this).isEmpty()) {
+                enablePublicAfterFolder = true;
+                button.setChecked(false);
+                status.setText(R.string.transfer_choose_folder_first);
+                chooseFolder();
+                return;
+            }
+            TransferSettings.setAutoPublic(this, checked);
+            updateDestination();
+        });
+        findViewById(R.id.transfer_choose_folder).setOnClickListener(v -> chooseFolder());
         findViewById(R.id.transfer_refresh).setOnClickListener(v -> refresh());
+        updateDestination();
         refresh();
     }
     @Override protected void onSaveInstanceState(Bundle out) {
@@ -41,11 +67,16 @@ public final class TransferActivity extends Activity {
                 View row = getLayoutInflater().inflate(R.layout.item_transfer, rows, false);
                 rows.addView(row);
                 TextView label = row.findViewById(R.id.transfer_label);
-                label.setText(getString("in".equals(e.direction) ? R.string.transfer_incoming : R.string.transfer_outgoing,
-                        e.name, e.size));
+                int labelId = "in".equals(e.direction) ? R.string.transfer_incoming : R.string.transfer_outgoing;
+                String labelText = getString(labelId, e.name, e.size);
+                if ("published".equals(e.publicState)) labelText += " · " + getString(R.string.transfer_public_saved);
+                else if ("publishing".equals(e.publicState)) labelText += " · " + getString(R.string.transfer_public_saving);
+                else if ("failed".equals(e.publicState)) labelText += " · " + getString(R.string.transfer_public_failed);
+                label.setText(labelText);
                 if ("in".equals(e.direction)) {
                     Button save = row.findViewById(R.id.transfer_save);
-                    save.setVisibility(View.VISIBLE);
+                    save.setVisibility("published".equals(e.publicState) || "publishing".equals(e.publicState)
+                            ? View.GONE : View.VISIBLE);
                     save.setOnClickListener(v -> {
                         if (busy) return;
                         savingId = e.id;
@@ -67,8 +98,46 @@ public final class TransferActivity extends Activity {
             }
         } catch (IOException e) { status.setText(R.string.transfer_failed); }
     }
+    private void chooseFolder() {
+        if (busy) return;
+        Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        startActivityForResult(picker, 2);
+    }
+    private void updateDestination() {
+        if (destination == null) return;
+        String tree = TransferSettings.treeUri(this);
+        if (!TransferSettings.autoPublic(this)) {
+            destination.setText(R.string.transfer_destination_private);
+        } else if (tree.isEmpty()) {
+            destination.setText(R.string.transfer_destination_media_only);
+        } else {
+            destination.setText(R.string.transfer_destination_folder);
+        }
+    }
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == 2 && result == RESULT_OK && data != null && data.getData() != null) {
+            Uri uri = data.getData();
+            try {
+                int flags = Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION;
+                getContentResolver().takePersistableUriPermission(uri, flags);
+                TransferSettings.setTreeUri(this, uri.toString());
+                if (enablePublicAfterFolder) {
+                    enablePublicAfterFolder = false;
+                    TransferSettings.setAutoPublic(this, true);
+                    autoPublic.setChecked(true);
+                }
+                updateDestination();
+            } catch (SecurityException ignored) {
+                enablePublicAfterFolder = false;
+                status.setText(R.string.transfer_folder_failed);
+            }
+            return;
+        }
+        if (request == 2) enablePublicAfterFolder = false;
         if (request != 1 || result != RESULT_OK || data == null || data.getData() == null || savingId == null) return;
         String id = savingId; savingId = null; busy = true;
         status.setText(R.string.transfer_saving);

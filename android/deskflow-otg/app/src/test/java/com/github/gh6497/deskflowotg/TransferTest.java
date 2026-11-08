@@ -76,6 +76,10 @@ public final class TransferTest {
         store.stage(received, meta.name, "in", input, meta.size, true, null);
         check(store.list("in").size() == 1);
         check(!store.get(received).name.contains("/"));
+        store.setPublicState(received, "in", "published");
+        check(store.get(received).publicState.equals("published"));
+        store.writeReceipt(store.get(received));
+        check(store.getReceipt(received).sha256.equals(store.get(received).sha256));
         int before = store.list(null).size();
         String failed = TransferStore.newId();
         rejects(() -> store.stage(failed, "bad", "in", new ByteArrayInputStream(corrupt), content.length, true, null));

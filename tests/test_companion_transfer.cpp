@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "companion_transfer.h"
+#include "file_drop_widget.h"
 #include "transfer_dialog.h"
 #include "i18n.h"
 #include <QDir>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -10,6 +14,8 @@
 #include <QListWidget>
 #include <QPushButton>
 #include <QProgressBar>
+#include <QMimeData>
+#include <QUrl>
 #include <QtTest>
 
 // Windows CI can spend several seconds starting the fake ADB process while
@@ -286,6 +292,22 @@ private slots:
         const auto screenshot = qEnvironmentVariable("OTG_TEST_TRANSFER_SCREENSHOT");
         if (!screenshot.isEmpty()) QVERIFY(dialog.grab().save(screenshot));
         dialog.reject(); QVERIFY(!dialog.isVisible());
+    }
+    void localFilesCanBeDropped()
+    {
+        FileDropWidget widget; widget.show();
+        auto *drop = &widget;
+        QVERIFY(drop->acceptDrops());
+        const auto path = m_dir.filePath("dropped.txt"); write("dropped.txt", "data");
+        QMimeData mime;
+        mime.setUrls({QUrl::fromLocalFile(path)});
+        QSignalSpy files(drop, &FileDropWidget::filesDropped);
+        QDragEnterEvent enter(QPoint(2, 2), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+        QApplication::sendEvent(drop, &enter);
+        QDropEvent event(QPointF(2, 2), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+        QApplication::sendEvent(drop, &event);
+        QCOMPARE(files.size(), 1);
+        QCOMPARE(files.first().first().toStringList(), QStringList{QFileInfo(path).absoluteFilePath()});
     }
     void badReceipt()
     {
