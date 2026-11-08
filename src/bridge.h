@@ -82,12 +82,12 @@ struct otg_bridge {
      * only in the bridge process and is never included in diagnostic output. */
     char unlock_pin[33];
     bool unlock_attempted;
-    bool unlock_pending; /* Synthetic unlock owns the mouse; drop external input. */
+    bool unlock_pending; /* Synthetic unlock owns reports; track motion, drop actions. */
     bool unlock_adb_gated;
     uint64_t unlock_due_ms;
     unsigned unlock_phase;
     unsigned unlock_swipe_step;
-    int32_t unlock_saved_x, unlock_saved_y;
+    int32_t unlock_saved_x, unlock_saved_y; /* Latest server position, not swipe position. */
 };
 
 /*

@@ -624,6 +624,10 @@ bool otg_bridge_resize(struct otg_bridge *b, int32_t width, int32_t height)
     if (b->active) send_mouse_state(b, 0, 0); /* Release at the old drag location. */
     b->mouse_x = b->screen_w > 1 ? (int32_t)((int64_t)b->mouse_x * (width - 1) / (b->screen_w - 1)) : 0;
     b->mouse_y = b->screen_h > 1 ? (int32_t)((int64_t)b->mouse_y * (height - 1) / (b->screen_h - 1)) : 0;
+    if (b->unlock_pending) {
+        b->unlock_saved_x = b->screen_w > 1 ? (int32_t)((int64_t)b->unlock_saved_x * (width - 1) / (b->screen_w - 1)) : 0;
+        b->unlock_saved_y = b->screen_h > 1 ? (int32_t)((int64_t)b->unlock_saved_y * (height - 1) / (b->screen_h - 1)) : 0;
+    }
     b->screen_w = width; b->screen_h = height;
     if (b->mouse_mode == OTG_MOUSE_RELATIVE) b->have_mouse_pos = false;
     if (b->active) send_mouse_state(b, 0, 0);
@@ -636,9 +640,12 @@ static void schedule_unlock(struct otg_bridge *b)
     b->unlock_due_ms = bridge_now_ms() + UNLOCK_WAKE_DELAY_MS;
     b->unlock_phase = UNLOCK_PHASE_WAIT_SWIPE;
     b->unlock_swipe_step = 0;
+    b->unlock_saved_x = b->mouse_x;
+    b->unlock_saved_y = b->mouse_y;
     /* ADB lock-state detection may finish after mouse input has started.
      * Release any drag and discard wheel/navigation state before the synthetic
-     * swipe takes ownership. External mouse events are dropped until done. */
+     * swipe takes ownership. External mouse actions are dropped until done;
+     * motion only updates the server position used when handing control back. */
     b->middle_button_home_down = b->right_button_back_down = false;
     b->residual_hscroll = b->residual_vscroll = 0;
     if (b->mouse_buttons) {
@@ -753,8 +760,6 @@ void otg_bridge_unlock_tick(struct otg_bridge *b)
             LOG_WARN("automatic unlock requires absolute mouse mode; skipped\n");
             return;
         }
-        b->unlock_saved_x = b->mouse_x;
-        b->unlock_saved_y = b->mouse_y;
         b->mouse_x = b->screen_w / 2;
         b->mouse_y = b->screen_h - 1;
         b->mouse_buttons = 1; /* Tip Switch: begin the upward swipe. */
@@ -791,6 +796,11 @@ void otg_bridge_unlock_tick(struct otg_bridge *b)
         send_key_tap(b, HID_KEY_ENTER);
         b->unlock_pending = false;
         b->unlock_phase = UNLOCK_PHASE_NONE;
+        /* Motion also arrives during the PIN delay. Restore the latest server
+         * position, not the pre-swipe cursor or the synthetic swipe endpoint. */
+        b->mouse_x = b->unlock_saved_x;
+        b->mouse_y = b->unlock_saved_y;
+        send_mouse_state(b, 0, 0);
         LOG_DBG("unlock PIN sequence sent\n");
     }
 }
@@ -868,11 +878,16 @@ void otg_bridge_mouse_button(struct otg_bridge *b, uint8_t button, bool press)
 
 void otg_bridge_mouse_move(struct otg_bridge *b, int16_t x, int16_t y)
 {
-    if (!b->active || b->unlock_pending) {
+    if (!b->active) {
         return;
     }
     int32_t tx = clamp_position(x, b->screen_w);
     int32_t ty = clamp_position(y, b->screen_h);
+    if (b->unlock_pending) {
+        b->unlock_saved_x = tx;
+        b->unlock_saved_y = ty;
+        return;
+    }
     int32_t dx = tx - b->mouse_x;
     int32_t dy = ty - b->mouse_y;
     bool had_position = b->have_mouse_pos;
@@ -891,7 +906,12 @@ void otg_bridge_mouse_move(struct otg_bridge *b, int16_t x, int16_t y)
 
 void otg_bridge_mouse_rel_move(struct otg_bridge *b, int16_t dx, int16_t dy)
 {
-    if (!b->active || b->unlock_pending) {
+    if (!b->active) {
+        return;
+    }
+    if (b->unlock_pending) {
+        b->unlock_saved_x = clamp_position(b->unlock_saved_x + dx, b->screen_w);
+        b->unlock_saved_y = clamp_position(b->unlock_saved_y + dy, b->screen_h);
         return;
     }
     /* Locked-screen DMRM has no absolute target. Accumulate within the screen

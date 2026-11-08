@@ -141,7 +141,8 @@ static void test_navigation_shortcuts(enum otg_mouse_mode mode)
 }
 
 /* External mouse input must not overwrite the synthetic unlock swipe, send
- * navigation shortcuts, or accumulate events for replay after PIN entry. */
+ * navigation shortcuts, or accumulate actions for replay after PIN entry.
+ * Only the latest server position is retained for cursor resynchronization. */
 static void check_unlock_mouse_blocked(struct otg_bridge *b)
 {
     int before = reports;
@@ -212,7 +213,7 @@ static void test_unlock_mouse_suppression(bool gated)
             CHECK(b.mouse_y == (int32_t)(2339 * (12 - step) / 12));
         }
     }
-    CHECK(!b.mouse_buttons && b.mouse_x == 100 && b.mouse_y == 200);
+    CHECK(!b.mouse_buttons && b.mouse_x == 800 && b.mouse_y == 1900);
     check_unlock_mouse_blocked(&b); /* PIN animation delay. */
     unsigned before = keyboard_count;
     unlock_tick_now(&b);
@@ -278,6 +279,69 @@ static void test_unlock_mouse_cancellation(void)
     otg_bridge_close(&b);
 }
 
+static void check_pointer_position(int32_t x, int32_t y, int32_t w, int32_t h)
+{
+    CHECK(last_id == AOA_HID_ID_MOUSE && last_size == 8);
+    CHECK(report[0] == 2 && !report[1] && !report[6] && !report[7]);
+    uint16_t hx = (uint16_t)(report[2] | (uint16_t)report[3] << 8);
+    uint16_t hy = (uint16_t)(report[4] | (uint16_t)report[5] << 8);
+    CHECK(hx == (w > 1 ? x * 32767 / (w - 1) : 0));
+    CHECK(hy == (h > 1 ? y * 32767 / (h - 1) : 0));
+}
+
+static void test_unlock_cursor_tracking(void)
+{
+    struct otg_bridge b;
+    open_unlock_bridge(&b, OTG_MOUSE_ABSOLUTE);
+    otg_bridge_enter(&b, 100, 200, 0);
+    int before = reports;
+    otg_bridge_mouse_rel_move(&b, 30, -20); /* Wake delay: retain relative motion. */
+    CHECK(reports == before);
+    unlock_tick_now(&b);
+    CHECK(b.mouse_x == 540 && b.mouse_y == 2339 && b.mouse_buttons == 1);
+    before = reports;
+    otg_bridge_mouse_rel_move(&b, 50, 40); /* Must not accumulate from swipe position. */
+    CHECK(reports == before && b.mouse_x == 540 && b.mouse_y == 2339);
+    for (unsigned step = 0; step < 12; ++step) unlock_tick_now(&b);
+    CHECK(b.mouse_x == 180 && b.mouse_y == 220);
+    check_pointer_position(180, 220, 1080, 2340);
+    before = reports;
+    otg_bridge_mouse_move(&b, 900, 1800); /* Authoritative position during PIN delay. */
+    otg_bridge_mouse_rel_move(&b, 32767, -32768); /* Clamp, then reverse from edge. */
+    otg_bridge_mouse_rel_move(&b, -10, 10);
+    CHECK(reports == before);
+    unlock_tick_now(&b);
+    CHECK(!b.unlock_pending && b.mouse_x == 1069 && b.mouse_y == 10);
+    check_pointer_position(1069, 10, 1080, 2340);
+    otg_bridge_mouse_rel_move(&b, -9, 10);
+    CHECK(b.mouse_x == 1060 && b.mouse_y == 20);
+    check_pointer_position(1060, 20, 1080, 2340);
+    otg_bridge_close(&b);
+}
+
+static void test_unlock_cursor_resize(void)
+{
+    /* Rotation can happen before, during or after the lock-screen swipe. */
+    for (unsigned phase = 0; phase < 3; ++phase) {
+        struct otg_bridge b;
+        open_unlock_bridge(&b, OTG_MOUSE_ABSOLUTE);
+        otg_bridge_enter(&b, 100, 200, 0);
+        if (phase >= 1) unlock_tick_now(&b);
+        if (phase >= 2)
+            for (unsigned step = 0; step < 12; ++step) unlock_tick_now(&b);
+        otg_bridge_mouse_move(&b, 1079, 2339);
+        CHECK(otg_bridge_resize(&b, 2340, 1080));
+        /* With no subsequent absolute event, relative motion must use the
+         * rescaled server position rather than the synthetic swipe position. */
+        otg_bridge_mouse_rel_move(&b, -10, -20);
+        unsigned ticks = 0;
+        while (b.unlock_pending && ticks++ < 15) unlock_tick_now(&b);
+        CHECK(!b.unlock_pending && b.mouse_x == 2329 && b.mouse_y == 1059);
+        check_pointer_position(2329, 1059, 2340, 1080);
+        otg_bridge_close(&b);
+    }
+}
+
 int main(void)
 {
     struct otg_bridge b;
@@ -313,6 +377,8 @@ int main(void)
     test_unlock_mouse_suppression(false);
     test_unlock_mouse_suppression(true);
     test_unlock_mouse_cancellation();
-    puts("PASS: default USB descriptors, absolute coordinates, buttons, wheel, keyboard, Home/Back shortcuts, unlock mouse suppression and close lifecycle");
+    test_unlock_cursor_tracking();
+    test_unlock_cursor_resize();
+    puts("PASS: default USB descriptors, absolute coordinates, buttons, wheel, keyboard, Home/Back shortcuts, unlock mouse suppression/cursor tracking/resize and close lifecycle");
     return 0;
 }
