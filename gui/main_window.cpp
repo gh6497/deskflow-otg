@@ -776,12 +776,11 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     m_direction->setCurrentIndex(qMax(0, m_direction->findData(settings.value("direction", "right"))));
     m_mouseMode->setCurrentIndex(qMax(0, m_mouseMode->findData(settings.value("mouseMode", "absolute"))));
     m_middleButtonAction->setCurrentIndex(qMax(0, m_middleButtonAction->findData(
-        settings.value("middleButtonAction", "normal"))));
+        settings.value("middleButtonAction", "home"))));
     m_rightButtonAction->setCurrentIndex(qMax(0, m_rightButtonAction->findData(
-        settings.value("rightButtonAction", "normal"))));
-    /* PINs are deliberately session-only; never restore them from QSettings. */
-    m_unlockEnabled->setChecked(false);
-    m_unlockPin->clear();
+        settings.value("rightButtonAction", "back"))));
+    m_unlockEnabled->setChecked(settings.value("unlockEnabled", false).toBool());
+    m_unlockPin->setText(settings.value("unlockPin").toString());
     if (m_transport->currentData() == "ble") m_mouseMode->setCurrentIndex(0);
     const int profileCount = settings.beginReadArray("rememberedDevices");
     for (int i = 0; i < profileCount; ++i) {
@@ -1033,10 +1032,7 @@ void MainWindow::persistDevices()
     for (const auto &id : ids) {
         settings.setArrayIndex(index++);
         settings.setValue("id", id);
-        auto safeProfile = m_records.value(id);
-        safeProfile.remove("unlockPin");
-        safeProfile.remove("unlockEnabled");
-        settings.setValue("profile", safeProfile);
+        settings.setValue("profile", m_records.value(id));
     }
     settings.endArray();
 }
@@ -1229,8 +1225,8 @@ ConnectionOptions MainWindow::connectionOptions(const QVariantMap &profile) cons
     options.autoRotate = options.transport == "usb" &&
         options.adbEnabled && (options.audio || options.clipboard) && profile.value("autoRotate", false).toBool();
     options.mouseMode = options.transport == "ble" ? "absolute" : profile.value("mouseMode", "absolute").toString();
-    options.middleButtonAction = profile.value("middleButtonAction", "normal").toString();
-    options.rightButtonAction = profile.value("rightButtonAction", "normal").toString();
+    options.middleButtonAction = profile.value("middleButtonAction", "home").toString();
+    options.rightButtonAction = profile.value("rightButtonAction", "back").toString();
     options.unlockPin = options.adbEnabled && profile.value("unlockEnabled", false).toBool() ?
         profile.value("unlockPin").toString() : QString();
     options.unlockAdb = !options.unlockPin.isEmpty();
@@ -1884,9 +1880,9 @@ void MainWindow::applyDeviceProfile(const QVariantMap &profile)
     m_direction->setCurrentIndex(qMax(0, m_direction->findData(profile.value("direction", "right"))));
     m_mouseMode->setCurrentIndex(qMax(0, m_mouseMode->findData(profile.value("mouseMode", "absolute"))));
     m_middleButtonAction->setCurrentIndex(qMax(0, m_middleButtonAction->findData(
-        profile.value("middleButtonAction", "normal"))));
+        profile.value("middleButtonAction", "home"))));
     m_rightButtonAction->setCurrentIndex(qMax(0, m_rightButtonAction->findData(
-        profile.value("rightButtonAction", "normal"))));
+        profile.value("rightButtonAction", "back"))));
     m_unlockEnabled->setChecked(profile.value("unlockEnabled", false).toBool());
     m_unlockPin->setText(profile.value("unlockPin").toString());
     if (m_transport->currentData() == "ble") m_mouseMode->setCurrentIndex(0);
@@ -1909,10 +1905,7 @@ void MainWindow::rememberDevice()
     int index = 0;
     for (const auto &profile : m_profiles) {
         settings.setArrayIndex(index++);
-        auto safeProfile = profile;
-        safeProfile.remove("unlockPin");
-        safeProfile.remove("unlockEnabled");
-        settings.setValue("profile", safeProfile);
+        settings.setValue("profile", profile);
     }
     settings.endArray();
     updateAutoConnect();
