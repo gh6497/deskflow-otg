@@ -70,10 +70,13 @@ private slots:
             auto *middle = window.findChild<QComboBox *>("middleButtonAction");
             auto *list = window.findChild<QListWidget *>("deviceSidebar");
             auto *language = window.findChild<QComboBox *>("languageSelector");
-            QVERIFY(right && middle && list && language);
-            QCOMPARE(right->currentData().toString(), "normal");
+            auto *adbEnabled = window.findChild<QCheckBox *>("adbEnabled");
+            auto *unlock = window.findChild<QCheckBox *>("unlockEnabled");
+            auto *pin = window.findChild<QLineEdit *>("unlockPin");
+            QVERIFY(right && middle && list && language && adbEnabled && unlock && pin);
+            QCOMPARE(right->currentData().toString(), "back");
             right->setCurrentIndex(right->findData("back"));
-            QCOMPARE(middle->currentData().toString(), "normal");
+            QCOMPARE(middle->currentData().toString(), "home");
             QCOMPARE(right->currentText(), "安卓返回键（Win+Backspace）");
             language->setCurrentIndex(language->findData("en"));
             QCOMPARE(right->currentText(), "Android Back (Win+Backspace)");
@@ -85,7 +88,10 @@ private slots:
             for (int i = 0; i < list->count(); ++i)
                 if (list->item(i)->data(Qt::UserRole) == "initial") list->setCurrentRow(i);
             QCOMPARE(right->currentData().toString(), "back");
-            QCOMPARE(middle->currentData().toString(), "normal");
+            QCOMPARE(middle->currentData().toString(), "home");
+            adbEnabled->setChecked(true);
+            unlock->setChecked(true);
+            pin->setText("1234");
             window.findChild<QAction *>("trayQuit")->trigger();
         }
         AutoConnectTestWindow restored;
@@ -93,7 +99,9 @@ private slots:
         auto *middle = restored.findChild<QComboBox *>("middleButtonAction");
         auto *list = restored.findChild<QListWidget *>("deviceSidebar");
         QCOMPARE(right->currentData().toString(), "back");
-        QCOMPARE(middle->currentData().toString(), "normal");
+        QCOMPARE(middle->currentData().toString(), "home");
+        QCOMPARE(restored.findChild<QCheckBox *>("unlockEnabled")->isChecked(), true);
+        QCOMPARE(restored.findChild<QLineEdit *>("unlockPin")->text(), QStringLiteral("1234"));
         list->setCurrentRow(1);
         QCOMPARE(right->currentData().toString(), "normal");
         QCOMPARE(middle->currentData().toString(), "home");

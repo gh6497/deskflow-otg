@@ -25,8 +25,8 @@ struct ConnectionOptions {
     QString phone = "android";
     QString direction = "right";
     QString mouseMode = "absolute";
-    QString middleButtonAction = "normal";
-    QString rightButtonAction = "normal";
+    QString middleButtonAction = "home";
+    QString rightButtonAction = "back";
     QString unlockPin;
     bool unlockAdb = false;
     QString tlsCertificate;

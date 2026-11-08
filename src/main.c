@@ -284,8 +284,8 @@ static void usage(const char *prog)
              "      --width W         Virtual screen width, 1..32767 (default %d)\n"
              "      --height H        Virtual screen height, 1..32767 (default %d)\n"
              "      --mouse-mode MODE absolute (default) or relative (compatibility)\n"
-              "      --middle-button-action MODE normal (default) or home (Android Meta+Enter)\n"
-              "      --right-button-action MODE normal (default) or back (Android Meta+Backspace)\n"
+              "      --middle-button-action MODE home (default) or normal (Android Meta+Enter)\n"
+              "      --right-button-action MODE back (default) or normal (Android Meta+Backspace)\n"
               "      OTG_UNLOCK_PIN       GUI/experimental numeric PIN sent once on first enter\n"
              "      --audio             Forward Android output audio through ADB (Linux/Windows)\n"
               "      --clipboard         Share Deskflow text clipboard through ADB/scrcpy\n"
@@ -685,8 +685,8 @@ int main(int argc, char **argv)
         .transport = "usb",
         .adapter = "hci0",
         .mouse_mode = OTG_MOUSE_ABSOLUTE,
-        .middle_button_action = OTG_MIDDLE_BUTTON_NORMAL,
-        .right_button_action = OTG_RIGHT_BUTTON_NORMAL,
+        .middle_button_action = OTG_MIDDLE_BUTTON_HOME,
+        .right_button_action = OTG_RIGHT_BUTTON_BACK,
         .adb_path = "adb",
     };
     char unlock_pin_file_data[64] = {0};
