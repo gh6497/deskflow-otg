@@ -269,6 +269,10 @@ for f in platform/linux/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only
 - 每个 `.c` 顶部注明其对应的 scrcpy/deskflow 上游出处。
 - License：Apache-2.0（HID/AOA 逻辑移植自 scrcpy，同为 Apache-2.0）。
 
+## Git 提交约定
+
+- Git 提交消息统一使用英文。
+
 ## 可选桌面 GUI
 
 - **所有下拉框禁止通过鼠标滚轮修改值**，无论是否获得焦点；新增下拉框也必须遵守。
