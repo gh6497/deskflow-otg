@@ -43,7 +43,7 @@
  * twice as many points to avoid the visibly coarse 12-point trajectory. */
 #define SIDE_SWIPE_STEPS 24
 #define SIDE_SWIPE_INTERVAL_MS 4
-#define SIDE_SWIPE_DISTANCE_DIVISOR 6
+#define SIDE_SWIPE_DISTANCE_DEFAULT_PERCENT 17
 
 enum {
     UNLOCK_PHASE_NONE,
@@ -484,6 +484,7 @@ int otg_bridge_open(struct otg_bridge *b, const char *serial,
     b->screen_w = screen_w;
     b->screen_h = screen_h;
     b->mouse_mode = mouse_mode;
+    b->side_swipe_distance_percent = SIDE_SWIPE_DISTANCE_DEFAULT_PERCENT;
 
     if (!aoa_hid_init(&b->aoa)) {
         return -1;
@@ -531,6 +532,7 @@ int otg_bridge_open_transport(struct otg_bridge *b,
     b->screen_w = screen_w;
     b->screen_h = screen_h;
     b->mouse_mode = mouse_mode;
+    b->side_swipe_distance_percent = SIDE_SWIPE_DISTANCE_DEFAULT_PERCENT;
     b->transport_ops = ops;
     b->transport_ctx = ctx;
     b->external_transport = true;
@@ -604,6 +606,13 @@ void otg_bridge_set_side_button_action(struct otg_bridge *b, uint8_t button,
     } else if (button == 5) {
         b->side_button_2_action = action;
     }
+}
+
+void otg_bridge_set_side_swipe_distance(struct otg_bridge *b, uint8_t percent)
+{
+    if (!percent) percent = SIDE_SWIPE_DISTANCE_DEFAULT_PERCENT;
+    if (percent > 100) percent = 100;
+    b->side_swipe_distance_percent = percent;
 }
 
 bool otg_bridge_check(struct otg_bridge *b)
@@ -896,7 +905,8 @@ static void side_swipe_start(struct otg_bridge *b, uint8_t button,
         return;
     }
 
-    int32_t distance = b->screen_h / SIDE_SWIPE_DISTANCE_DIVISOR;
+    int32_t distance = (int32_t)((int64_t)b->screen_h *
+                                 b->side_swipe_distance_percent / 100);
     if (distance < 1) distance = 1;
     int32_t target = b->mouse_y +
         (action == OTG_SIDE_BUTTON_SWIPE_UP ? -distance : distance);

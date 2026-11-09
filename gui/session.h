@@ -29,6 +29,7 @@ struct ConnectionOptions {
     QString rightButtonAction = "back";
     QString sideButton1Action = "swipe-up";
     QString sideButton2Action = "swipe-down";
+    int sideSwipeDistancePercent = 17;
     QString unlockPin;
     bool unlockAdb = false;
     QString tlsCertificate;

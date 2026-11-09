@@ -353,7 +353,7 @@ static void test_side_button_swipes(void)
 
     otg_bridge_mouse_button(&b, 4, true);
     CHECK(b.side_swipe_pending && b.mouse_buttons == 1 && report[0] == 3);
-    CHECK(b.side_swipe_target_y == 610);
+    CHECK(b.side_swipe_target_y == 603);
     for (unsigned i = 0; i < 24; ++i) {
         b.side_swipe_due_ms = 0;
         otg_bridge_unlock_tick(&b);
@@ -362,9 +362,10 @@ static void test_side_button_swipes(void)
     CHECK(b.mouse_x == 540 && b.mouse_y == 1000 && report[0] == 2);
     otg_bridge_mouse_button(&b, 4, false);
 
+    otg_bridge_set_side_swipe_distance(&b, 25);
     otg_bridge_mouse_button(&b, 5, true);
     CHECK(b.side_swipe_pending && b.mouse_buttons == 1);
-    CHECK(b.side_swipe_target_y == 1390);
+    CHECK(b.side_swipe_target_y == 1585);
     for (unsigned i = 0; i < 24; ++i) {
         b.side_swipe_due_ms = 0;
         otg_bridge_unlock_tick(&b);

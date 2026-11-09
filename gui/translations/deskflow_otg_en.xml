@@ -200,6 +200,8 @@
    <message id="otg.label.side_button_1_action"><source>Side button 1 (Button 4)</source><translation>Side button 1 (Button 4)</translation></message>
    <message id="otg.label.side_button_2_action"><source>Side button 2 (Button 5)</source><translation>Side button 2 (Button 5)</translation></message>
    <message id="otg.side_button.tooltip"><source>In absolute mode, sends a short touch-like swipe and then returns the pointer to its original position. The gesture is ignored in relative mode.</source><translation>In absolute mode, sends a short touch-like swipe and then returns the pointer to its original position. The gesture is ignored in relative mode.</translation></message>
+   <message id="otg.label.side_swipe_distance"><source>Side swipe distance</source><translation>Side swipe distance</translation></message>
+   <message id="otg.side_swipe_distance.tooltip"><source>Swipe distance as a percentage of the virtual screen height. Applies to both side buttons.</source><translation>Swipe distance as a percentage of the virtual screen height. Applies to both side buttons.</translation></message>
   <message id="otg.unlock.enabled"><source>Try automatic numeric PIN unlock on entry</source><translation>Try automatic numeric PIN unlock on entry</translation></message>
   <message id="otg.label.unlock_pin"><source>Numeric PIN (saved per device)</source><translation>Numeric PIN (saved per device)</translation></message>
   <message id="otg.unlock.pin_hint"><source>4–32 digits; saved per device in local settings</source><translation>4–32 digits; saved per device in local settings</translation></message>

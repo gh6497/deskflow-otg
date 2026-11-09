@@ -82,6 +82,7 @@ struct app_options {
     enum otg_right_button_action right_button_action;
     enum otg_side_button_action side_button_1_action;
     enum otg_side_button_action side_button_2_action;
+    unsigned side_swipe_distance_percent;
 
     /* Optional ADB features and unlock configuration. */
     const char *adb_path;
@@ -290,6 +291,7 @@ static void usage(const char *prog)
                "      --right-button-action MODE back (default) or normal (Android Meta+Backspace)\n"
                "      --side-button-1-action MODE swipe-up (default), swipe-down or normal\n"
                "      --side-button-2-action MODE swipe-down (default), swipe-up or normal\n"
+               "      --side-swipe-distance PERCENT 1..100 (default 17; screen-height percentage)\n"
               "      OTG_UNLOCK_PIN       GUI/experimental numeric PIN sent once on first enter\n"
              "      --audio             Forward Android output audio through ADB (Linux/Windows)\n"
               "      --clipboard         Share Deskflow text clipboard through ADB/scrcpy\n"
@@ -693,6 +695,7 @@ int main(int argc, char **argv)
         .right_button_action = OTG_RIGHT_BUTTON_BACK,
         .side_button_1_action = OTG_SIDE_BUTTON_SWIPE_UP,
         .side_button_2_action = OTG_SIDE_BUTTON_SWIPE_DOWN,
+        .side_swipe_distance_percent = 17,
         .adb_path = "adb",
     };
     char unlock_pin_file_data[64] = {0};
@@ -810,6 +813,13 @@ int main(int argc, char **argv)
             }
             if (first) opts.side_button_1_action = value;
             else opts.side_button_2_action = value;
+        } else if (strcmp(a, "--side-swipe-distance") == 0 && i + 1 < argc) {
+            const int distance = atoi(argv[++i]);
+            if (distance < 1 || distance > 100) {
+                fprintf(stderr, "invalid side swipe distance: %d (use 1..100 percent)\n", distance);
+                return 2;
+            }
+            opts.side_swipe_distance_percent = (unsigned)distance;
         } else if (strcmp(a, "--audio") == 0) {
             opts.audio = 1;
         } else if (strcmp(a, "--clipboard") == 0) {
@@ -999,6 +1009,7 @@ int main(int argc, char **argv)
         g_control.right_button_back = opts.right_button_action == OTG_RIGHT_BUTTON_BACK;
         g_control.side_button_1_action = opts.side_button_1_action;
         g_control.side_button_2_action = opts.side_button_2_action;
+        g_control.side_swipe_distance_percent = opts.side_swipe_distance_percent;
     }
     if (!strcmp(opts.transport, "ble") && !opts.ble_service && !opts.ble_status && !opts.ble_stop_service && !opts.ble_restore &&
         (opts.ble_session || opts.ble_isolate || opts.serial || (opts.adb_serial && !(opts.clipboard || opts.unlock_adb_gate)) ||
@@ -1075,6 +1086,7 @@ int main(int argc, char **argv)
         otg_bridge_set_right_button_action(&state.bridge, opts.right_button_action);
         otg_bridge_set_side_button_action(&state.bridge, 4, opts.side_button_1_action);
         otg_bridge_set_side_button_action(&state.bridge, 5, opts.side_button_2_action);
+        otg_bridge_set_side_swipe_distance(&state.bridge, (uint8_t)opts.side_swipe_distance_percent);
         fprintf(stderr, "INFO:  AOA HID keyboard + %s pointer ready (screen %dx%d)\n",
                 opts.mouse_mode == OTG_MOUSE_ABSOLUTE ? "absolute" : "relative", opts.width, opts.height);
     } else if (strcmp(opts.transport, "ble") == 0) {
@@ -1098,6 +1110,7 @@ int main(int argc, char **argv)
         otg_bridge_set_right_button_action(&state.bridge, opts.right_button_action);
         otg_bridge_set_side_button_action(&state.bridge, 4, opts.side_button_1_action);
         otg_bridge_set_side_button_action(&state.bridge, 5, opts.side_button_2_action);
+        otg_bridge_set_side_swipe_distance(&state.bridge, (uint8_t)opts.side_swipe_distance_percent);
         fprintf(stderr, "INFO:  BLE HID advertisement started on %s; waiting for phone subscriptions\n", opts.adapter);
 #elif defined(OTG_HAVE_BLE_WIN)
         state.transport_owner = otg_ble_win_create(opts.ble_peer);
@@ -1110,6 +1123,7 @@ int main(int argc, char **argv)
         otg_bridge_set_right_button_action(&state.bridge, opts.right_button_action);
         otg_bridge_set_side_button_action(&state.bridge, 4, opts.side_button_1_action);
         otg_bridge_set_side_button_action(&state.bridge, 5, opts.side_button_2_action);
+        otg_bridge_set_side_swipe_distance(&state.bridge, (uint8_t)opts.side_swipe_distance_percent);
         fprintf(stderr, "INFO: Windows BLE target %s; starting GATT worker, waiting for paired phone subscriptions\n", opts.ble_peer);
 #else
         fprintf(stderr, "ERROR: BLE HID requires Linux with BUILD_BLE=ON (adapter %s)\n", opts.adapter);
@@ -1186,6 +1200,8 @@ int main(int argc, char **argv)
                 (enum otg_side_button_action)g_control.side_button_1_action);
             otg_bridge_set_side_button_action(&state.bridge, 5,
                 (enum otg_side_button_action)g_control.side_button_2_action);
+            otg_bridge_set_side_swipe_distance(&state.bridge,
+                (uint8_t)g_control.side_swipe_distance_percent);
         }
 #endif
 #if defined(OTG_HAVE_BLE) || defined(OTG_HAVE_BLE_WIN)

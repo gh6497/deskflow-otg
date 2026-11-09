@@ -70,6 +70,7 @@ struct otg_bridge {
     bool right_button_back_down;
     enum otg_side_button_action side_button_1_action;
     enum otg_side_button_action side_button_2_action;
+    uint8_t side_swipe_distance_percent;
     bool side_button_1_down;
     bool side_button_2_down;
     bool side_swipe_pending;
@@ -150,6 +151,8 @@ void otg_bridge_set_right_button_action(struct otg_bridge *b,
 /* Configure Deskflow Extra0/Extra1 (mouse buttons 4/5). */
 void otg_bridge_set_side_button_action(struct otg_bridge *b, uint8_t button,
                                        enum otg_side_button_action action);
+/* Configure the synthetic swipe distance as a percentage of screen height. */
+void otg_bridge_set_side_swipe_distance(struct otg_bridge *b, uint8_t percent);
 void otg_bridge_mouse_move(struct otg_bridge *b, int16_t x, int16_t y);
 void otg_bridge_mouse_rel_move(struct otg_bridge *b, int16_t dx, int16_t dy);
 void otg_bridge_mouse_wheel(struct otg_bridge *b, int16_t x, int16_t y);
