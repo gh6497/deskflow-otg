@@ -33,6 +33,9 @@ int main(void)
     assert(feed(&c, "resume\tlocalhost\t24800\tandroid\t1080\t1920\tnormal\tback\n"));
     assert(!c.middle_button_home && c.right_button_back);
     c.phase = OTG_BLE_IDLE;
+    assert(feed(&c, "resume\tlocalhost\t24800\tandroid\t1080\t1920\tnormal\tnormal\tswipe-up\tswipe-down\n"));
+    assert(c.side_button_1_action == 1 && c.side_button_2_action == 2);
+    c.phase = OTG_BLE_IDLE;
     assert(feed(&c, resume));
     assert(c.middle_button_home && !c.right_button_back); /* Legacy resume also clears an old Back setting. */
     const char *invalid[] = {
@@ -42,6 +45,7 @@ int main(void)
         "resume\tx\t12\tp\t10\t20\textra\n", "resume\tx\t12\tp\t10\t20\tbad\n",
         "resume\tx\t12\tp\t10\t20\tnormal\thome\n",
         "resume\tx\t12\tp\t10\t20\tnormal\t\n",
+        "resume\tx\t12\tp\t10\t20\tnormal\tnormal\tswipe\tnormal\n",
         "resume\tx\t12\tp\t10\t20\thome\tback\textra\n",
         "wat\n", "pause\r\n"
     };

@@ -193,7 +193,13 @@
   <message id="otg.right_button.normal"><source>Normal right button</source><translation>普通右键</translation></message>
   <message id="otg.right_button.back"><source>Android Back (Win+Backspace)</source><translation>安卓返回键（Win+Backspace）</translation></message>
   <message id="otg.label.right_button_action"><source>Right button action</source><translation>右键功能</translation></message>
-  <message id="otg.right_button.tooltip"><source>Back mode sends and releases Win+Backspace through HID once per click instead of a right click. No companion app, accessibility service or ADB is required. Android system shortcut support depends on the ROM.</source><translation>每次点击通过 HID 发送并释放一次 Win+Backspace，不再发送普通右键。无需伴侣应用、无障碍服务或 ADB；需要手机 ROM 支持该系统快捷键。</translation></message>
+   <message id="otg.right_button.tooltip"><source>Back mode sends and releases Win+Backspace through HID once per click instead of a right click. No companion app, accessibility service or ADB is required. Android system shortcut support depends on the ROM.</source><translation>每次点击通过 HID 发送并释放一次 Win+Backspace，不再发送普通右键。无需伴侣应用、无障碍服务或 ADB；需要手机 ROM 支持该系统快捷键。</translation></message>
+   <message id="otg.side_button.normal"><source>Normal side button</source><translation>普通侧键</translation></message>
+   <message id="otg.side_button.swipe_up"><source>Swipe up</source><translation>向上滑动</translation></message>
+   <message id="otg.side_button.swipe_down"><source>Swipe down</source><translation>向下滑动</translation></message>
+   <message id="otg.label.side_button_1_action"><source>Side button 1 (Button 4)</source><translation>侧键 1（Button 4）</translation></message>
+   <message id="otg.label.side_button_2_action"><source>Side button 2 (Button 5)</source><translation>侧键 2（Button 5）</translation></message>
+   <message id="otg.side_button.tooltip"><source>In absolute mode, sends a short touch-like swipe and then returns the pointer to its original position. The gesture is ignored in relative mode.</source><translation>绝对坐标模式下发送一次短暂的触控滑动，然后将指针恢复到原位置；相对坐标模式下忽略此手势。</translation></message>
   <message id="otg.unlock.enabled"><source>Try automatic numeric PIN unlock on entry</source><translation>进入手机时尝试自动输入数字 PIN 解锁</translation></message>
   <message id="otg.label.unlock_pin"><source>Numeric PIN (saved per device)</source><translation>数字 PIN（按设备保存）</translation></message>
   <message id="otg.unlock.pin_hint"><source>4–32 digits; saved per device in local settings</source><translation>4–32 位数字；按设备保存到本地设置</translation></message>

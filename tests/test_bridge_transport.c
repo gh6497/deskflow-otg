@@ -342,6 +342,48 @@ static void test_unlock_cursor_resize(void)
     }
 }
 
+static void test_side_button_swipes(void)
+{
+    struct otg_bridge b;
+    registrations = 0;
+    CHECK(!otg_bridge_open(&b, "mock", 1080, 2340, OTG_MOUSE_ABSOLUTE));
+    otg_bridge_set_side_button_action(&b, 4, OTG_SIDE_BUTTON_SWIPE_UP);
+    otg_bridge_set_side_button_action(&b, 5, OTG_SIDE_BUTTON_SWIPE_DOWN);
+    otg_bridge_enter(&b, 540, 1000, 0);
+
+    otg_bridge_mouse_button(&b, 4, true);
+    CHECK(b.side_swipe_pending && b.mouse_buttons == 1 && report[0] == 3);
+    CHECK(b.side_swipe_target_y == 610);
+    for (unsigned i = 0; i < 24; ++i) {
+        b.side_swipe_due_ms = 0;
+        otg_bridge_unlock_tick(&b);
+    }
+    CHECK(!b.side_swipe_pending && !b.mouse_buttons);
+    CHECK(b.mouse_x == 540 && b.mouse_y == 1000 && report[0] == 2);
+    otg_bridge_mouse_button(&b, 4, false);
+
+    otg_bridge_mouse_button(&b, 5, true);
+    CHECK(b.side_swipe_pending && b.mouse_buttons == 1);
+    CHECK(b.side_swipe_target_y == 1390);
+    for (unsigned i = 0; i < 24; ++i) {
+        b.side_swipe_due_ms = 0;
+        otg_bridge_unlock_tick(&b);
+    }
+    CHECK(!b.side_swipe_pending && !b.mouse_buttons && b.mouse_y == 1000);
+    otg_bridge_mouse_button(&b, 5, false);
+    otg_bridge_close(&b);
+
+    registrations = 0;
+    CHECK(!otg_bridge_open(&b, "mock", 1080, 2340, OTG_MOUSE_RELATIVE));
+    otg_bridge_set_side_button_action(&b, 4, OTG_SIDE_BUTTON_SWIPE_UP);
+    otg_bridge_enter(&b, 540, 1000, 0);
+    int before = reports;
+    otg_bridge_mouse_button(&b, 4, true);
+    otg_bridge_mouse_button(&b, 4, false);
+    CHECK(reports == before + 2 && !b.side_swipe_pending && !b.mouse_buttons);
+    otg_bridge_close(&b);
+}
+
 int main(void)
 {
     struct otg_bridge b;
@@ -379,6 +421,7 @@ int main(void)
     test_unlock_mouse_cancellation();
     test_unlock_cursor_tracking();
     test_unlock_cursor_resize();
-    puts("PASS: default USB descriptors, absolute coordinates, buttons, wheel, keyboard, Home/Back shortcuts, unlock mouse suppression/cursor tracking/resize and close lifecycle");
+    test_side_button_swipes();
+    puts("PASS: default USB descriptors, absolute coordinates, buttons, wheel, keyboard, Home/Back shortcuts, side-button swipes, unlock mouse suppression/cursor tracking/resize and close lifecycle");
     return 0;
 }

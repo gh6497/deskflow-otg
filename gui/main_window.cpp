@@ -114,6 +114,12 @@ void MainWindow::retranslateUi()
     m_middleButtonAction->setItemText(1, qtTrId("otg.middle_button.home"));
     m_rightButtonAction->setItemText(0, qtTrId("otg.right_button.normal"));
     m_rightButtonAction->setItemText(1, qtTrId("otg.right_button.back"));
+    m_sideButton1Action->setItemText(0, qtTrId("otg.side_button.normal"));
+    m_sideButton1Action->setItemText(1, qtTrId("otg.side_button.swipe_up"));
+    m_sideButton1Action->setItemText(2, qtTrId("otg.side_button.swipe_down"));
+    m_sideButton2Action->setItemText(0, qtTrId("otg.side_button.normal"));
+    m_sideButton2Action->setItemText(1, qtTrId("otg.side_button.swipe_up"));
+    m_sideButton2Action->setItemText(2, qtTrId("otg.side_button.swipe_down"));
     m_transport->setItemText(0, qtTrId("otg.transport.usb"));
     if (m_transport->count() > 1)
 #ifdef Q_OS_WIN
@@ -542,6 +548,22 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     setTranslatedProperty(m_rightButtonAction, "toolTip", "otg.right_button.tooltip");
     addTranslatedRow(featuresForm, "otg.label.right_button_action", m_rightButtonAction);
 
+    m_sideButton1Action = new NoWheelWidget<QComboBox>;
+    m_sideButton1Action->setObjectName("sideButton1Action");
+    m_sideButton1Action->addItem(qtTrId("otg.side_button.normal"), "normal");
+    m_sideButton1Action->addItem(qtTrId("otg.side_button.swipe_up"), "swipe-up");
+    m_sideButton1Action->addItem(qtTrId("otg.side_button.swipe_down"), "swipe-down");
+    setTranslatedProperty(m_sideButton1Action, "toolTip", "otg.side_button.tooltip");
+    addTranslatedRow(featuresForm, "otg.label.side_button_1_action", m_sideButton1Action);
+
+    m_sideButton2Action = new NoWheelWidget<QComboBox>;
+    m_sideButton2Action->setObjectName("sideButton2Action");
+    m_sideButton2Action->addItem(qtTrId("otg.side_button.normal"), "normal");
+    m_sideButton2Action->addItem(qtTrId("otg.side_button.swipe_up"), "swipe-up");
+    m_sideButton2Action->addItem(qtTrId("otg.side_button.swipe_down"), "swipe-down");
+    setTranslatedProperty(m_sideButton2Action, "toolTip", "otg.side_button.tooltip");
+    addTranslatedRow(featuresForm, "otg.label.side_button_2_action", m_sideButton2Action);
+
     formLayout->addWidget(featuresBox);
 
     auto *companionBox = translated(new QGroupBox, "title", "otg.companion.title");
@@ -779,6 +801,10 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
         settings.value("middleButtonAction", "home"))));
     m_rightButtonAction->setCurrentIndex(qMax(0, m_rightButtonAction->findData(
         settings.value("rightButtonAction", "back"))));
+    m_sideButton1Action->setCurrentIndex(qMax(0, m_sideButton1Action->findData(
+        settings.value("sideButton1Action", "swipe-up"))));
+    m_sideButton2Action->setCurrentIndex(qMax(0, m_sideButton2Action->findData(
+        settings.value("sideButton2Action", "swipe-down"))));
     m_unlockEnabled->setChecked(settings.value("unlockEnabled", false).toBool());
     m_unlockPin->setText(settings.value("unlockPin").toString());
     if (m_transport->currentData() == "ble") m_mouseMode->setCurrentIndex(0);
@@ -1227,6 +1253,8 @@ ConnectionOptions MainWindow::connectionOptions(const QVariantMap &profile) cons
     options.mouseMode = options.transport == "ble" ? "absolute" : profile.value("mouseMode", "absolute").toString();
     options.middleButtonAction = profile.value("middleButtonAction", "home").toString();
     options.rightButtonAction = profile.value("rightButtonAction", "back").toString();
+    options.sideButton1Action = profile.value("sideButton1Action", "swipe-up").toString();
+    options.sideButton2Action = profile.value("sideButton2Action", "swipe-down").toString();
     options.unlockPin = options.adbEnabled && profile.value("unlockEnabled", false).toBool() ?
         profile.value("unlockPin").toString() : QString();
     options.unlockAdb = !options.unlockPin.isEmpty();
@@ -1841,8 +1869,10 @@ QVariantMap MainWindow::deviceProfile() const
                {"tlsFingerprintFile", m_tlsFingerprintFile->text()},
                {"direction", m_direction->currentData()},
                 {"mouseMode", m_mouseMode->currentData()}, {"audio", m_audio->isChecked()},
-                 {"middleButtonAction", m_middleButtonAction->currentData()},
-                 {"rightButtonAction", m_rightButtonAction->currentData()},
+                  {"middleButtonAction", m_middleButtonAction->currentData()},
+                  {"rightButtonAction", m_rightButtonAction->currentData()},
+                  {"sideButton1Action", m_sideButton1Action->currentData()},
+                  {"sideButton2Action", m_sideButton2Action->currentData()},
                  {"unlockEnabled", m_unlockEnabled->isChecked()}, {"unlockPin", m_unlockPin->text()},
                  {"clipboard", m_clipboard->isChecked()}, {"autoRotate", m_autoRotate->isChecked()}};
 }
@@ -1883,6 +1913,10 @@ void MainWindow::applyDeviceProfile(const QVariantMap &profile)
         profile.value("middleButtonAction", "home"))));
     m_rightButtonAction->setCurrentIndex(qMax(0, m_rightButtonAction->findData(
         profile.value("rightButtonAction", "back"))));
+    m_sideButton1Action->setCurrentIndex(qMax(0, m_sideButton1Action->findData(
+        profile.value("sideButton1Action", "swipe-up"))));
+    m_sideButton2Action->setCurrentIndex(qMax(0, m_sideButton2Action->findData(
+        profile.value("sideButton2Action", "swipe-down"))));
     m_unlockEnabled->setChecked(profile.value("unlockEnabled", false).toBool());
     m_unlockPin->setText(profile.value("unlockPin").toString());
     if (m_transport->currentData() == "ble") m_mouseMode->setCurrentIndex(0);
@@ -1951,6 +1985,8 @@ void MainWindow::saveSettings()
     settings.setValue("mouseMode", m_mouseMode->currentData());
     settings.setValue("middleButtonAction", m_middleButtonAction->currentData());
     settings.setValue("rightButtonAction", m_rightButtonAction->currentData());
+    settings.setValue("sideButton1Action", m_sideButton1Action->currentData());
+    settings.setValue("sideButton2Action", m_sideButton2Action->currentData());
     settings.setValue("autoConnect", m_autoConnectEnabled->isChecked());
 }
 

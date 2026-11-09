@@ -80,6 +80,8 @@ struct app_options {
     enum otg_mouse_mode mouse_mode;
     enum otg_middle_button_action middle_button_action;
     enum otg_right_button_action right_button_action;
+    enum otg_side_button_action side_button_1_action;
+    enum otg_side_button_action side_button_2_action;
 
     /* Optional ADB features and unlock configuration. */
     const char *adb_path;
@@ -284,8 +286,10 @@ static void usage(const char *prog)
              "      --width W         Virtual screen width, 1..32767 (default %d)\n"
              "      --height H        Virtual screen height, 1..32767 (default %d)\n"
              "      --mouse-mode MODE absolute (default) or relative (compatibility)\n"
-              "      --middle-button-action MODE home (default) or normal (Android Meta+Enter)\n"
-              "      --right-button-action MODE back (default) or normal (Android Meta+Backspace)\n"
+               "      --middle-button-action MODE home (default) or normal (Android Meta+Enter)\n"
+               "      --right-button-action MODE back (default) or normal (Android Meta+Backspace)\n"
+               "      --side-button-1-action MODE swipe-up (default), swipe-down or normal\n"
+               "      --side-button-2-action MODE swipe-down (default), swipe-up or normal\n"
               "      OTG_UNLOCK_PIN       GUI/experimental numeric PIN sent once on first enter\n"
              "      --audio             Forward Android output audio through ADB (Linux/Windows)\n"
               "      --clipboard         Share Deskflow text clipboard through ADB/scrcpy\n"
@@ -687,6 +691,8 @@ int main(int argc, char **argv)
         .mouse_mode = OTG_MOUSE_ABSOLUTE,
         .middle_button_action = OTG_MIDDLE_BUTTON_HOME,
         .right_button_action = OTG_RIGHT_BUTTON_BACK,
+        .side_button_1_action = OTG_SIDE_BUTTON_SWIPE_UP,
+        .side_button_2_action = OTG_SIDE_BUTTON_SWIPE_DOWN,
         .adb_path = "adb",
     };
     char unlock_pin_file_data[64] = {0};
@@ -790,6 +796,20 @@ int main(int argc, char **argv)
                 fprintf(stderr, "invalid middle button action: %s (use normal or home)\n", action);
                 return 2;
             }
+        } else if ((strcmp(a, "--side-button-1-action") == 0 ||
+                    strcmp(a, "--side-button-2-action") == 0) && i + 1 < argc) {
+            const bool first = strcmp(a, "--side-button-1-action") == 0;
+            const char *action = argv[++i];
+            enum otg_side_button_action value;
+            if (strcmp(action, "normal") == 0) value = OTG_SIDE_BUTTON_NORMAL;
+            else if (strcmp(action, "swipe-up") == 0) value = OTG_SIDE_BUTTON_SWIPE_UP;
+            else if (strcmp(action, "swipe-down") == 0) value = OTG_SIDE_BUTTON_SWIPE_DOWN;
+            else {
+                fprintf(stderr, "invalid side button action: %s (use normal, swipe-up or swipe-down)\n", action);
+                return 2;
+            }
+            if (first) opts.side_button_1_action = value;
+            else opts.side_button_2_action = value;
         } else if (strcmp(a, "--audio") == 0) {
             opts.audio = 1;
         } else if (strcmp(a, "--clipboard") == 0) {
@@ -977,6 +997,8 @@ int main(int argc, char **argv)
         g_control.port = opts.port; g_control.width = (unsigned)opts.width; g_control.height = (unsigned)opts.height;
         g_control.middle_button_home = opts.middle_button_action == OTG_MIDDLE_BUTTON_HOME;
         g_control.right_button_back = opts.right_button_action == OTG_RIGHT_BUTTON_BACK;
+        g_control.side_button_1_action = opts.side_button_1_action;
+        g_control.side_button_2_action = opts.side_button_2_action;
     }
     if (!strcmp(opts.transport, "ble") && !opts.ble_service && !opts.ble_status && !opts.ble_stop_service && !opts.ble_restore &&
         (opts.ble_session || opts.ble_isolate || opts.serial || (opts.adb_serial && !(opts.clipboard || opts.unlock_adb_gate)) ||
@@ -1051,6 +1073,8 @@ int main(int argc, char **argv)
         }
         otg_bridge_set_middle_button_action(&state.bridge, opts.middle_button_action);
         otg_bridge_set_right_button_action(&state.bridge, opts.right_button_action);
+        otg_bridge_set_side_button_action(&state.bridge, 4, opts.side_button_1_action);
+        otg_bridge_set_side_button_action(&state.bridge, 5, opts.side_button_2_action);
         fprintf(stderr, "INFO:  AOA HID keyboard + %s pointer ready (screen %dx%d)\n",
                 opts.mouse_mode == OTG_MOUSE_ABSOLUTE ? "absolute" : "relative", opts.width, opts.height);
     } else if (strcmp(opts.transport, "ble") == 0) {
@@ -1072,6 +1096,8 @@ int main(int argc, char **argv)
         }
         otg_bridge_set_middle_button_action(&state.bridge, opts.middle_button_action);
         otg_bridge_set_right_button_action(&state.bridge, opts.right_button_action);
+        otg_bridge_set_side_button_action(&state.bridge, 4, opts.side_button_1_action);
+        otg_bridge_set_side_button_action(&state.bridge, 5, opts.side_button_2_action);
         fprintf(stderr, "INFO:  BLE HID advertisement started on %s; waiting for phone subscriptions\n", opts.adapter);
 #elif defined(OTG_HAVE_BLE_WIN)
         state.transport_owner = otg_ble_win_create(opts.ble_peer);
@@ -1082,6 +1108,8 @@ int main(int argc, char **argv)
         }
         otg_bridge_set_middle_button_action(&state.bridge, opts.middle_button_action);
         otg_bridge_set_right_button_action(&state.bridge, opts.right_button_action);
+        otg_bridge_set_side_button_action(&state.bridge, 4, opts.side_button_1_action);
+        otg_bridge_set_side_button_action(&state.bridge, 5, opts.side_button_2_action);
         fprintf(stderr, "INFO: Windows BLE target %s; starting GATT worker, waiting for paired phone subscriptions\n", opts.ble_peer);
 #else
         fprintf(stderr, "ERROR: BLE HID requires Linux with BUILD_BLE=ON (adapter %s)\n", opts.adapter);
@@ -1127,8 +1155,13 @@ int main(int argc, char **argv)
         .on_mouse_wheel = cb_mouse_wheel,
         .on_disconnected = cb_disconnected,
         .on_idle = cb_idle,
-        .on_tick = state.transport_owner || adb_features ? cb_tick : NULL,
-        .tick_interval_ms = state.transport_owner ? 1 : opts.clipboard ? 5 : opts.audio ? 50 :
+        .on_tick = state.transport_owner || adb_features ||
+                   opts.side_button_1_action != OTG_SIDE_BUTTON_NORMAL ||
+                   opts.side_button_2_action != OTG_SIDE_BUTTON_NORMAL ? cb_tick : NULL,
+        .tick_interval_ms = state.transport_owner ? 1 :
+                            (opts.side_button_1_action != OTG_SIDE_BUTTON_NORMAL ||
+                             opts.side_button_2_action != OTG_SIDE_BUTTON_NORMAL) ? 1 :
+                            opts.clipboard ? 5 : opts.audio ? 50 :
                             opts.unlock_adb_gate ? 5 : 0,
         .on_clipboard = cb_clipboard,
         .on_clipboard_enabled = opts.clipboard ? cb_clipboard_enabled : NULL,
@@ -1149,6 +1182,10 @@ int main(int argc, char **argv)
                 g_control.middle_button_home ? OTG_MIDDLE_BUTTON_HOME : OTG_MIDDLE_BUTTON_NORMAL);
             otg_bridge_set_right_button_action(&state.bridge,
                 g_control.right_button_back ? OTG_RIGHT_BUTTON_BACK : OTG_RIGHT_BUTTON_NORMAL);
+            otg_bridge_set_side_button_action(&state.bridge, 4,
+                (enum otg_side_button_action)g_control.side_button_1_action);
+            otg_bridge_set_side_button_action(&state.bridge, 5,
+                (enum otg_side_button_action)g_control.side_button_2_action);
         }
 #endif
 #if defined(OTG_HAVE_BLE) || defined(OTG_HAVE_BLE_WIN)

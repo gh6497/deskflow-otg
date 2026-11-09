@@ -292,6 +292,8 @@ private slots:
         QTest::newRow("mouse mode") << QStringLiteral("mouseMode");
         QTest::newRow("middle button") << QStringLiteral("middleButtonAction");
         QTest::newRow("right button") << QStringLiteral("rightButtonAction");
+        QTest::newRow("side button 1") << QStringLiteral("sideButton1Action");
+        QTest::newRow("side button 2") << QStringLiteral("sideButton2Action");
         QTest::newRow("screen position") << QStringLiteral("screenPosition");
         QTest::newRow("screen neighbor") << QStringLiteral("screenNeighbor");
         QTest::newRow("TLS key length") << QStringLiteral("tlsKeyLength");
