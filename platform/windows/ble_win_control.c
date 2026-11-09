@@ -21,12 +21,12 @@ static bool command(struct otg_ble_control *c)
         if (c->phase == OTG_BLE_ACTIVE) c->phase = OTG_BLE_PAUSING;
         return true;
     }
-    char *fields[8] = {0}, *p = c->line;
-    for (unsigned i = 0; i < 8; ++i) {
+    char *fields[10] = {0}, *p = c->line;
+    for (unsigned i = 0; i < 10; ++i) {
         fields[i] = p;
         char *tab = strchr(p, '\t');
         if (!tab) { if (i < 6) return false; break; }
-        if (i == 7) return false;
+        if (i == 9) return false;
         *tab = 0; p = tab + 1;
     }
     if (strcmp(fields[0], "resume") || c->phase != OTG_BLE_IDLE ||
@@ -39,11 +39,19 @@ static bool command(struct otg_ble_control *c)
              height = number(fields[5], 32767);
     if (!port || !width || !height ||
         (strcmp(fields[6], "normal") && strcmp(fields[6], "home")) ||
-        (fields[7] && strcmp(fields[7], "normal") && strcmp(fields[7], "back"))) return false;
+        (fields[7] && strcmp(fields[7], "normal") && strcmp(fields[7], "back")) ||
+        (fields[8] && strcmp(fields[8], "normal") && strcmp(fields[8], "swipe-up") &&
+            strcmp(fields[8], "swipe-down")) ||
+        (fields[9] && strcmp(fields[9], "normal") && strcmp(fields[9], "swipe-up") &&
+            strcmp(fields[9], "swipe-down"))) return false;
     strcpy(c->host, fields[1]); strcpy(c->name, fields[3]);
     c->port = port; c->width = width; c->height = height;
     c->middle_button_home = !strcmp(fields[6], "home");
     c->right_button_back = fields[7] && !strcmp(fields[7], "back");
+    c->side_button_1_action = fields[8] && !strcmp(fields[8], "swipe-up") ? 1 :
+                              fields[8] && !strcmp(fields[8], "swipe-down") ? 2 : 0;
+    c->side_button_2_action = fields[9] && !strcmp(fields[9], "swipe-up") ? 1 :
+                              fields[9] && !strcmp(fields[9], "swipe-down") ? 2 : 0;
     c->phase = OTG_BLE_ACTIVE;
     return true;
 }

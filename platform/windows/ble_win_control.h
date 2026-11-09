@@ -13,11 +13,14 @@ struct otg_ble_control {
     unsigned port, width, height;
     bool middle_button_home;
     bool right_button_back;
+    unsigned side_button_1_action;
+    unsigned side_button_2_action;
     size_t used;
 };
 /* Commands are bounded UTF-8 lines: pause, stop, or
  * resume<TAB>host<TAB>port<TAB>screen<TAB>width<TAB>height<TAB>middle-action
- * [<TAB>right-action]. Legacy commands without right-action default to normal.
+ * [<TAB>right-action<TAB>side-1-action<TAB>side-2-action]. Legacy commands
+ * without the optional fields default to normal actions.
  * Resume is accepted only after the release/drain acknowledgement. The peer
  * and HID descriptors are deliberately immutable for this provider lifetime. */
 bool otg_ble_control_feed(struct otg_ble_control *c, const char *bytes, size_t size);

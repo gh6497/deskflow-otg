@@ -109,6 +109,8 @@ Companion **0.1.4** also displays the actual Deskflow session state reported by 
 
 The GUI's **Middle button action → Android Home (Win+Enter)** and **Right button action → Android Back (Win+Backspace)** send Android system keyboard shortcuts directly over HID instead of the corresponding mouse button. **No companion app, accessibility service or ADB is required.** The two mappings are independent, saved per device, and default to Android Home and Android Back. CLI: `--middle-button-action home|normal` and `--right-button-action back|normal`. USB and supported BLE transports share the same implementation; the phone ROM must support these system shortcuts.
 
+The two side buttons are also configurable per device. By default, Deskflow Button 4 sends a short upward touch-like swipe and Button 5 sends a downward swipe in absolute mode, then the pointer returns to its original position. CLI: `--side-button-1-action normal|swipe-up|swipe-down` and `--side-button-2-action normal|swipe-up|swipe-down`. Relative mode keeps these buttons as normal HID buttons.
+
 Each mouse press sends a complete press/release sequence, so holding the mouse button does not keep Meta or Enter/Backspace pressed. Existing keyboard state is preserved. If the shortcut key is already physically held or all six keyboard slots are occupied, the click is consumed without a shortcut rather than releasing/repressing physical keys. Previous desktop builds used F13/F14 with the companion accessibility service; that legacy service remains in APK 0.1.8, but is not used by the updated desktop mappings.
 
 The optional automatic numeric PIN is saved per device in the GUI's local settings when enabled. It is never written to runtime logs; protect the local settings file accordingly.

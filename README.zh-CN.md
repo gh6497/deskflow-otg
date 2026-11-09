@@ -199,6 +199,11 @@ GUI 的「中键功能」默认为「返回安卓桌面（Win+Enter）」，「�
 无障碍服务或 ADB，是否生效取决于手机 ROM。启用自动数字 PIN 解锁后，PIN 会按设备保存到 GUI 本地设置，
 不会写入运行日志，请妥善保护本地设置文件。
 
+两个鼠标侧键也可以按设备配置。默认情况下，Deskflow Button 4 在绝对坐标模式发送一次短暂的向上触控滑动，
+Button 5 发送向下滑动，完成后指针恢复到原位置。CLI 参数为
+`--side-button-1-action normal|swipe-up|swipe-down` 和
+`--side-button-2-action normal|swipe-up|swipe-down`；相对坐标模式下这两个按键保持普通 HID 侧键行为。
+
 ### 多设备连接
 
 GUI 左侧管理设备列表，右侧分为「设备配置」「屏幕布局」「共享服务」三个页签。

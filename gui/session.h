@@ -27,6 +27,8 @@ struct ConnectionOptions {
     QString mouseMode = "absolute";
     QString middleButtonAction = "home";
     QString rightButtonAction = "back";
+    QString sideButton1Action = "swipe-up";
+    QString sideButton2Action = "swipe-down";
     QString unlockPin;
     bool unlockAdb = false;
     QString tlsCertificate;

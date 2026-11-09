@@ -39,6 +39,11 @@
 #define UNLOCK_SWIPE_STEPS 12
 #define UNLOCK_SWIPE_INTERVAL_MS 10
 #define UNLOCK_PIN_DELAY_MS 500
+/* Keep the gesture close to the original click-to-swipe latency, while using
+ * twice as many points to avoid the visibly coarse 12-point trajectory. */
+#define SIDE_SWIPE_STEPS 24
+#define SIDE_SWIPE_INTERVAL_MS 4
+#define SIDE_SWIPE_DISTANCE_DIVISOR 6
 
 enum {
     UNLOCK_PHASE_NONE,
@@ -46,6 +51,8 @@ enum {
     UNLOCK_PHASE_SWIPE,
     UNLOCK_PHASE_WAIT_PIN,
 };
+
+static void side_swipe_tick(struct otg_bridge *b);
 
 static bool usb_register_report(void *ctx, uint16_t id, const uint8_t *desc,
                                 uint16_t size)
@@ -585,6 +592,20 @@ void otg_bridge_set_right_button_action(struct otg_bridge *b,
     b->right_button_action = action;
 }
 
+void otg_bridge_set_side_button_action(struct otg_bridge *b, uint8_t button,
+                                       enum otg_side_button_action action)
+{
+    if (action != OTG_SIDE_BUTTON_SWIPE_UP &&
+        action != OTG_SIDE_BUTTON_SWIPE_DOWN) {
+        action = OTG_SIDE_BUTTON_NORMAL;
+    }
+    if (button == 4) {
+        b->side_button_1_action = action;
+    } else if (button == 5) {
+        b->side_button_2_action = action;
+    }
+}
+
 bool otg_bridge_check(struct otg_bridge *b)
 {
     return b->transport_ops && b->transport_ops->poll(b->transport_ctx);
@@ -597,10 +618,20 @@ bool otg_bridge_ready(const struct otg_bridge *b)
 
 void otg_bridge_reset_input(struct otg_bridge *b)
 {
+    if (b->side_swipe_pending) {
+        b->mouse_buttons = b->side_swipe_saved_buttons;
+        send_mouse_state(b, 0, 0);
+        b->mouse_x = b->side_swipe_saved_x;
+        b->mouse_y = b->side_swipe_saved_y;
+    }
     b->hid_mods = 0;
     memset(b->keys, 0, sizeof(b->keys));
     b->middle_button_home_down = false;
     b->right_button_back_down = false;
+    b->side_button_1_down = false;
+    b->side_button_2_down = false;
+    b->side_swipe_pending = false;
+    b->side_swipe_step = 0;
     b->mouse_buttons = 0;
     b->mouse_x = b->mouse_y = 0;
     b->active = b->have_mouse_pos = false;
@@ -619,6 +650,13 @@ bool otg_bridge_resize(struct otg_bridge *b, int32_t width, int32_t height)
 {
     if (width < 1 || width > INT16_MAX || height < 1 || height > INT16_MAX) return false;
     if (width == b->screen_w && height == b->screen_h) return true;
+    if (b->side_swipe_pending) {
+        b->mouse_buttons = b->side_swipe_saved_buttons;
+        send_mouse_state(b, 0, 0);
+        b->mouse_x = b->side_swipe_saved_x;
+        b->mouse_y = b->side_swipe_saved_y;
+        b->side_swipe_pending = false;
+    }
     b->mouse_buttons = 0;
     b->residual_hscroll = b->residual_vscroll = 0;
     if (b->active) send_mouse_state(b, 0, 0); /* Release at the old drag location. */
@@ -685,6 +723,13 @@ void otg_bridge_enter(struct otg_bridge *b, int16_t x, int16_t y, uint16_t mask)
 
 void otg_bridge_leave(struct otg_bridge *b)
 {
+    if (b->side_swipe_pending) {
+        b->mouse_buttons = b->side_swipe_saved_buttons;
+        send_mouse_state(b, 0, 0);
+        b->mouse_x = b->side_swipe_saved_x;
+        b->mouse_y = b->side_swipe_saved_y;
+        b->side_swipe_pending = false;
+    }
     if (b->middle_button_home_down || b->right_button_back_down) {
         b->middle_button_home_down = b->right_button_back_down = false;
     }
@@ -710,6 +755,8 @@ void otg_bridge_leave(struct otg_bridge *b)
     b->have_mouse_pos = false;
     b->residual_hscroll = 0;
     b->residual_vscroll = 0;
+    b->side_button_1_down = false;
+    b->side_button_2_down = false;
     b->unlock_pending = false;
     b->unlock_phase = UNLOCK_PHASE_NONE;
     if (b->unlock_adb_gated) b->unlock_attempted = false;
@@ -749,7 +796,9 @@ void otg_bridge_unlock_adb_state(struct otg_bridge *b, bool valid, bool locked)
 
 void otg_bridge_unlock_tick(struct otg_bridge *b)
 {
-    if (!b || !b->unlock_pending || !b->active) return;
+    if (!b) return;
+    side_swipe_tick(b);
+    if (!b->unlock_pending || !b->active) return;
     if (bridge_now_ms() < b->unlock_due_ms) return;
 
     const uint64_t now = bridge_now_ms();
@@ -814,6 +863,82 @@ void otg_bridge_release_keyboard(struct otg_bridge *b)
     send_keyboard_report(b);
 }
 
+static enum otg_side_button_action side_button_action(
+    const struct otg_bridge *b, uint8_t button)
+{
+    if (button == 4) return b->side_button_1_action;
+    if (button == 5) return b->side_button_2_action;
+    return OTG_SIDE_BUTTON_NORMAL;
+}
+
+static bool side_button_down_state(struct otg_bridge *b, uint8_t button,
+                                   bool value)
+{
+    if (button == 4) {
+        b->side_button_1_down = value;
+        return true;
+    }
+    if (button == 5) {
+        b->side_button_2_down = value;
+        return true;
+    }
+    return false;
+}
+
+static void side_swipe_start(struct otg_bridge *b, uint8_t button,
+                             enum otg_side_button_action action)
+{
+    if (b->mouse_mode != OTG_MOUSE_ABSOLUTE) {
+        LOG_WARN("side-button swipe requires absolute mouse mode; ignored\n");
+        return;
+    }
+    if (b->side_swipe_pending || b->mouse_buttons) {
+        return;
+    }
+
+    int32_t distance = b->screen_h / SIDE_SWIPE_DISTANCE_DIVISOR;
+    if (distance < 1) distance = 1;
+    int32_t target = b->mouse_y +
+        (action == OTG_SIDE_BUTTON_SWIPE_UP ? -distance : distance);
+    target = clamp_position(target, b->screen_h);
+
+    b->side_swipe_pending = true;
+    b->side_swipe_button = button;
+    b->side_swipe_saved_buttons = b->mouse_buttons;
+    b->side_swipe_saved_x = b->mouse_x;
+    b->side_swipe_saved_y = b->mouse_y;
+    b->side_swipe_start_y = b->mouse_y;
+    b->side_swipe_target_y = target;
+    b->side_swipe_step = 0;
+    b->side_swipe_due_ms = bridge_now_ms();
+    b->mouse_buttons |= 1; /* Tip Switch: begin a touch-like drag. */
+    send_mouse_state(b, 0, 0);
+}
+
+static void side_swipe_tick(struct otg_bridge *b)
+{
+    if (!b->side_swipe_pending || bridge_now_ms() < b->side_swipe_due_ms) return;
+    ++b->side_swipe_step;
+    b->mouse_y = b->side_swipe_start_y +
+        (int32_t)((int64_t)(b->side_swipe_target_y - b->side_swipe_start_y) *
+                  b->side_swipe_step / SIDE_SWIPE_STEPS);
+    send_mouse_state(b, 0, 0);
+    if (b->side_swipe_step < SIDE_SWIPE_STEPS) {
+        b->side_swipe_due_ms = bridge_now_ms() + SIDE_SWIPE_INTERVAL_MS;
+        return;
+    }
+
+    /* Release the synthetic touch at the end, then put the pointer back at
+     * the latest server position so the next absolute event remains aligned. */
+    b->mouse_buttons = b->side_swipe_saved_buttons;
+    send_mouse_state(b, 0, 0);
+    b->mouse_x = b->side_swipe_saved_x;
+    b->mouse_y = b->side_swipe_saved_y;
+    send_mouse_state(b, 0, 0);
+    b->side_swipe_pending = false;
+    b->side_swipe_step = 0;
+}
+
 void otg_bridge_key(struct otg_bridge *b, uint32_t keyid, bool down)
 {
     int usage = keyid_to_hid(keyid);
@@ -857,6 +982,22 @@ void otg_bridge_mouse_button(struct otg_bridge *b, uint8_t button, bool press)
         }
         return;
     }
+    if (button == 4 || button == 5) {
+        enum otg_side_button_action action = side_button_action(b, button);
+        if (action != OTG_SIDE_BUTTON_NORMAL &&
+            b->mouse_mode == OTG_MOUSE_ABSOLUTE) {
+            if (press) {
+                bool already_down = button == 4 ? b->side_button_1_down : b->side_button_2_down;
+                if (!already_down) {
+                    side_button_down_state(b, button, true);
+                    side_swipe_start(b, button, action);
+                }
+            } else {
+                side_button_down_state(b, button, false);
+            }
+            return;
+        }
+    }
     /* deskflow ButtonID -> HID button bit
      * kButtonLeft=1, Middle=2, Right=3, Extra0=4, Extra1=5. */
     uint8_t bit;
@@ -883,6 +1024,11 @@ void otg_bridge_mouse_move(struct otg_bridge *b, int16_t x, int16_t y)
     }
     int32_t tx = clamp_position(x, b->screen_w);
     int32_t ty = clamp_position(y, b->screen_h);
+    if (b->side_swipe_pending) {
+        b->side_swipe_saved_x = tx;
+        b->side_swipe_saved_y = ty;
+        return;
+    }
     if (b->unlock_pending) {
         b->unlock_saved_x = tx;
         b->unlock_saved_y = ty;
@@ -907,6 +1053,11 @@ void otg_bridge_mouse_move(struct otg_bridge *b, int16_t x, int16_t y)
 void otg_bridge_mouse_rel_move(struct otg_bridge *b, int16_t dx, int16_t dy)
 {
     if (!b->active) {
+        return;
+    }
+    if (b->side_swipe_pending) {
+        b->side_swipe_saved_x = clamp_position(b->side_swipe_saved_x + dx, b->screen_w);
+        b->side_swipe_saved_y = clamp_position(b->side_swipe_saved_y + dy, b->screen_h);
         return;
     }
     if (b->unlock_pending) {

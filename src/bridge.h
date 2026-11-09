@@ -46,6 +46,12 @@ enum otg_right_button_action {
     OTG_RIGHT_BUTTON_BACK,
 };
 
+enum otg_side_button_action {
+    OTG_SIDE_BUTTON_NORMAL,
+    OTG_SIDE_BUTTON_SWIPE_UP,
+    OTG_SIDE_BUTTON_SWIPE_DOWN,
+};
+
 struct otg_bridge {
     struct aoa_hid aoa;
     const struct otg_hid_transport_ops *transport_ops;
@@ -62,6 +68,18 @@ struct otg_bridge {
     bool middle_button_home_down;
     enum otg_right_button_action right_button_action;
     bool right_button_back_down;
+    enum otg_side_button_action side_button_1_action;
+    enum otg_side_button_action side_button_2_action;
+    bool side_button_1_down;
+    bool side_button_2_down;
+    bool side_swipe_pending;
+    uint8_t side_swipe_button;
+    uint8_t side_swipe_saved_buttons;
+    int32_t side_swipe_start_y;
+    int32_t side_swipe_target_y;
+    int32_t side_swipe_saved_x, side_swipe_saved_y;
+    unsigned side_swipe_step;
+    uint64_t side_swipe_due_ms;
     uint8_t mouse_buttons;    /* HID button byte */
     int32_t mouse_x, mouse_y; /* last absolute cursor position */
     bool have_mouse_pos;
@@ -128,7 +146,10 @@ void otg_bridge_set_middle_button_action(struct otg_bridge *b,
                                          enum otg_middle_button_action action);
 /* Configure Android Meta+Backspace (Back). Must be set while idle. */
 void otg_bridge_set_right_button_action(struct otg_bridge *b,
-                                       enum otg_right_button_action action);
+                                        enum otg_right_button_action action);
+/* Configure Deskflow Extra0/Extra1 (mouse buttons 4/5). */
+void otg_bridge_set_side_button_action(struct otg_bridge *b, uint8_t button,
+                                       enum otg_side_button_action action);
 void otg_bridge_mouse_move(struct otg_bridge *b, int16_t x, int16_t y);
 void otg_bridge_mouse_rel_move(struct otg_bridge *b, int16_t dx, int16_t dy);
 void otg_bridge_mouse_wheel(struct otg_bridge *b, int16_t x, int16_t y);
