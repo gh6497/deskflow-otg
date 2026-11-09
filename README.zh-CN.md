@@ -203,6 +203,8 @@ GUI 的「中键功能」默认为「返回安卓桌面（Win+Enter）」，「�
 Button 5 发送向下滑动，完成后指针恢复到原位置。CLI 参数为
 `--side-button-1-action normal|swipe-up|swipe-down` 和
 `--side-button-2-action normal|swipe-up|swipe-down`；相对坐标模式下这两个按键保持普通 HID 侧键行为。
+GUI 的「侧键滑动幅度」可按设备设置，表示虚拟屏幕高度的百分比，默认值为 17%；CLI 可使用
+`--side-swipe-distance 1..100` 设置。
 
 ### 多设备连接
 

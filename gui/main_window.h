@@ -141,7 +141,7 @@ private:
     QCheckBox *m_clipboard;
     QCheckBox *m_autoRotate;
     QLabel *m_clipboardStatus;
-    QSpinBox *m_width, *m_height, *m_port;
+    QSpinBox *m_width, *m_height, *m_port, *m_sideSwipeDistance;
     QDoubleSpinBox *m_sensitivity;
     QCheckBox *m_manage;
     QCheckBox *m_autoConnectEnabled;

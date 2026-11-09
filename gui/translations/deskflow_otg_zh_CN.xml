@@ -200,6 +200,8 @@
    <message id="otg.label.side_button_1_action"><source>Side button 1 (Button 4)</source><translation>侧键 1（Button 4）</translation></message>
    <message id="otg.label.side_button_2_action"><source>Side button 2 (Button 5)</source><translation>侧键 2（Button 5）</translation></message>
    <message id="otg.side_button.tooltip"><source>In absolute mode, sends a short touch-like swipe and then returns the pointer to its original position. The gesture is ignored in relative mode.</source><translation>绝对坐标模式下发送一次短暂的触控滑动，然后将指针恢复到原位置；相对坐标模式下忽略此手势。</translation></message>
+   <message id="otg.label.side_swipe_distance"><source>Side swipe distance</source><translation>侧键滑动幅度</translation></message>
+   <message id="otg.side_swipe_distance.tooltip"><source>Swipe distance as a percentage of the virtual screen height. Applies to both side buttons.</source><translation>滑动距离占虚拟屏幕高度的百分比，两个侧键共用。</translation></message>
   <message id="otg.unlock.enabled"><source>Try automatic numeric PIN unlock on entry</source><translation>进入手机时尝试自动输入数字 PIN 解锁</translation></message>
   <message id="otg.label.unlock_pin"><source>Numeric PIN (saved per device)</source><translation>数字 PIN（按设备保存）</translation></message>
   <message id="otg.unlock.pin_hint"><source>4–32 digits; saved per device in local settings</source><translation>4–32 位数字；按设备保存到本地设置</translation></message>

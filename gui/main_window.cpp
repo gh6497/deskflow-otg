@@ -564,6 +564,14 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     setTranslatedProperty(m_sideButton2Action, "toolTip", "otg.side_button.tooltip");
     addTranslatedRow(featuresForm, "otg.label.side_button_2_action", m_sideButton2Action);
 
+    m_sideSwipeDistance = new NoWheelWidget<QSpinBox>;
+    m_sideSwipeDistance->setObjectName("sideSwipeDistance");
+    m_sideSwipeDistance->setRange(1, 100);
+    m_sideSwipeDistance->setValue(17);
+    m_sideSwipeDistance->setSuffix(QStringLiteral(" %"));
+    setTranslatedProperty(m_sideSwipeDistance, "toolTip", "otg.side_swipe_distance.tooltip");
+    addTranslatedRow(featuresForm, "otg.label.side_swipe_distance", m_sideSwipeDistance);
+
     formLayout->addWidget(featuresBox);
 
     auto *companionBox = translated(new QGroupBox, "title", "otg.companion.title");
@@ -805,6 +813,7 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
         settings.value("sideButton1Action", "swipe-up"))));
     m_sideButton2Action->setCurrentIndex(qMax(0, m_sideButton2Action->findData(
         settings.value("sideButton2Action", "swipe-down"))));
+    m_sideSwipeDistance->setValue(settings.value("sideSwipeDistancePercent", 17).toInt());
     m_unlockEnabled->setChecked(settings.value("unlockEnabled", false).toBool());
     m_unlockPin->setText(settings.value("unlockPin").toString());
     if (m_transport->currentData() == "ble") m_mouseMode->setCurrentIndex(0);
@@ -1255,6 +1264,7 @@ ConnectionOptions MainWindow::connectionOptions(const QVariantMap &profile) cons
     options.rightButtonAction = profile.value("rightButtonAction", "back").toString();
     options.sideButton1Action = profile.value("sideButton1Action", "swipe-up").toString();
     options.sideButton2Action = profile.value("sideButton2Action", "swipe-down").toString();
+    options.sideSwipeDistancePercent = profile.value("sideSwipeDistancePercent", 17).toInt();
     options.unlockPin = options.adbEnabled && profile.value("unlockEnabled", false).toBool() ?
         profile.value("unlockPin").toString() : QString();
     options.unlockAdb = !options.unlockPin.isEmpty();
@@ -1873,6 +1883,7 @@ QVariantMap MainWindow::deviceProfile() const
                   {"rightButtonAction", m_rightButtonAction->currentData()},
                   {"sideButton1Action", m_sideButton1Action->currentData()},
                   {"sideButton2Action", m_sideButton2Action->currentData()},
+                  {"sideSwipeDistancePercent", m_sideSwipeDistance->value()},
                  {"unlockEnabled", m_unlockEnabled->isChecked()}, {"unlockPin", m_unlockPin->text()},
                  {"clipboard", m_clipboard->isChecked()}, {"autoRotate", m_autoRotate->isChecked()}};
 }
@@ -1917,6 +1928,7 @@ void MainWindow::applyDeviceProfile(const QVariantMap &profile)
         profile.value("sideButton1Action", "swipe-up"))));
     m_sideButton2Action->setCurrentIndex(qMax(0, m_sideButton2Action->findData(
         profile.value("sideButton2Action", "swipe-down"))));
+    m_sideSwipeDistance->setValue(profile.value("sideSwipeDistancePercent", 17).toInt());
     m_unlockEnabled->setChecked(profile.value("unlockEnabled", false).toBool());
     m_unlockPin->setText(profile.value("unlockPin").toString());
     if (m_transport->currentData() == "ble") m_mouseMode->setCurrentIndex(0);
@@ -1987,6 +1999,7 @@ void MainWindow::saveSettings()
     settings.setValue("rightButtonAction", m_rightButtonAction->currentData());
     settings.setValue("sideButton1Action", m_sideButton1Action->currentData());
     settings.setValue("sideButton2Action", m_sideButton2Action->currentData());
+    settings.setValue("sideSwipeDistancePercent", m_sideSwipeDistance->value());
     settings.setValue("autoConnect", m_autoConnectEnabled->isChecked());
 }
 
