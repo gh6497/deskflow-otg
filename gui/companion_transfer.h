@@ -43,6 +43,7 @@ private:
     void online(Done done);
     void command(const QStringList &args, Stream stream, Done done, int timeout = 30000);
     void drain();
+    bool writeUpload(const QByteArray &bytes, bool final = false);
     void pump();
     void failCommand();
     void finish(bool ok, const char *statusId, const QString &detail = {});
@@ -54,7 +55,7 @@ private:
     QString m_adb, m_target, m_user;
     QProcess *m_process = nullptr;
     QTimer m_idle, m_absolute, m_receiptTimer;
-    QByteArray m_capture, m_errors;
+    QByteArray m_capture, m_errors, m_uploadRemainder;
     Stream m_stream = Stream::Capture;
     bool m_busy = false, m_cancelled = false, m_failed = false, m_trailer = false;
     QList<SharedFile> m_files, m_receiving;

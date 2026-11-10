@@ -130,7 +130,7 @@ private slots:
             QVERIFY(!args.contains(m_dir.filePath("你好 '$; image.png")));
             QVERIFY(!args.contains("你好 '$; image.png"));
             if (args.contains("write"))
-                QCOMPARE(args.mid(2, 4), (QStringList{"shell", "-T", "content", "write"}));
+                QCOMPARE(args.mid(2, 7), (QStringList{"shell", "-T", "base64", "-d", "|", "content", "write"}));
         }
     }
     void sendBeyondPipeCapacity()
@@ -147,6 +147,46 @@ private slots:
         const auto wire = file.readAll();
         QVERIFY(wire.endsWith(QCryptographicHash::hash(large, QCryptographicHash::Sha256)));
         QCOMPARE(wire.mid(20 + QByteArray("large-binary").size(), large.size()), large);
+    }
+    void sendThroughTextModeAdb_data()
+    {
+        QTest::addColumn<int>("size");
+        for (int size : {0, 1, 2, 65535, 65536, 65537, 1310720})
+            QTest::newRow(qPrintable(QString::number(size))) << size;
+    }
+    void sendThroughTextModeAdb()
+    {
+        QFETCH(int, size);
+        QByteArray body(size, '\0');
+        for (int i = 0; i < size; ++i) body[i] = char((i + 26) % 256);
+        if (size > 4) body.replace(1, 2, "\r\n");
+        write("text-mode-binary", body);
+        qputenv("OTG_TEST_TRANSFER_MODE", "text-stdin");
+        CompanionTransfer transfer(peer(), "[::1]:5555");
+        QSignalSpy spy(&transfer, &CompanionTransfer::completed);
+        transfer.send({m_dir.filePath("text-mode-binary")});
+        OTG_QTRY_COMPARE(spy.size(), 1); QVERIFY(spy.first().first().toBool());
+        const auto sent = QDir(m_dir.path()).entryList({"*.wire"}, QDir::Files);
+        QCOMPARE(sent.size(), 1);
+        QFile file(m_dir.filePath(sent.first())); QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto wire = file.readAll();
+        QCOMPARE(wire.mid(20 + QByteArray("text-mode-binary").size(), body.size()), body);
+        QFile input(m_dir.filePath(sent.first().chopped(5) + ".stdin"));
+        QVERIFY(input.open(QIODevice::ReadOnly));
+        QCOMPARE(input.readAll(), wire.toBase64());
+    }
+    void rejectedUploadDoesNotWaitForReceipt()
+    {
+        write("empty", {});
+        qputenv("OTG_TEST_TRANSFER_MODE", "upload-rejected");
+        CompanionTransfer transfer(peer(), "[::1]:5555");
+        QSignalSpy spy(&transfer, &CompanionTransfer::completed);
+        transfer.send({m_dir.filePath("empty")});
+        OTG_QTRY_COMPARE(spy.size(), 1);
+        QVERIFY(!spy.first().first().toBool());
+        QCOMPARE(spy.first().at(1).toString(), "otg.transfer.failed");
+        for (const auto &args : commands())
+            QVERIFY(!args.value(args.indexOf("--uri") + 1).contains("/receipt/"));
     }
     void progressWaitsForReceipt()
     {
@@ -235,14 +275,14 @@ private slots:
         if (fillPipe) QTest::qWait(200);
         // Progress counts bytes read from the file, including data already in
         // the OS pipe (Qt uses a 1 MiB pipe on Windows). Only the application
-        // queue has a portable bound: the 256 KiB watermark plus one chunk.
+        // queue has a portable bound: the 256 KiB watermark plus one encoded chunk.
         const auto queuedBytes = [&transfer]() -> qint64 {
             for (auto *process : transfer.findChildren<QProcess *>())
                 if (process->state() == QProcess::Running) return process->bytesToWrite();
             return -1;
         };
         OTG_QTRY_VERIFY(queuedBytes() > 0);
-        QVERIFY(queuedBytes() <= 256 * 1024 + 65536);
+        QVERIFY(queuedBytes() <= 256 * 1024 + (65536 + 2) / 3 * 4);
         QVERIFY(progress.last().at(1).toLongLong() < fileSize);
         QVERIFY(transfer.busy());
         QVERIFY(spy.isEmpty());

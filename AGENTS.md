@@ -333,7 +333,10 @@ for f in platform/linux/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only
   UTF-8 文件。`gui/companion_transfer.cpp` 固定 `adb -s`，仅 USB 回退 USB serial，BLE 需显式
   ADB。`am get-current-user` 解析数字用户，content CLI 不支持 `--user current`。
   v1上传含长度/EOF/SHA-256；64KiB分块、约256KiB背压，手机私有暂存32个/2GiB、单文件1GiB。
-  上传须用 `adb shell -T content write`，由 shell v2 独立传 stdin EOF 并等待远端退出；
+  上传须用 `adb shell -T base64 -d | content write`（管道在手机执行），完整v1流分块Base64编码，
+  保留最多2字节跨块余数，仅末尾补padding；三平台共用，进度/哈希按原始文件计算。
+  Windows adb shell 的stdin文本模式会把0x1A当EOF并转换CRLF，`-T`不能解决本机转换；
+  由 shell v2 独立传 stdin EOF 并等待远端退出；
   不用无法半关闭 stdin 的 raw `exec-in`（真机复现退出0但无回执）。手机回执确认前进度最多99%。
   手机上传回执确认提交，电脑接收临时文件校验后不覆盖改名，再清手机 outbox 并重读列表确认；
   content delete 无成功计数且错误可能退出0，不得只信退出码。手机另存走 SAF，接收不自动打开。

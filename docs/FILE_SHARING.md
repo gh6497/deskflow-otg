@@ -86,14 +86,20 @@ ADB shell 已有 DUMP，普通 App 不能读暂存、上传或伪造清除；分
 - `exec-out content read --user USER --uri …/manifest`：至多64 KiB JSON，版本、ID、大小、SHA-256
   严格检查；`…/out/ID` 读取原始字节。电脑持久化后 `shell content delete …/out/ID`，
   再读 manifest 确认该 ID 消失；不能仅以 `content` 退出码或假定存在的成功文本判断。
-- `shell -T content write …/in/ID`：使用 shell v2 独立传递 stdin EOF 并等待远端命令完成，
-  `-T` 禁用 PTY 以保持二进制字节不变。不能使用 raw `exec-in`：它无法半关闭 stdin，
+- `shell -T base64 -d | content write …/in/ID`（管道在手机 shell 内执行）：桌面把完整协议流
+  分块编码为 Base64，手机解码后交给 provider；Linux / Windows / macOS 共用此路径，APK 协议不变。
+  只在末尾补 Base64 padding，保留最多2字节跨块余数；传输量约增加三分之一，不产生额外临时文件。
+  shell v2 独立传递 stdin EOF 并等待远端命令完成。`-T` 仅禁用远端 PTY，Windows ADB 的
+  本机 stdin 仍可能按文本模式处理（`0x1A` 截断、CRLF 改写），因此不能直接写二进制。
+  不能使用 raw `exec-in`：它无法半关闭 stdin，
   可能在手机写入完成前结束通道，出现退出码0却无回执的上传失败。
   数据为8 字节 ASCII `DFOTGFT1`、大端 uint32 文件名 UTF-8 长度
   （1..1024）、文件名、大端 uint64 内容长度、内容、32 字节 SHA-256、EOF。
   手机逐块读入私有 `.ID.part`，校验长度 / 哈希 / 无尾随数据，写盘后原子改名为完成项。
   `…/receipt/ID` 返回已提交项；桌面核对 ID / 大小 / 哈希才报告完成。
-- 一条桌面命令在途；文件以64 KiB分块，上传缓冲约256 KiB，不把整个文件放入内存。
+  `content write` 即使拒绝上传也可能退出0；桌面检测其 provider 错误后直接报失败，不继续轮询回执。
+- 一条桌面命令在途；文件以64 KiB分块，上传编码缓冲以256 KiB为水位（最多再加一个编码块），
+  不把整个文件放入内存；进度和 SHA-256 仍按原始文件字节统计。
   手机仅允许一个桌面上传在途，分享源也在工作线程读取。异常 / 截断 / 校验失败不产生回执。
 
 ## 验证
@@ -108,7 +114,8 @@ ANDROID_HOME=/path/to/Android/Sdk ./gradlew :app:assembleDebug :app:lintDebug
 主机 Java 测试运行真实的流协议和私有存储核心，覆盖二进制 / 空文件、哈希、截断、尾随数据、
 版本 / 大小限制、文件名、取消、失败清理、队列上限、持久化和重启清理。
 Qt 使用跨平台 fake ADB 验证双向二进制、数字用户 / 精确目标、无自动接收、无远端路径注入、
-同名保护、确认清理、错误回执、断线、超时、取消、背压与窗口生命周期。
+同名保护、确认清理、错误回执、断线、超时、取消、背压与窗口生命周期；模拟 Windows ADB
+文本 stdin 的 Ctrl-Z EOF / CRLF 转换，验证空文件、跨64 KiB和 Base64三字节边界及大文件。
 测试不访问手机、系统蓝牙或真实 ADB server，**不等同真实 ROM 的分享菜单、URI 授权、
 provider 权限 / 后台投递或 Windows/macOS 真机验收**。
 
@@ -116,3 +123,11 @@ provider 权限 / 后台投递或 Windows/macOS 真机验收**。
 改用 `shell -T` 后提交成功。修复后的真实 `CompanionTransfer` 另通过1,280,000字节二进制
 文件（含全部字节值）及空文件上传，手机回执的长度和SHA-256核对通过；仅清理此次诊断项。
 这不等同手机分享菜单、SAF另存为或Windows/macOS真机验收，仍需分别验证。
+
+2026-11-10 Windows + 无线 ADB（37.0.1）/ Redmi K20 Pro / 伴侣0.1.12真机排障：
+`shell -T wc -c` 对含全部字节值的1 MiB输入仅收到26字节（首个`0x1A`处EOF），
+CRLF也被转换；Base64解码链路的同一数据SHA-256正确。原始桌面实现的新文本stdin模拟
+回归先失败，分块编码修复后通过。实际 `CompanionTransfer` 上传空文件、1 MiB和
+16 MiB + 1字节均收到成功回执，并另行核对手机公共目录文件的SHA-256；仅清理诊断项。
+测试中该ROM在锁屏后冻结伴侣线程（`do_freezer_trap`），大文件因此超时；保持伴侣前台亮屏
+后完成验证。传输期间应保持伴侣运行，以上不代表此ROM锁屏后台传输已通过，也不代表macOS真机验收。
