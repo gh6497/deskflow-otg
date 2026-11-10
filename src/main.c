@@ -512,6 +512,10 @@ static int cb_idle(void *ud)
      * server notices the client is gone and returns the cursor to the primary
      * screen. */
     app_state *s = ud;
+    /* A side swipe temporarily needs a 1 ms tick. On USB callers, do not
+     * also enumerate the device list at every one of those timeouts: that
+     * check is much more expensive on Windows than the gesture interval. */
+    if (!s->transport_owner && s->bridge.side_swipe_pending) return 0;
     clipboard_poll(s);
     if (!otg_bridge_check(&s->bridge)) {
         return 1;
@@ -589,6 +593,15 @@ static int cb_tick(void *ud)
         }
     }
     return result;
+}
+
+static int cb_tick_interval(void *ud, int configured_ms)
+{
+    app_state *s = ud;
+    /* Side-button swipes are the only USB feature that needs a fast tick
+     * intermittently. Avoid turning the whole session into a 1 ms polling
+     * loop just because the default side-button actions are enabled. */
+    return s->bridge.side_swipe_pending ? 1 : configured_ms;
 }
 
 static void destroy_transport_owner(app_state *s)
@@ -1155,6 +1168,12 @@ int main(int argc, char **argv)
     }
 
     /* 2. Connect to the Deskflow server. */
+    const bool side_button_actions =
+        opts.side_button_1_action != OTG_SIDE_BUTTON_NORMAL ||
+        opts.side_button_2_action != OTG_SIDE_BUTTON_NORMAL;
+    const int base_tick_interval = state.transport_owner ? 1 :
+                                   opts.clipboard ? 5 : opts.audio ? 50 :
+                                   opts.unlock_adb_gate ? 5 : 0;
     df_client_callbacks cbs = {
         .on_connected = cb_connected,
         .on_enter = cb_enter,
@@ -1169,14 +1188,9 @@ int main(int argc, char **argv)
         .on_mouse_wheel = cb_mouse_wheel,
         .on_disconnected = cb_disconnected,
         .on_idle = cb_idle,
-        .on_tick = state.transport_owner || adb_features ||
-                   opts.side_button_1_action != OTG_SIDE_BUTTON_NORMAL ||
-                   opts.side_button_2_action != OTG_SIDE_BUTTON_NORMAL ? cb_tick : NULL,
-        .tick_interval_ms = state.transport_owner ? 1 :
-                            (opts.side_button_1_action != OTG_SIDE_BUTTON_NORMAL ||
-                             opts.side_button_2_action != OTG_SIDE_BUTTON_NORMAL) ? 1 :
-                            opts.clipboard ? 5 : opts.audio ? 50 :
-                            opts.unlock_adb_gate ? 5 : 0,
+        .on_tick = base_tick_interval || side_button_actions ? cb_tick : NULL,
+        .on_tick_interval_ms = side_button_actions ? cb_tick_interval : NULL,
+        .tick_interval_ms = base_tick_interval,
         .on_clipboard = cb_clipboard,
         .on_clipboard_enabled = opts.clipboard ? cb_clipboard_enabled : NULL,
     };

@@ -118,11 +118,12 @@ GUI 参数、状态和停止流程有离线模拟测试；真实 `main.c` + brid
 - WinRT 服务、设备身份检查、通知完成等待均在专用工作线程，Deskflow 回调只入队。
 - 队列最多 64 条；仅相邻且同按钮/范围状态的纯移动可合并。首次位置、按下/松开、
   键盘、滚轮及其清零、In Range 变化均作为顺序屏障保留。
-- 默认通知间隔为 30ms（包括键盘和范围/按钮屏障），用于 Windows 10 或无法读取链路参数
-  的驱动；顺序仍保留，不丢弃状态屏障。Windows 11 会在可用时改用实测协商间隔。
+- 默认状态通知间隔为 30ms（键盘和范围/按钮屏障），纯指针移动默认 15ms，适用于
+  Windows 10 或无法读取链路参数的驱动；顺序仍保留，不丢弃状态屏障。Windows 11
+  会在可用时让两者都改用实测协商间隔。
 - Windows 11 如果系统暴露已协商的 LE connection interval，通知节流会跟随该间隔，并在
-  `ConnectionParametersChanged` 时更新；Windows 10 或驱动不支持时回退到 30ms。状态屏障
-  仍与指针移动共享同一顺序队列，不会因自适应节流而丢失。
+  `ConnectionParametersChanged` 时更新；Windows 10 或驱动不支持时回退到状态屏障 30ms、
+  纯指针移动 15ms。状态屏障仍与指针移动共享同一顺序队列，不会因自适应节流而丢失。
 - HID 服务补充 `Protocol Mode`（当前固定 Report Protocol；Boot Protocol 会明确拒绝）、
   `HID Information` 的 `RemoteWake | NormallyConnectable` flags，以及只读 Battery
   Service（100%）。这些是兼容性补全，不改变当前绝对 Digitizer 报告格式。
@@ -163,7 +164,8 @@ GUI 参数、状态和停止流程有离线模拟测试；真实 `main.c` + brid
 
 2026-10-28 新日志没有先出现手机断线，而是连续 enter/leave 后 `notify pointer`
 超时，释放也失败。此现象不能再直接归因为手机断链。排障版增加通知超时时的
-成功发送计数、队列长度、在线与 GATT session 状态，统一30ms通知节流；致命超时
+成功发送计数、队列长度、在线与 GATT session 状态，状态屏障30ms、纯指针移动15ms
+通知节流；致命超时
 在释放/注销前立即关闭 ready，避免清理期间继续接收新输入。根因和真机改善尚待确认。
 
 同日 nova 9 的手机侧实时日志补充：11:10:22.031 按既有信息注册键盘/指针通知

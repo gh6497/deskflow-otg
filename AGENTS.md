@@ -202,7 +202,8 @@ for f in platform/linux/*.c; do gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only
   失联/订阅变化清队列并断开 Deskflow，恢复先释放输入；退出释放为尽力而为。
   WinRT 等待按会话 epoch 取消并记录操作名；断线取消不算致命超时。Cancel 不等于完成，
   旧通知真正完成/取消前不得恢复 ready 或发送新通知；5 秒仍未结束则失败退出。
-  当前 Windows 排障版所有通知统一30ms间隔（非实测interval），降低切屏状态突发；
+  当前 Windows 排障版状态屏障通知30ms、纯指针移动15ms（均非实测interval），降低切屏
+  状态突发并改善连续指针轨迹；
   致命通知超时先关闭ready再释放/注销，日志含发送计数/队列/在线及session状态。
   nova 9 的独立原型键盘/悬停/点击/拖拽/滚轮已过，不能等同连续 Deskflow 输入、
   重连/休眠/进程重启已验收。Redmi Android14 ROM 的 LHDC 白名单超91字节导致
