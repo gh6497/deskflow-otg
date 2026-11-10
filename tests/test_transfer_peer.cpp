@@ -81,11 +81,33 @@ int main(int argc, char **argv)
         // Raw exec-in has no independent stdin EOF. Reproduce an exit-0 upload
         // that never commits, instead of treating it like an ordinary pipe.
         if (args.value(2) == "exec-in") return 0;
-        if (args.mid(2, 4) != QStringList{"shell", "-T", "content", "write"}) return 89;
+        const bool encoded = args.mid(2, 7) == QStringList{
+            "shell", "-T", "base64", "-d", "|", "content", "write"};
+        if (!encoded && args.mid(2, 4) != QStringList{"shell", "-T", "content", "write"}) return 89;
         if (mode == "hold") return app.exec();
+        if (mode == "upload-rejected") {
+            std::fputs("Error while accessing provider:com.github.gh6497.deskflowotg.transfer\n"
+                       "java.io.IOException: Another upload is active\n", stderr);
+            return 0;
+        }
         QFile input;
         if (!input.open(stdin, QIODevice::ReadOnly)) return 95;
-        const auto data = input.readAll();
+        auto data = input.readAll();
+        if (mode == "text-stdin") {
+            // Windows adb shell uses CRT text input even with -T. The old
+            // binary fake hid Ctrl-Z EOF and CRLF translation by using _O_BINARY.
+            save(dir.filePath(path.mid(3) + ".stdin"), data);
+            const auto eof = data.indexOf('\x1a');
+            if (eof >= 0) data.truncate(eof);
+            data.replace("\r\n", "\n");
+        }
+        if (encoded) {
+            const auto decoded = QByteArray::fromBase64Encoding(data, QByteArray::AbortOnBase64DecodingErrors);
+            // Enforce a single canonical stream: padding inside separately
+            // encoded chunks must not silently discard the rest of the file.
+            if (!decoded || decoded.decoded.toBase64() != data) return 88;
+            data = decoded.decoded;
+        }
         if (data.size() < 52 || data.left(8) != "DFOTGFT1") return 94;
         const auto n = qFromBigEndian<quint32>(data.constData() + 8);
         if (n < 1 || n > 1024 || quint64(data.size()) < 52 + n) return 93;

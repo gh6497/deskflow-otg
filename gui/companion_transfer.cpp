@@ -149,7 +149,7 @@ void CompanionTransfer::command(const QStringList &args, Stream stream, Done don
         qToBigEndian<quint32>(quint32(name.size()), length);
         qToBigEndian<quint64>(quint64(m_size), size);
         header.append(length, 4); header.append(name); header.append(size, 8);
-        process->write(header);
+        if (!writeUpload(header)) return;
         pump();
     });
     connect(process, &QProcess::bytesWritten, this, [this](qint64) {
@@ -158,6 +158,8 @@ void CompanionTransfer::command(const QStringList &args, Stream stream, Done don
     auto finishCommand = [this, process, done](bool ok) {
         if (m_process != process) return;
         drain();
+        const auto errors = process->readAllStandardError();
+        m_errors.append(errors.left(qMax(0, 8192 - int(m_errors.size()))));
         m_idle.stop(); m_absolute.stop();
         m_process = nullptr;
         process->deleteLater();
@@ -197,6 +199,19 @@ void CompanionTransfer::drain()
     }
 }
 
+bool CompanionTransfer::writeUpload(const QByteArray &bytes, bool final)
+{
+    // ADB shell's Windows CRT stdin is text-mode even with -T: Ctrl-Z becomes
+    // EOF and CRLF is translated. Send ASCII and decode on Android instead.
+    // Keep 0..2 bytes between chunks so only the final block contains padding.
+    m_uploadRemainder.append(bytes);
+    const auto count = final ? m_uploadRemainder.size() : m_uploadRemainder.size() / 3 * 3;
+    const auto encoded = m_uploadRemainder.left(count).toBase64();
+    m_uploadRemainder.remove(0, count);
+    if (m_process->write(encoded) != encoded.size()) { failCommand(); return false; }
+    return true;
+}
+
 void CompanionTransfer::pump()
 {
     if (!m_process || m_stream != Stream::Upload || m_failed || m_cancelled || m_trailer) return;
@@ -204,14 +219,14 @@ void CompanionTransfer::pump()
         const auto bytes = m_input.read(qMin<qint64>(65536, m_size - m_bytes));
         if (bytes.isEmpty()) { failCommand(); return; }
         m_hash.addData(bytes); m_bytes += bytes.size();
-        if (m_process->write(bytes) != bytes.size()) { failCommand(); return; }
+        if (!writeUpload(bytes)) return;
         emit progress(m_name, m_bytes, m_size);
     }
     if (m_bytes == m_size) {
         // Detect a source growing during upload instead of silently truncating it.
         if (!m_input.atEnd() || m_input.size() != m_size) { failCommand(); return; }
         m_trailer = true;
-        m_process->write(m_hash.result());
+        if (!writeUpload(m_hash.result(), true)) return;
         m_process->closeWriteChannel();
     }
 }
@@ -328,14 +343,23 @@ void CompanionTransfer::nextSend()
     m_name = safeName(QFileInfo(m_input).fileName()); m_size = m_input.size();
     m_uploadId = QUuid::createUuid().toString(QUuid::Id128);
     m_bytes = 0; m_hash.reset(); m_trailer = false;
+    m_uploadRemainder.clear();
     emit progress(m_name, 0, m_size);
     // The raw exec service cannot half-close stdin: exec-in can terminate the
     // remote writer before it drains the upload. Shell v2 forwards stdin EOF
-    // independently and waits for the remote command. -T keeps binary data raw.
-    command({"shell", "-T", "content", "write", "--user", m_user, "--uri", uri("in/" + m_uploadId)},
+    // independently and waits for the remote command. -T disables the remote
+    // PTY; Base64 also protects against Windows adb's host-side text conversion.
+    // This fixed pipeline contains only our numeric user and generated ID.
+    command({"shell", "-T", "base64", "-d", "|", "content", "write", "--user", m_user,
+             "--uri", uri("in/" + m_uploadId)},
             Stream::Upload, [this](bool ok) {
         m_input.close();
-        if (!ok || !m_trailer) { finish(false, "otg.transfer.failed"); return; }
+        // Android content may print a provider error but still exit zero. No
+        // receipt can arrive for a rejected upload, so do not keep showing 99%.
+        if (!ok || !m_trailer || m_capture.contains("Error while accessing provider:") ||
+            m_errors.contains("Error while accessing provider:")) {
+            finish(false, "otg.transfer.failed"); return;
+        }
         m_receiptAttempts = 0; receipt();
     });
 }
