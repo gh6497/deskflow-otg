@@ -31,6 +31,7 @@
 
 #define HID_KEYBOARD_MAX_KEYS 6
 #define HID_ABSOLUTE_MAX 32767
+#define MOUSE_SENSITIVITY_MAX 10.0
 
 /* Deskflow wheel deltas are in units of 120 per notch (PlatformScreen.h
  * s_scrollDelta), matching the Windows WHEEL_DELTA convention. */
@@ -243,6 +244,51 @@ static uint16_t absolute_axis(int32_t value, int32_t size)
     }
     return (uint16_t)((int64_t)clamp_position(value, size) * HID_ABSOLUTE_MAX /
                       (size - 1));
+}
+
+static int32_t rescale_position(int32_t value, int32_t old_size, int32_t new_size)
+{
+    if (old_size <= 1 || new_size <= 1) return 0;
+    return (int32_t)((int64_t)value * (new_size - 1) / (old_size - 1));
+}
+
+/* Keep fractional motion between reports.  Deskflow coordinates are integral,
+ * but a 1.5x setting must not round every one-pixel move in the same direction. */
+static int32_t scale_motion(struct otg_bridge *b, int32_t delta, double *residual)
+{
+    if (b->mouse_mode != OTG_MOUSE_ABSOLUTE ||
+        b->sensitivity_multiplier == 1.0) {
+        return delta;
+    }
+    const double scaled = (double)delta * b->sensitivity_multiplier + *residual;
+    const int32_t result = (int32_t)scaled; /* truncates toward zero */
+    *residual = scaled - (double)result;
+    return result;
+}
+
+static void move_phone_pointer(struct otg_bridge *b, int32_t dx, int32_t dy)
+{
+    dx = scale_motion(b, dx, &b->motion_residual_x);
+    dy = scale_motion(b, dy, &b->motion_residual_y);
+    b->mouse_x = clamp_position(b->mouse_x + dx, b->screen_w);
+    b->mouse_y = clamp_position(b->mouse_y + dy, b->screen_h);
+}
+
+/* While a synthetic gesture owns the HID reports, keep the latest Deskflow
+ * position and the corresponding phone position for hand-off afterwards. */
+static void update_saved_motion(struct otg_bridge *b,
+                                int32_t *saved_x, int32_t *saved_y,
+                                int32_t *saved_mouse_x, int32_t *saved_mouse_y,
+                                int32_t x, int32_t y)
+{
+    int32_t dx = x - *saved_x;
+    int32_t dy = y - *saved_y;
+    *saved_x = x;
+    *saved_y = y;
+    dx = scale_motion(b, dx, &b->motion_residual_x);
+    dy = scale_motion(b, dy, &b->motion_residual_y);
+    *saved_mouse_x = clamp_position(*saved_mouse_x + dx, b->screen_w);
+    *saved_mouse_y = clamp_position(*saved_mouse_y + dy, b->screen_h);
 }
 
 static int8_t clamp_i8(int32_t v)
@@ -484,6 +530,7 @@ int otg_bridge_open(struct otg_bridge *b, const char *serial,
     b->screen_w = screen_w;
     b->screen_h = screen_h;
     b->mouse_mode = mouse_mode;
+    b->sensitivity_multiplier = 1.0;
     b->side_swipe_distance_percent = SIDE_SWIPE_DISTANCE_DEFAULT_PERCENT;
 
     if (!aoa_hid_init(&b->aoa)) {
@@ -532,6 +579,7 @@ int otg_bridge_open_transport(struct otg_bridge *b,
     b->screen_w = screen_w;
     b->screen_h = screen_h;
     b->mouse_mode = mouse_mode;
+    b->sensitivity_multiplier = 1.0;
     b->side_swipe_distance_percent = SIDE_SWIPE_DISTANCE_DEFAULT_PERCENT;
     b->transport_ops = ops;
     b->transport_ctx = ctx;
@@ -615,6 +663,16 @@ void otg_bridge_set_side_swipe_distance(struct otg_bridge *b, uint8_t percent)
     b->side_swipe_distance_percent = percent;
 }
 
+bool otg_bridge_set_sensitivity(struct otg_bridge *b, double multiplier)
+{
+    if (!b || !(multiplier >= 1.0) || multiplier > MOUSE_SENSITIVITY_MAX) {
+        return false;
+    }
+    b->sensitivity_multiplier = multiplier;
+    b->motion_residual_x = b->motion_residual_y = 0;
+    return true;
+}
+
 bool otg_bridge_check(struct otg_bridge *b)
 {
     return b->transport_ops && b->transport_ops->poll(b->transport_ctx);
@@ -630,8 +688,8 @@ void otg_bridge_reset_input(struct otg_bridge *b)
     if (b->side_swipe_pending) {
         b->mouse_buttons = b->side_swipe_saved_buttons;
         send_mouse_state(b, 0, 0);
-        b->mouse_x = b->side_swipe_saved_x;
-        b->mouse_y = b->side_swipe_saved_y;
+        b->mouse_x = b->side_swipe_saved_mouse_x;
+        b->mouse_y = b->side_swipe_saved_mouse_y;
     }
     b->hid_mods = 0;
     memset(b->keys, 0, sizeof(b->keys));
@@ -643,8 +701,11 @@ void otg_bridge_reset_input(struct otg_bridge *b)
     b->side_swipe_step = 0;
     b->mouse_buttons = 0;
     b->mouse_x = b->mouse_y = 0;
+    b->server_x = b->server_y = 0;
     b->active = b->have_mouse_pos = false;
+    b->have_server_pos = false;
     b->residual_hscroll = b->residual_vscroll = 0;
+    b->motion_residual_x = b->motion_residual_y = 0;
     b->unlock_attempted = false;
     b->unlock_pending = false;
     b->unlock_phase = UNLOCK_PHASE_NONE;
@@ -659,24 +720,36 @@ bool otg_bridge_resize(struct otg_bridge *b, int32_t width, int32_t height)
 {
     if (width < 1 || width > INT16_MAX || height < 1 || height > INT16_MAX) return false;
     if (width == b->screen_w && height == b->screen_h) return true;
+    const int32_t old_width = b->screen_w;
+    const int32_t old_height = b->screen_h;
     if (b->side_swipe_pending) {
         b->mouse_buttons = b->side_swipe_saved_buttons;
         send_mouse_state(b, 0, 0);
-        b->mouse_x = b->side_swipe_saved_x;
-        b->mouse_y = b->side_swipe_saved_y;
+        b->mouse_x = b->side_swipe_saved_mouse_x;
+        b->mouse_y = b->side_swipe_saved_mouse_y;
+        b->server_x = b->side_swipe_saved_x;
+        b->server_y = b->side_swipe_saved_y;
         b->side_swipe_pending = false;
     }
     b->mouse_buttons = 0;
     b->residual_hscroll = b->residual_vscroll = 0;
+    b->motion_residual_x = b->motion_residual_y = 0;
     if (b->active) send_mouse_state(b, 0, 0); /* Release at the old drag location. */
-    b->mouse_x = b->screen_w > 1 ? (int32_t)((int64_t)b->mouse_x * (width - 1) / (b->screen_w - 1)) : 0;
-    b->mouse_y = b->screen_h > 1 ? (int32_t)((int64_t)b->mouse_y * (height - 1) / (b->screen_h - 1)) : 0;
+    b->mouse_x = rescale_position(b->mouse_x, old_width, width);
+    b->mouse_y = rescale_position(b->mouse_y, old_height, height);
+    b->server_x = rescale_position(b->server_x, old_width, width);
+    b->server_y = rescale_position(b->server_y, old_height, height);
     if (b->unlock_pending) {
-        b->unlock_saved_x = b->screen_w > 1 ? (int32_t)((int64_t)b->unlock_saved_x * (width - 1) / (b->screen_w - 1)) : 0;
-        b->unlock_saved_y = b->screen_h > 1 ? (int32_t)((int64_t)b->unlock_saved_y * (height - 1) / (b->screen_h - 1)) : 0;
+        b->unlock_saved_x = rescale_position(b->unlock_saved_x, old_width, width);
+        b->unlock_saved_y = rescale_position(b->unlock_saved_y, old_height, height);
+        b->unlock_saved_mouse_x = rescale_position(b->unlock_saved_mouse_x, old_width, width);
+        b->unlock_saved_mouse_y = rescale_position(b->unlock_saved_mouse_y, old_height, height);
     }
     b->screen_w = width; b->screen_h = height;
-    if (b->mouse_mode == OTG_MOUSE_RELATIVE) b->have_mouse_pos = false;
+    if (b->mouse_mode == OTG_MOUSE_RELATIVE) {
+        b->have_mouse_pos = false;
+        b->have_server_pos = false;
+    }
     if (b->active) send_mouse_state(b, 0, 0);
     return true;
 }
@@ -687,8 +760,10 @@ static void schedule_unlock(struct otg_bridge *b)
     b->unlock_due_ms = bridge_now_ms() + UNLOCK_WAKE_DELAY_MS;
     b->unlock_phase = UNLOCK_PHASE_WAIT_SWIPE;
     b->unlock_swipe_step = 0;
-    b->unlock_saved_x = b->mouse_x;
-    b->unlock_saved_y = b->mouse_y;
+    b->unlock_saved_x = b->server_x;
+    b->unlock_saved_y = b->server_y;
+    b->unlock_saved_mouse_x = b->mouse_x;
+    b->unlock_saved_mouse_y = b->mouse_y;
     /* ADB lock-state detection may finish after mouse input has started.
      * Release any drag and discard wheel/navigation state before the synthetic
      * swipe takes ownership. External mouse actions are dropped until done;
@@ -711,9 +786,13 @@ void otg_bridge_enter(struct otg_bridge *b, int16_t x, int16_t y, uint16_t mask)
      * subsequent modifier key events will refine it. */
     b->hid_mods = modmask_to_hid(mask);
 
-    b->mouse_x = clamp_position(x, b->screen_w);
-    b->mouse_y = clamp_position(y, b->screen_h);
+    b->server_x = clamp_position(x, b->screen_w);
+    b->server_y = clamp_position(y, b->screen_h);
+    b->mouse_x = b->server_x;
+    b->mouse_y = b->server_y;
     b->have_mouse_pos = true;
+    b->have_server_pos = true;
+    b->motion_residual_x = b->motion_residual_y = 0;
     b->active = true;
     b->mouse_buttons = 0;
     if (b->mouse_mode == OTG_MOUSE_ABSOLUTE) {
@@ -735,8 +814,8 @@ void otg_bridge_leave(struct otg_bridge *b)
     if (b->side_swipe_pending) {
         b->mouse_buttons = b->side_swipe_saved_buttons;
         send_mouse_state(b, 0, 0);
-        b->mouse_x = b->side_swipe_saved_x;
-        b->mouse_y = b->side_swipe_saved_y;
+        b->mouse_x = b->side_swipe_saved_mouse_x;
+        b->mouse_y = b->side_swipe_saved_mouse_y;
         b->side_swipe_pending = false;
     }
     if (b->middle_button_home_down || b->right_button_back_down) {
@@ -753,15 +832,15 @@ void otg_bridge_leave(struct otg_bridge *b)
         send_mouse_state(b, 0, 0); /* end hover after releasing buttons */
     }
     if (b->have_mouse_pos) {
-        /* mouse_x/mouse_y still hold the server's cursor position at the
-         * moment the cursor left the screen (they are only cleared just
-         * below), so log where it exited from. */
-        LOG_DBG("leave at %d,%d (screen %dx%d)\n", b->mouse_x, b->mouse_y,
+        /* server_x/server_y are the Deskflow position at the moment the
+         * cursor left the screen; mouse_x/mouse_y may be sensitivity-scaled. */
+        LOG_DBG("leave at %d,%d (screen %dx%d)\n", b->server_x, b->server_y,
                 b->screen_w, b->screen_h);
     } else {
         LOG_DBG("leave (cursor position unknown)\n");
     }
     b->have_mouse_pos = false;
+    b->have_server_pos = false;
     b->residual_hscroll = 0;
     b->residual_vscroll = 0;
     b->side_button_1_down = false;
@@ -815,6 +894,13 @@ void otg_bridge_unlock_tick(struct otg_bridge *b)
         if (b->mouse_mode != OTG_MOUSE_ABSOLUTE) {
             b->unlock_pending = false;
             b->unlock_phase = UNLOCK_PHASE_NONE;
+            /* Relative mode cannot replay the hidden absolute position. Keep
+             * the device/server anchors aligned so the next DMMV is measured
+             * from the pointer position that was actually retained. */
+            b->server_x = b->mouse_x;
+            b->server_y = b->mouse_y;
+            b->have_server_pos = b->have_mouse_pos;
+            b->motion_residual_x = b->motion_residual_y = 0;
             LOG_WARN("automatic unlock requires absolute mouse mode; skipped\n");
             return;
         }
@@ -839,8 +925,8 @@ void otg_bridge_unlock_tick(struct otg_bridge *b)
         }
         b->mouse_buttons = 0; /* Release at the top of the lock screen. */
         send_mouse_state(b, 0, 0);
-        b->mouse_x = b->unlock_saved_x;
-        b->mouse_y = b->unlock_saved_y;
+        b->mouse_x = b->unlock_saved_mouse_x;
+        b->mouse_y = b->unlock_saved_mouse_y;
         send_mouse_state(b, 0, 0);
         b->unlock_phase = UNLOCK_PHASE_WAIT_PIN;
         b->unlock_due_ms = now + UNLOCK_PIN_DELAY_MS;
@@ -856,8 +942,8 @@ void otg_bridge_unlock_tick(struct otg_bridge *b)
         b->unlock_phase = UNLOCK_PHASE_NONE;
         /* Motion also arrives during the PIN delay. Restore the latest server
          * position, not the pre-swipe cursor or the synthetic swipe endpoint. */
-        b->mouse_x = b->unlock_saved_x;
-        b->mouse_y = b->unlock_saved_y;
+        b->mouse_x = b->unlock_saved_mouse_x;
+        b->mouse_y = b->unlock_saved_mouse_y;
         send_mouse_state(b, 0, 0);
         LOG_DBG("unlock PIN sequence sent\n");
     }
@@ -915,8 +1001,10 @@ static void side_swipe_start(struct otg_bridge *b, uint8_t button,
     b->side_swipe_pending = true;
     b->side_swipe_button = button;
     b->side_swipe_saved_buttons = b->mouse_buttons;
-    b->side_swipe_saved_x = b->mouse_x;
-    b->side_swipe_saved_y = b->mouse_y;
+    b->side_swipe_saved_x = b->server_x;
+    b->side_swipe_saved_y = b->server_y;
+    b->side_swipe_saved_mouse_x = b->mouse_x;
+    b->side_swipe_saved_mouse_y = b->mouse_y;
     b->side_swipe_start_y = b->mouse_y;
     b->side_swipe_target_y = target;
     b->side_swipe_step = 0;
@@ -942,8 +1030,8 @@ static void side_swipe_tick(struct otg_bridge *b)
      * the latest server position so the next absolute event remains aligned. */
     b->mouse_buttons = b->side_swipe_saved_buttons;
     send_mouse_state(b, 0, 0);
-    b->mouse_x = b->side_swipe_saved_x;
-    b->mouse_y = b->side_swipe_saved_y;
+    b->mouse_x = b->side_swipe_saved_mouse_x;
+    b->mouse_y = b->side_swipe_saved_mouse_y;
     send_mouse_state(b, 0, 0);
     b->side_swipe_pending = false;
     b->side_swipe_step = 0;
@@ -1035,27 +1123,49 @@ void otg_bridge_mouse_move(struct otg_bridge *b, int16_t x, int16_t y)
     int32_t tx = clamp_position(x, b->screen_w);
     int32_t ty = clamp_position(y, b->screen_h);
     if (b->side_swipe_pending) {
-        b->side_swipe_saved_x = tx;
-        b->side_swipe_saved_y = ty;
+        update_saved_motion(b, &b->side_swipe_saved_x, &b->side_swipe_saved_y,
+                            &b->side_swipe_saved_mouse_x, &b->side_swipe_saved_mouse_y,
+                            tx, ty);
+        b->server_x = tx;
+        b->server_y = ty;
+        b->have_server_pos = true;
         return;
     }
     if (b->unlock_pending) {
-        b->unlock_saved_x = tx;
-        b->unlock_saved_y = ty;
+        update_saved_motion(b, &b->unlock_saved_x, &b->unlock_saved_y,
+                            &b->unlock_saved_mouse_x, &b->unlock_saved_mouse_y,
+                            tx, ty);
+        b->server_x = tx;
+        b->server_y = ty;
+        b->have_server_pos = true;
         return;
     }
-    int32_t dx = tx - b->mouse_x;
-    int32_t dy = ty - b->mouse_y;
-    bool had_position = b->have_mouse_pos;
-    b->mouse_x = tx;
-    b->mouse_y = ty;
-    b->have_mouse_pos = true;
+    const bool had_server_position = b->have_server_pos;
+    const bool had_position = b->have_mouse_pos;
+    const int32_t dx = tx - (had_server_position ? b->server_x : tx);
+    const int32_t dy = ty - (had_server_position ? b->server_y : ty);
+    b->server_x = tx;
+    b->server_y = ty;
+    b->have_server_pos = true;
 
     if (b->mouse_mode == OTG_MOUSE_ABSOLUTE) {
+        if (had_server_position) {
+            move_phone_pointer(b, dx, dy);
+        } else {
+            b->mouse_x = tx;
+            b->mouse_y = ty;
+            b->motion_residual_x = b->motion_residual_y = 0;
+        }
+        b->have_mouse_pos = true;
         send_mouse_state(b, 0, 0);
     } else if (!had_position) {
+        b->mouse_x = tx;
+        b->mouse_y = ty;
+        b->have_mouse_pos = true;
         mouse_warp(b, tx, ty);
     } else {
+        b->mouse_x = tx;
+        b->mouse_y = ty;
         send_mouse_move(b, dx, dy);
     }
 }
@@ -1066,23 +1176,47 @@ void otg_bridge_mouse_rel_move(struct otg_bridge *b, int16_t dx, int16_t dy)
         return;
     }
     if (b->side_swipe_pending) {
-        b->side_swipe_saved_x = clamp_position(b->side_swipe_saved_x + dx, b->screen_w);
-        b->side_swipe_saved_y = clamp_position(b->side_swipe_saved_y + dy, b->screen_h);
+        const int32_t tx = clamp_position(b->side_swipe_saved_x + dx, b->screen_w);
+        const int32_t ty = clamp_position(b->side_swipe_saved_y + dy, b->screen_h);
+        update_saved_motion(b, &b->side_swipe_saved_x, &b->side_swipe_saved_y,
+                            &b->side_swipe_saved_mouse_x, &b->side_swipe_saved_mouse_y,
+                            tx, ty);
+        b->server_x = tx;
+        b->server_y = ty;
+        b->have_server_pos = true;
         return;
     }
     if (b->unlock_pending) {
-        b->unlock_saved_x = clamp_position(b->unlock_saved_x + dx, b->screen_w);
-        b->unlock_saved_y = clamp_position(b->unlock_saved_y + dy, b->screen_h);
+        const int32_t tx = clamp_position(b->unlock_saved_x + dx, b->screen_w);
+        const int32_t ty = clamp_position(b->unlock_saved_y + dy, b->screen_h);
+        update_saved_motion(b, &b->unlock_saved_x, &b->unlock_saved_y,
+                            &b->unlock_saved_mouse_x, &b->unlock_saved_mouse_y,
+                            tx, ty);
+        b->server_x = tx;
+        b->server_y = ty;
+        b->have_server_pos = true;
         return;
     }
     /* Locked-screen DMRM has no absolute target. Accumulate within the screen
      * so reversing after an overshoot responds immediately. The next DMMV
      * provides the authoritative position again. */
-    b->mouse_x = clamp_position(b->mouse_x + dx, b->screen_w);
-    b->mouse_y = clamp_position(b->mouse_y + dy, b->screen_h);
+    const int32_t old_x = b->have_server_pos ? b->server_x : b->mouse_x;
+    const int32_t old_y = b->have_server_pos ? b->server_y : b->mouse_y;
+    const int32_t tx = clamp_position(old_x + dx, b->screen_w);
+    const int32_t ty = clamp_position(old_y + dy, b->screen_h);
+    const int32_t actual_dx = tx - old_x;
+    const int32_t actual_dy = ty - old_y;
+    b->server_x = tx;
+    b->server_y = ty;
+    b->have_server_pos = true;
     if (b->mouse_mode == OTG_MOUSE_ABSOLUTE) {
+        move_phone_pointer(b, actual_dx, actual_dy);
+        b->have_mouse_pos = true;
         send_mouse_state(b, 0, 0);
     } else {
+        b->mouse_x = clamp_position(b->mouse_x + dx, b->screen_w);
+        b->mouse_y = clamp_position(b->mouse_y + dy, b->screen_h);
+        b->have_mouse_pos = true;
         send_mouse_move(b, dx, dy);
     }
 }

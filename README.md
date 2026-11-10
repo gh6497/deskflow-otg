@@ -26,7 +26,7 @@ In Deskflow, the phone appears as a normal "screen" that can be placed to the le
 ## How it works
 
 - **Deskflow side:** This program implements a minimal Deskflow *client* (secondary screen) in C. It speaks the Deskflow/Synergy/Barrier TCP binary protocol directly, including the handshake, screen information exchange, keyboard and mouse event stream, keep-alive, and CNOP replies. The protocol format is based on `src/lib/deskflow/ProtocolTypes.h` from Deskflow.
-- **scrcpy/OTG side:** Through libusb, the program sends **AOA 2.0 HID** control requests directly to the phone (`ACCESSORY_REGISTER_HID`=54 / `SET_HID_REPORT_DESC`=56 / `SEND_HID_EVENT`=57), encoding keyboard and mouse events as standard USB HID reports. USB transport, keyboard, and relative mouse code are based on scrcpy's `app/src/usb/aoa_hid.c`, `app/src/hid/hid_keyboard.c`, and `app/src/hid/hid_mouse.c`. The default pointer uses an **HID digitizer absolute coordinate** device with hover support, mapping Deskflow coordinates directly to the phone's full screen to avoid coordinate drift caused by Android mouse acceleration.
+- **scrcpy/OTG side:** Through libusb, the program sends **AOA 2.0 HID** control requests directly to the phone (`ACCESSORY_REGISTER_HID`=54 / `SET_HID_REPORT_DESC`=56 / `SEND_HID_EVENT`=57), encoding keyboard and mouse events as standard USB HID reports. USB transport, keyboard, and relative mouse code are based on scrcpy's `app/src/usb/aoa_hid.c`, `app/src/hid/hid_keyboard.c`, and `app/src/hid/hid_mouse.c`. The default pointer uses an **HID digitizer absolute coordinate** device with hover support, mapping Deskflow coordinates to the phone's full screen to avoid coordinate drift caused by Android mouse acceleration; the optional movement multiplier scales deltas independently of the bridge resolution.
 
 The complete path is: `host keyboard and mouse → deskflow → this program → AOA HID → phone`.
 
@@ -91,7 +91,7 @@ The files still use the Qt TS XML format, but have an `.xml` suffix so that IDEs
 
 1. Start `bin/deskflow-otg-gui` (`.exe` on Windows); on macOS, open `deskflow-otg-gui.app`.
 2. The device page has a per-device **ADB enhancements** switch. Leave it off for phones without USB debugging; USB discovery uses `usb-scan`, dimensions are entered manually, and HID remains fully available. When it is on, Linux/macOS may use USB ADB discovery and the device's ADB target for screen information and optional features. The ADB executable path remains global.
-3. Select the phone. With ADB enhancements enabled, the GUI reads `wm size`, prefers Override size, and swaps width and height according to the screen orientation. With ADB disabled, enter the dimensions manually. On Windows, USB/HID discovery always uses `usb-scan`; screen dimensions can be read before USB insertion by entering a wireless ADB `host:port` target in the ADB enhancements section, or by using **Wireless ADB setup** to pair and connect it. The result is treated as the "original screen size". A "sensitivity multiplier" (1–10×) can proportionally reduce the virtual size, and the effective virtual size is shown live. When "Follow screen rotation" is enabled, the ADB session used by audio or clipboard monitors orientation changes and updates the screen size dynamically without restarting the audio, clipboard, or HID session. This option is disabled by default; when disabled, disconnect and reconnect after refreshing or swapping width and height.
+3. Select the phone. With ADB enhancements enabled, the GUI reads `wm size`, prefers Override size, and swaps width and height according to the screen orientation. With ADB disabled, enter the dimensions manually. On Windows, USB/HID discovery always uses `usb-scan`; screen dimensions can be read before USB insertion by entering a wireless ADB `host:port` target in the ADB enhancements section, or by using **Wireless ADB setup** to pair and connect it. The result is treated as the "original screen size". The GUI provides independent **bridge resolution** and **movement** multipliers (1–10×): the first reduces the Deskflow/bridge coordinate size, while the second multiplies motion deltas before they reach the phone. The effective bridge size is shown live. When "Follow screen rotation" is enabled, the ADB session used by audio or clipboard monitors orientation changes and updates the screen size dynamically without restarting the audio, clipboard, or HID session. This option is disabled by default; when disabled, disconnect and reconnect after refreshing or swapping width and height.
 4. Select "Automatically configure and start local Deskflow" and choose whether the phone is to the left, right, above, or below the computer. Common installation locations are searched automatically. If none is found, select the **deskflow-core / deskflow-server executable**, not the Deskflow GUI. On macOS it is usually under `/Applications/Deskflow.app/Contents/MacOS/`.
 5. Click "Connect". The state changes to "Connected" only after USB HID initialization succeeds and Deskflow accepts the screen information.
 6. Closing the window hides it in the system tray without interrupting the connection. Click the tray icon or "Show window" to restore it; the tray menu also provides "Disconnect".
@@ -134,7 +134,7 @@ separate ADB target. No notification access is required. See [File sharing](docs
 
 The GUI manages the device list on the left and provides three tabs on the right: "Device configuration", "Screen layout", and "Shared service".
 
-1. Before connecting, click "Add device" and enter an independent USB serial number (or BLE identity address), unique screen name, dimensions, and sensitivity for each phone. The ADB discovery list identifies the currently selected device; it does not automatically add every phone to the configuration.
+1. Before connecting, click "Add device" and enter an independent USB serial number (or BLE identity address), unique screen name, dimensions, bridge resolution multiplier, and movement multiplier for each phone. The ADB discovery list identifies the currently selected device; it does not automatically add every phone to the configuration.
 2. In "Screen layout", select the neighboring screen and direction for the current device. A layout such as `computer ↔ android ↔ android-2` is supported, as are phones placed on different sides of the computer. The preview is not scaled to actual resolutions. Duplicate names, edge conflicts, overlapping screens, unknown neighbors, and layouts disconnected from the computer are rejected.
 3. Configure the Deskflow executable, computer screen name, address, and port once under "Shared service". Automatic mode starts one Deskflow server; each phone starts an independent bridge process using the same `deskflow-otg` executable, without opening a terminal. With an external service, configure all phone screens and the layout in Deskflow yourself; the GUI does not modify or stop external services.
 4. Devices can be connected or disconnected individually, or all at once. Selecting a device on the left only changes the object being viewed and does not interrupt connections. Parameters for connected devices are read-only, while dimensions and connection parameters for disconnected devices remain editable.
@@ -475,7 +475,7 @@ When an input device is shown but there is no cursor, inspect `BLE waiting:` in 
 
 Move the mouse across the edge of the host screen toward the "phone" screen; the keyboard and mouse are then injected into the phone. Move the mouse back across the host edge to return to the computer.
 
-The default is `--mouse-mode absolute`: movement hovers, holding the left button produces continuous button-down reports for dragging, and leaving the phone screen releases buttons. For natural movement, set `--width/--height` to the phone's current-orientation resolution. Absolute mode maps the complete virtual screen to the phone display, so a dimension mismatch does not accumulate relative-movement error.
+The default is `--mouse-mode absolute`: movement hovers, holding the left button produces continuous button-down reports for dragging, and leaving the phone screen releases buttons. Set `--width/--height` to the desired Deskflow/bridge resolution and use `--sensitivity` for the movement multiplier. Absolute mode maps the complete bridge screen to the phone display, so a dimension mismatch does not accumulate relative-movement error.
 
 > **To exit:** When the mouse is on the "phone" screen, keyboard input, including Ctrl+C, is forwarded to the phone instead of the terminal. Move the mouse back to the computer first, then press Ctrl+C; alternatively unplug the phone. The program detects USB removal, exits automatically, and returns the mouse to the computer.
 
@@ -495,9 +495,10 @@ The default is `--mouse-mode absolute`: movement hovers, holding the left button
       --ble-session     Run a bridge session through the persistent service (absolute only)
       --ble-status      Query service JSON status without acquiring a session
       --ble-stop-service Stop an idle service; subscription continuity is lost
-      --width W         Virtual screen width, 1..32767 (default: 1080)
-      --height H        Virtual screen height, 1..32767 (default: 1920)
+      --width W         Deskflow/bridge screen width, 1..32767 (default: 1080)
+      --height H        Deskflow/bridge screen height, 1..32767 (default: 1920)
       --mouse-mode MODE absolute (default) or relative (compatibility mode)
+      --sensitivity X   Absolute-mode motion multiplier, 1..10 (default: 1)
       --gui              GUI subprocess mode: JSON status on stdout; stdin byte/EOF requests exit
       --usb-scan         Output a USB device JSON snapshot; no ADB or HID registration
       --usb-watch        Output USB hotplug JSON events; stdin byte/EOF stops; exit code 3 if unsupported
@@ -507,19 +508,19 @@ The default is `--mouse-mode absolute`: movement hovers, holding the left button
 
 ### Low mouse sensitivity and tiring vertical movement
 
-**GUI:** After confirming the "original screen size", set the "sensitivity multiplier" to `1.5×` or `2×`. The virtual width and height are calculated as **original dimensions ÷ multiplier**, rounded to the nearest integer with a minimum of 1. The calculation always starts from the original dimensions, so repeated adjustments do not compound scaling; `1×` restores the original size. Changing the original dimensions manually, swapping width and height, or detecting dimensions again through ADB reapplies the current multiplier. Original dimensions and the multiplier are saved separately, and the new setting takes effect after reconnecting.
-The multiplier applies only to absolute coordinates. Relative mode uses the original dimensions and retains the multiplier for a later switch back to absolute mode.
+**GUI:** After confirming the "original screen size", configure the two independent multipliers. The bridge resolution multiplier makes the width and height sent to Deskflow **original dimensions ÷ resolution multiplier**, rounded to the nearest integer. The movement multiplier then multiplies each received Deskflow motion delta before updating the phone pointer. Fractional results are retained between reports, so a `1.5×` movement setting does not round every one-pixel move in the same direction. Both settings are saved per device and take effect after reconnecting.
+Both multipliers apply only to absolute coordinates. Relative mode uses the original dimensions and disables both multipliers while retaining their values for a later switch back to absolute mode.
 
-If the pointer can reach the full screen but moving from top to bottom requires a large wrist movement, this may not be stutter or latency; the virtual screen may simply be large and therefore have low sensitivity. Absolute mode maps virtual coordinates to the complete phone screen, so `--width/--height` do not have to match the phone's real resolution: **proportionally reducing the virtual dimensions increases movement sensitivity while still covering the full phone screen**.
+If the pointer can reach the full screen but moving from top to bottom requires a large wrist movement, this may not be stutter or latency; either multiplier may need adjustment. Absolute mode maps the bridge coordinates to the complete phone screen. The resolution multiplier changes the coordinate grid, while the movement multiplier changes motion distance: **with a `2×` movement setting, `1` Deskflow pixel can move the phone pointer by approximately `2` pixels**. The pointer can reach a phone edge before the Deskflow cursor reaches the corresponding edge; moving back reverses immediately.
 
-For example, with a phone resolution of `1080 × 2340`, first try `720 × 1560`, which gives approximately 1.5× the original movement sensitivity. If it is still tiring, try `540 × 1170`, approximately 2×:
+For example, with a phone resolution of `1080 × 2340`, use a half-size bridge and a `2×` movement multiplier:
 
 ```bash
 sudo ./build/deskflow-otg --host 127.0.0.1 --port 24800 --name android \
-    --width 720 --height 1560 -s <phone USB serial>
+    --width 540 --height 1170 --sensitivity 2 -s <phone USB serial>
 ```
 
-Adjust width and height proportionally to avoid an imbalance between horizontal and vertical movement. Before changing parameters, move the mouse back to the computer, press Ctrl+C to stop the old process, and start it again. This adjustment targets the default absolute mode and does not require switching to the relative mode affected by Android mouse acceleration.
+Use `--width/--height` for the bridge resolution multiplier and `--sensitivity` for movement scaling; they are independent and can be used together. Before changing parameters, move the mouse back to the computer, press Ctrl+C to stop the old process, and start it again. This adjustment targets the default absolute mode and does not require switching to the relative mode affected by Android mouse acceleration.
 
 ### The mouse reaches an invisible boundary too early
 

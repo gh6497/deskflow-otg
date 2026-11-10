@@ -289,6 +289,35 @@ static void check_pointer_position(int32_t x, int32_t y, int32_t w, int32_t h)
     CHECK(hy == (h > 1 ? y * 32767 / (h - 1) : 0));
 }
 
+static void test_sensitivity(void)
+{
+    struct otg_bridge b;
+    registrations = 0;
+    CHECK(!otg_bridge_open(&b, "mock", 1080, 2340, OTG_MOUSE_ABSOLUTE));
+    CHECK(otg_bridge_set_sensitivity(&b, 2.0));
+    CHECK(!otg_bridge_set_sensitivity(&b, 0.0));
+    CHECK(!otg_bridge_set_sensitivity(&b, 10.01));
+    otg_bridge_enter(&b, 100, 200, 0);
+    otg_bridge_mouse_move(&b, 101, 201);
+    CHECK(b.server_x == 101 && b.server_y == 201 && b.mouse_x == 102 && b.mouse_y == 202);
+    check_pointer_position(102, 202, 1080, 2340);
+    otg_bridge_mouse_move(&b, 102, 201);
+    CHECK(b.mouse_x == 104 && b.mouse_y == 202);
+    otg_bridge_mouse_rel_move(&b, 1, 0);
+    CHECK(b.server_x == 103 && b.mouse_x == 106);
+    otg_bridge_close(&b);
+
+    registrations = 0;
+    CHECK(!otg_bridge_open(&b, "mock", 1080, 2340, OTG_MOUSE_ABSOLUTE));
+    CHECK(otg_bridge_set_sensitivity(&b, 1.5));
+    otg_bridge_enter(&b, 100, 200, 0);
+    otg_bridge_mouse_rel_move(&b, 1, 0);
+    otg_bridge_mouse_rel_move(&b, 1, 0);
+    otg_bridge_mouse_rel_move(&b, 1, 0);
+    CHECK(b.server_x == 103 && b.mouse_x == 104); /* 1.5 + 1.5 + 1.5, retained as residual. */
+    otg_bridge_close(&b);
+}
+
 static void test_unlock_cursor_tracking(void)
 {
     struct otg_bridge b;
@@ -423,6 +452,7 @@ int main(void)
     test_unlock_cursor_tracking();
     test_unlock_cursor_resize();
     test_side_button_swipes();
+    test_sensitivity();
     puts("PASS: default USB descriptors, absolute coordinates, buttons, wheel, keyboard, Home/Back shortcuts, side-button swipes, unlock mouse suppression/cursor tracking/resize and close lifecycle");
     return 0;
 }

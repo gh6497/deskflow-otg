@@ -241,6 +241,8 @@ void Session::start(const ConnectionOptions &options)
         options.host.trimmed().isEmpty() || options.host.contains(QRegularExpression("[\\x00-\\x20\\x7f]")) ||
         options.host.toUtf8().size() > 1024 || options.phone.toUtf8().size() > 255 ||
         options.port < 1 || options.port > 65535 ||
+        options.motionMultiplier < 1.0 || options.motionMultiplier > 10.0 ||
+        (options.mouseMode == "relative" && options.motionMultiplier != 1.0) ||
         options.width < 1 || options.width > 32767 || options.height < 1 || options.height > 32767) {
         fail("otg.error.invalid_options");
         return;
@@ -439,7 +441,8 @@ void Session::launchBridge()
     QStringList args = {"--gui", "--host", m_options.manageServer ? "127.0.0.1" : m_options.host,
                     "--port", QString::number(m_options.port), "--name", m_options.phone,
                      "--width", QString::number(m_options.width),
-                     "--height", QString::number(m_options.height), "--mouse-mode", m_options.mouseMode,
+                      "--height", QString::number(m_options.height), "--mouse-mode", m_options.mouseMode,
+                      "--sensitivity", QString::number(m_options.motionMultiplier, 'f', 2),
                      "--middle-button-action", m_options.middleButtonAction,
                       "--right-button-action", m_options.rightButtonAction,
                       "--side-button-1-action", m_options.sideButton1Action,
@@ -485,12 +488,13 @@ void Session::launchBridge()
         m_bleProvider.setProcessEnvironment(environment);
         m_bleActive = true;
         if (hasBleProvider()) {
-            const auto resume = QString("resume\t%1\t%2\t%3\t%4\t%5\t%6\t%7\t%8\t%9\n")
+            const auto resume = QString("resume\t%1\t%2\t%3\t%4\t%5\t%6\t%7\t%8\t%9\t%10\t%11\n")
                 .arg(m_options.manageServer ? "127.0.0.1" : m_options.host)
                 .arg(m_options.port).arg(m_options.phone).arg(m_options.width).arg(m_options.height)
                 .arg(m_options.middleButtonAction).arg(m_options.rightButtonAction)
                 .arg(m_options.sideButton1Action).arg(m_options.sideButton2Action)
-                .arg(m_options.sideSwipeDistancePercent).toUtf8();
+                .arg(m_options.sideSwipeDistancePercent)
+                .arg(qRound(m_options.motionMultiplier * 100.0)).toUtf8();
             m_bleProvider.write(resume);
             emit log(qtTrId("otg.ble.provider_reused"));
         } else {

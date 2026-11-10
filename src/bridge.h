@@ -79,11 +79,14 @@ struct otg_bridge {
     int32_t side_swipe_start_y;
     int32_t side_swipe_target_y;
     int32_t side_swipe_saved_x, side_swipe_saved_y;
+    int32_t side_swipe_saved_mouse_x, side_swipe_saved_mouse_y;
     unsigned side_swipe_step;
     uint64_t side_swipe_due_ms;
     uint8_t mouse_buttons;    /* HID button byte */
-    int32_t mouse_x, mouse_y; /* last absolute cursor position */
+    int32_t mouse_x, mouse_y; /* current phone pointer position */
+    int32_t server_x, server_y; /* latest Deskflow absolute cursor position */
     bool have_mouse_pos;
+    bool have_server_pos;
     /*
      * True between "enter" and "leave", i.e. while the phone is the screen
      * the server is sending mouse events for.  Motion received outside that
@@ -107,13 +110,17 @@ struct otg_bridge {
     unsigned unlock_phase;
     unsigned unlock_swipe_step;
     int32_t unlock_saved_x, unlock_saved_y; /* Latest server position, not swipe position. */
+    int32_t unlock_saved_mouse_x, unlock_saved_mouse_y;
+    double sensitivity_multiplier;
+    double motion_residual_x, motion_residual_y;
 };
 
 /*
  * Open the Android device over USB and register the HID keyboard + mouse.
  *
  * `screen_w`/`screen_h` must be in 1..32767 (Deskflow signed coordinates).
- * Absolute mode scales these coordinates to the full Android display.
+ * Absolute mode scales these coordinates to the full Android display; its
+ * optional sensitivity multiplier scales motion deltas before clamping.
  * Relative compatibility mode additionally assumes matching display bounds
  * and unaccelerated 1:1 motion, which Android does not normally guarantee.
  * Returns 0 on success, non-zero on failure.
@@ -153,6 +160,8 @@ void otg_bridge_set_side_button_action(struct otg_bridge *b, uint8_t button,
                                        enum otg_side_button_action action);
 /* Configure the synthetic swipe distance as a percentage of screen height. */
 void otg_bridge_set_side_swipe_distance(struct otg_bridge *b, uint8_t percent);
+/* Configure absolute-mode motion scaling. Must be set while the bridge is idle. */
+bool otg_bridge_set_sensitivity(struct otg_bridge *b, double multiplier);
 void otg_bridge_mouse_move(struct otg_bridge *b, int16_t x, int16_t y);
 void otg_bridge_mouse_rel_move(struct otg_bridge *b, int16_t dx, int16_t dy);
 void otg_bridge_mouse_wheel(struct otg_bridge *b, int16_t x, int16_t y);

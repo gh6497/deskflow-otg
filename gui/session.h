@@ -46,6 +46,7 @@ struct ConnectionOptions {
     int port = 24800;
     int width = 1080;
     int height = 1920;
+    double motionMultiplier = 1.0;
     bool manageServer = true;
     bool tls = false;
     bool audio = false;

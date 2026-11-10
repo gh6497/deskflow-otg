@@ -95,6 +95,7 @@ struct app_options {
     const char *unlock_pin;
     const char *unlock_pin_file;
     int unlock_adb_gate;
+    double sensitivity_multiplier;
 };
 
 static volatile sig_atomic_t g_stop = 0;
@@ -284,9 +285,10 @@ static void usage(const char *prog)
               "      --background-stop  Stop the Windows BLE background process\n"
               "      --ble-status      Read resident service JSON status without attaching\n"
              "      --ble-stop-service Stop an idle user service (loses GATT subscription continuity)\n"
-             "      --width W         Virtual screen width, 1..32767 (default %d)\n"
-             "      --height H        Virtual screen height, 1..32767 (default %d)\n"
+             "      --width W         Deskflow/bridge screen width, 1..32767 (default %d)\n"
+             "      --height H        Deskflow/bridge screen height, 1..32767 (default %d)\n"
              "      --mouse-mode MODE absolute (default) or relative (compatibility)\n"
+             "      --sensitivity X   Absolute-mode motion multiplier, 1..10 (default 1)\n"
                "      --middle-button-action MODE home (default) or normal (Android Meta+Enter)\n"
                "      --right-button-action MODE back (default) or normal (Android Meta+Backspace)\n"
                "      --side-button-1-action MODE swipe-up (default), swipe-down or normal\n"
@@ -328,6 +330,24 @@ static int parse_screen_size(const char *arg)
     }
     return (int)size;
 }
+
+static double parse_sensitivity(const char *arg)
+{
+    char *end;
+    errno = 0;
+    const double value = strtod(arg, &end);
+    if (errno || end == arg || *end || !(value >= 1.0) || value > 10.0) {
+        return 0.0;
+    }
+    return value;
+}
+
+#ifdef OTG_HAVE_BLE_WIN
+static unsigned sensitivity_centi(double value)
+{
+    return (unsigned)(value * 100.0 + 0.5);
+}
+#endif
 
 /* ---- deskflow callbacks -> bridge --------------------------------------- */
 
@@ -709,6 +729,7 @@ int main(int argc, char **argv)
         .side_button_1_action = OTG_SIDE_BUTTON_SWIPE_UP,
         .side_button_2_action = OTG_SIDE_BUTTON_SWIPE_DOWN,
         .side_swipe_distance_percent = 17,
+        .sensitivity_multiplier = 1.0,
         .adb_path = "adb",
     };
     char unlock_pin_file_data[64] = {0};
@@ -792,6 +813,8 @@ int main(int argc, char **argv)
                 fprintf(stderr, "invalid mouse mode: %s (use absolute or relative)\n", mode);
                 return 2;
             }
+        } else if (strcmp(a, "--sensitivity") == 0 && i + 1 < argc) {
+            opts.sensitivity_multiplier = parse_sensitivity(argv[++i]);
         } else if (strcmp(a, "--right-button-action") == 0 && i + 1 < argc) {
             const char *action = argv[++i];
             if (strcmp(action, "normal") == 0) {
@@ -868,6 +891,14 @@ int main(int argc, char **argv)
 
     if (!opts.width || !opts.height) {
         fprintf(stderr, "screen width and height must be integers in 1..32767\n");
+        return 2;
+    }
+    if (!opts.sensitivity_multiplier) {
+        fprintf(stderr, "sensitivity must be a number in 1..10\n");
+        return 2;
+    }
+    if (opts.mouse_mode == OTG_MOUSE_RELATIVE && opts.sensitivity_multiplier != 1.0) {
+        fprintf(stderr, "sensitivity is supported only in absolute mouse mode\n");
         return 2;
     }
     opts.unlock_pin = getenv("OTG_UNLOCK_PIN");
@@ -1018,6 +1049,7 @@ int main(int argc, char **argv)
     if (g_ble_control) {
         strcpy(g_control.host, opts.host); strcpy(g_control.name, opts.name);
         g_control.port = opts.port; g_control.width = (unsigned)opts.width; g_control.height = (unsigned)opts.height;
+        g_control.sensitivity_centi = sensitivity_centi(opts.sensitivity_multiplier);
         g_control.middle_button_home = opts.middle_button_action == OTG_MIDDLE_BUTTON_HOME;
         g_control.right_button_back = opts.right_button_action == OTG_RIGHT_BUTTON_BACK;
         g_control.side_button_1_action = opts.side_button_1_action;
@@ -1146,6 +1178,12 @@ int main(int argc, char **argv)
         fprintf(stderr, "invalid transport: %s (use usb or ble)\n", opts.transport);
         return 2;
     }
+    if (!otg_bridge_set_sensitivity(&state.bridge, opts.sensitivity_multiplier)) {
+        fprintf(stderr, "ERROR: invalid mouse sensitivity\n");
+        otg_bridge_close(&state.bridge);
+        destroy_transport_owner(&state);
+        return 2;
+    }
     if (!otg_bridge_set_unlock_pin(&state.bridge, opts.unlock_pin)) {
         fprintf(stderr, "ERROR: invalid OTG_UNLOCK_PIN\n");
         otg_bridge_close(&state.bridge);
@@ -1205,7 +1243,9 @@ int main(int argc, char **argv)
             if (!windows_ble_control_wait(&state)) break;
             opts.host = g_control.host; opts.name = g_control.name; opts.port = g_control.port;
             opts.width = (int)g_control.width; opts.height = (int)g_control.height;
+            opts.sensitivity_multiplier = (double)g_control.sensitivity_centi / 100.0;
             state.bridge.screen_w = opts.width; state.bridge.screen_h = opts.height;
+            (void)otg_bridge_set_sensitivity(&state.bridge, opts.sensitivity_multiplier);
             otg_bridge_set_middle_button_action(&state.bridge,
                 g_control.middle_button_home ? OTG_MIDDLE_BUTTON_HOME : OTG_MIDDLE_BUTTON_NORMAL);
             otg_bridge_set_right_button_action(&state.bridge,
