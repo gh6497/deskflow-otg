@@ -202,12 +202,14 @@ private slots:
         auto *width = window.findChild<QSpinBox *>("screenWidth");
         auto *height = window.findChild<QSpinBox *>("screenHeight");
         auto *sensitivity = window.findChild<QDoubleSpinBox *>("sensitivityMultiplier");
+        auto *motion = window.findChild<QDoubleSpinBox *>("motionMultiplier");
         auto *port = window.findChild<QSpinBox *>("serverPort");
-        QVERIFY(width && height && sensitivity && port);
+        QVERIFY(width && height && sensitivity && motion && port);
 
         width->setValue(1080);
         height->setValue(2340);
         sensitivity->setValue(2.0);
+        motion->setValue(2.5);
         port->setValue(24800);
 
         const auto sendWheel = [](QWidget *widget) {
@@ -220,11 +222,13 @@ private slots:
         sendWheel(width);
         sendWheel(height);
         sendWheel(sensitivity);
+        sendWheel(motion);
         sendWheel(port);
 
         QCOMPARE(width->value(), 1080);
         QCOMPARE(height->value(), 2340);
         QCOMPARE(sensitivity->value(), 2.0);
+        QCOMPARE(motion->value(), 2.5);
         QCOMPARE(port->value(), 24800);
     }
 
@@ -629,11 +633,13 @@ private slots:
             auto *width = window.findChild<QSpinBox *>("screenWidth");
             auto *height = window.findChild<QSpinBox *>("screenHeight");
             auto *sensitivity = window.findChild<QDoubleSpinBox *>("sensitivityMultiplier");
-            QVERIFY(manager && list && width && height && sensitivity);
+            auto *motion = window.findChild<QDoubleSpinBox *>("motionMultiplier");
+            QVERIFY(manager && list && width && height && sensitivity && motion);
             width->setValue(1080); height->setValue(1920); sensitivity->setValue(2.0);
+            motion->setValue(2.0);
             window.findChild<QPushButton *>("addDeviceButton")->click();
             const auto second = list->currentItem()->data(Qt::UserRole).toString();
-            width->setValue(720); height->setValue(1600); sensitivity->setValue(1.5);
+            width->setValue(720); height->setValue(1600); sensitivity->setValue(1.5); motion->setValue(2.5);
             manager->session("initial")->displaySizeChanged(QSize(1920, 1080));
             QCOMPARE(width->value(), 720); QCOMPARE(height->value(), 1600);
             for (int i = 0; i < list->count(); ++i)
@@ -649,11 +655,13 @@ private slots:
         QCOMPARE(restored.findChild<QSpinBox *>("screenWidth")->value(), 1920);
         QCOMPARE(restored.findChild<QSpinBox *>("screenHeight")->value(), 1080);
         QCOMPARE(restored.findChild<QDoubleSpinBox *>("sensitivityMultiplier")->value(), 2.0);
+        QCOMPARE(restored.findChild<QDoubleSpinBox *>("motionMultiplier")->value(), 2.0);
         auto *list = restored.findChild<QListWidget *>("deviceSidebar");
         list->setCurrentRow(1);
         QCOMPARE(restored.findChild<QSpinBox *>("screenWidth")->value(), 1600);
         QCOMPARE(restored.findChild<QSpinBox *>("screenHeight")->value(), 720);
         QCOMPARE(restored.findChild<QDoubleSpinBox *>("sensitivityMultiplier")->value(), 1.5);
+        QCOMPARE(restored.findChild<QDoubleSpinBox *>("motionMultiplier")->value(), 2.5);
         restored.findChild<QAction *>("trayQuit")->trigger();
     }
     void deviceFeatureProfiles_data()
@@ -1399,17 +1407,21 @@ private slots:
         language->setCurrentIndex(language->findData("zh_CN"));
         QCOMPARE(connectButton->text(), "连接");
         auto *multiplier = window.findChild<QDoubleSpinBox *>("sensitivityMultiplier");
+        auto *motion = window.findChild<QDoubleSpinBox *>("motionMultiplier");
         auto *virtualSize = window.findChild<QLabel *>("virtualScreenSize");
         auto *swap = window.findChild<QPushButton *>("swapDimensions");
         auto *mode = window.findChild<QComboBox *>("mouseMode");
-        QVERIFY(multiplier && virtualSize && swap && mode);
+        QVERIFY(multiplier && motion && virtualSize && swap && mode);
         width->setValue(1080);
         height->setValue(2340);
         multiplier->setValue(1.5);
+        motion->setValue(2.0);
         QVERIFY(virtualSize->text().startsWith("720 × 1560"));
         multiplier->setValue(2.0);
         QVERIFY(virtualSize->text().startsWith("540 × 1170"));
         multiplier->setValue(1.5);
+        QVERIFY(virtualSize->text().startsWith("720 × 1560"));
+        motion->setValue(3.0);
         QVERIFY(virtualSize->text().startsWith("720 × 1560"));
         QCOMPARE(width->value(), 1080);
         QCOMPARE(height->value(), 2340);
@@ -1418,9 +1430,11 @@ private slots:
         swap->click();
         mode->setCurrentIndex(mode->findData("relative"));
         QVERIFY(!multiplier->isEnabled());
+        QVERIFY(!motion->isEnabled());
         QVERIFY(virtualSize->text().startsWith("1080 × 2340"));
         mode->setCurrentIndex(mode->findData("absolute"));
         QVERIFY(multiplier->isEnabled());
+        QVERIFY(motion->isEnabled());
         QVERIFY(virtualSize->text().startsWith("720 × 1560"));
         width->setValue(1);
         height->setValue(3);
@@ -1431,6 +1445,7 @@ private slots:
         multiplier->setValue(1.0);
         QVERIFY(virtualSize->text().startsWith("1080 × 2340"));
         multiplier->setValue(1.5);
+        motion->setValue(1.5);
         const QString capture = qEnvironmentVariable("OTG_TEST_SCREENSHOT");
         if (!capture.isEmpty())
             QVERIFY(window.grab().save(capture));
@@ -1438,12 +1453,14 @@ private slots:
         QCOMPARE(settings.value("originalWidth").toInt(), 1080);
         QCOMPARE(settings.value("originalHeight").toInt(), 2340);
         QCOMPARE(settings.value("sensitivityMultiplier").toDouble(), 1.5);
+        QCOMPARE(settings.value("motionMultiplier").toDouble(), 1.5);
         QCOMPARE(settings.value("width").toInt(), 720);
         QCOMPARE(settings.value("height").toInt(), 1560);
         AutoConnectTestWindow restored;
         restored.available = false;
         QCOMPARE(restored.findChild<QSpinBox *>("screenWidth")->value(), 1080);
         QCOMPARE(restored.findChild<QDoubleSpinBox *>("sensitivityMultiplier")->value(), 1.5);
+        QCOMPARE(restored.findChild<QDoubleSpinBox *>("motionMultiplier")->value(), 1.5);
         QVERIFY(restored.findChild<QLabel *>("virtualScreenSize")->text().startsWith("720 × 1560"));
         // ADB refresh replaces the baseline, retaining the chosen multiplier.
         QTRY_COMPARE(restored.findChild<QSpinBox *>("screenWidth")->value(), 1600);

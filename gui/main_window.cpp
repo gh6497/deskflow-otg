@@ -512,6 +512,15 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     setTranslatedProperty(m_sensitivity, "toolTip", "otg.sensitivity.tooltip");
     addTranslatedRow(displayForm, "otg.label.sensitivity", m_sensitivity);
 
+    m_motionMultiplier = new NoWheelWidget<QDoubleSpinBox>;
+    m_motionMultiplier->setObjectName("motionMultiplier");
+    m_motionMultiplier->setRange(1.0, 10.0);
+    m_motionMultiplier->setDecimals(2);
+    m_motionMultiplier->setSingleStep(0.25);
+    m_motionMultiplier->setSuffix(" ×");
+    setTranslatedProperty(m_motionMultiplier, "toolTip", "otg.motion_multiplier.tooltip");
+    addTranslatedRow(displayForm, "otg.label.motion_multiplier", m_motionMultiplier);
+
     m_virtualSize = new QLabel;
     m_virtualSize->setObjectName("virtualScreenSize");
     m_virtualSize->setWordWrap(true);
@@ -793,6 +802,7 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     m_width->setValue(settings.value("originalWidth", settings.value("width", 1080)).toInt());
     m_height->setValue(settings.value("originalHeight", settings.value("height", 1920)).toInt());
     m_sensitivity->setValue(settings.value("sensitivityMultiplier", 1.0).toDouble());
+    m_motionMultiplier->setValue(settings.value("motionMultiplier", 1.0).toDouble());
     m_computer->setText(settings.value("computer", "computer").toString());
     m_phone->setText(settings.value("phone", "android").toString());
     m_host->setText(settings.value("host", "127.0.0.1").toString());
@@ -895,6 +905,7 @@ MainWindow::MainWindow() : m_connections(this), m_autoConnect(this), m_companion
     connect(m_width, &QSpinBox::valueChanged, this, &MainWindow::updateVirtualSize);
     connect(m_height, &QSpinBox::valueChanged, this, &MainWindow::updateVirtualSize);
     connect(m_sensitivity, &QDoubleSpinBox::valueChanged, this, &MainWindow::updateVirtualSize);
+    connect(m_motionMultiplier, &QDoubleSpinBox::valueChanged, this, &MainWindow::updateVirtualSize);
     connect(m_mouseMode, &QComboBox::currentIndexChanged, this, &MainWindow::updateVirtualSize);
     updateVirtualSize();
     connect(m_manage, &QCheckBox::toggled, this, &MainWindow::updateEnabled);
@@ -1275,9 +1286,15 @@ ConnectionOptions MainWindow::connectionOptions(const QVariantMap &profile) cons
 #else
     options.adapter.clear();
 #endif
-    const double multiplier = options.mouseMode == "absolute" ? profile.value("sensitivityMultiplier", 1.0).toDouble() : 1.0;
-    options.width = qMax(1, qRound(profile.value("originalWidth", 1080).toInt() / qMax(1.0, multiplier)));
-    options.height = qMax(1, qRound(profile.value("originalHeight", 1920).toInt() / qMax(1.0, multiplier)));
+    const bool absolute = options.mouseMode == "absolute";
+    const double resolutionMultiplier = absolute ?
+        qMin(10.0, qMax(1.0, profile.value("sensitivityMultiplier", 1.0).toDouble())) : 1.0;
+    options.motionMultiplier = absolute ?
+        qMin(10.0, qMax(1.0, profile.value("motionMultiplier", 1.0).toDouble())) : 1.0;
+    const int originalWidth = qBound(1, profile.value("originalWidth", 1080).toInt(), 32767);
+    const int originalHeight = qBound(1, profile.value("originalHeight", 1920).toInt(), 32767);
+    options.width = qMax(1, qRound(originalWidth / resolutionMultiplier));
+    options.height = qMax(1, qRound(originalHeight / resolutionMultiplier));
     return options;
 }
 
@@ -1504,6 +1521,7 @@ void MainWindow::updateVirtualSize()
 {
     const bool absolute = m_mouseMode->currentData() == "absolute";
     m_sensitivity->setEnabled(absolute);
+    m_motionMultiplier->setEnabled(absolute);
     const auto size = virtualScreenSize();
     m_virtualSize->setText(QString("%1 × %2%3").arg(size.width()).arg(size.height()).arg(
         absolute ? qtTrId("otg.size.absolute_note") : qtTrId("otg.size.relative_note")));
@@ -1872,6 +1890,7 @@ QVariantMap MainWindow::deviceProfile() const
             {"autoConnect", m_autoConnectEnabled->isChecked()}, {"neighbor", m_neighbor->currentData()},
             {"originalWidth", m_width->value()}, {"originalHeight", m_height->value()},
             {"sensitivityMultiplier", m_sensitivity->value()},
+            {"motionMultiplier", m_motionMultiplier->value()},
             {"deskflow", m_deskflow->text()}, {"computer", m_computer->text()},
              {"phone", m_phone->text()}, {"host", m_host->text()}, {"port", m_port->value()},
               {"manageServer", m_manage->isChecked()}, {"tls", m_tls->isChecked()},
@@ -1901,6 +1920,7 @@ void MainWindow::applyDeviceProfile(const QVariantMap &profile)
     m_width->setValue(profile.value("originalWidth", 1080).toInt());
     m_height->setValue(profile.value("originalHeight", 1920).toInt());
     m_sensitivity->setValue(profile.value("sensitivityMultiplier", 1.0).toDouble());
+    m_motionMultiplier->setValue(profile.value("motionMultiplier", 1.0).toDouble());
     m_phone->setText(profile.value("phone", "android").toString());
     m_alias->setText(profile.value("alias", m_phone->text()).toString());
     m_tls->setChecked(profile.value("tls", false).toBool());
@@ -1980,6 +2000,7 @@ void MainWindow::saveSettings()
     settings.setValue("originalWidth", m_width->value());
     settings.setValue("originalHeight", m_height->value());
     settings.setValue("sensitivityMultiplier", m_sensitivity->value());
+    settings.setValue("motionMultiplier", m_motionMultiplier->value());
     const auto size = virtualScreenSize();
     settings.setValue("width", size.width());
     settings.setValue("height", size.height());

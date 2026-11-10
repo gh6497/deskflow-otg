@@ -23,6 +23,7 @@ int main(void)
     assert(!strcmp(c.host, "127.0.0.2") && !strcmp(c.name, "phone-2"));
     assert(c.middle_button_home);
     assert(!c.right_button_back); /* Legacy resume defaults to a normal right button. */
+    assert(c.sensitivity_centi == 100);
     c.phase = OTG_BLE_IDLE;
     assert(feed(&c, "resume\tlocalhost\t24800\tandroid\t1080\t1920\thome\tback\n"));
     assert(c.middle_button_home && c.right_button_back);
@@ -38,6 +39,9 @@ int main(void)
     c.phase = OTG_BLE_IDLE;
     assert(feed(&c, "resume\tlocalhost\t24800\tandroid\t1080\t1920\thome\tback\tswipe-up\tswipe-down\t25\n"));
     assert(c.side_swipe_distance_percent == 25);
+    c.phase = OTG_BLE_IDLE;
+    assert(feed(&c, "resume\tlocalhost\t24800\tandroid\t1080\t1920\thome\tback\tswipe-up\tswipe-down\t25\t250\n"));
+    assert(c.sensitivity_centi == 250);
     c.phase = OTG_BLE_IDLE;
     assert(feed(&c, resume));
     assert(c.middle_button_home && !c.right_button_back); /* Legacy resume also clears an old Back setting. */
