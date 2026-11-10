@@ -10,6 +10,7 @@ namespace otg_ble_win_detail {
 // Fallback for Windows 10 and adapters which do not expose negotiated
 // connection parameters. Windows 11 uses the live interval when available.
 inline constexpr unsigned notification_interval_ms = 30;
+inline constexpr unsigned pointer_notification_interval_ms = 15;
 struct Report {
     uint16_t id = 0;
     std::array<uint8_t, 8> bytes{};

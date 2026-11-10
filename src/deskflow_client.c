@@ -209,6 +209,14 @@ static void socket_enable_low_latency(df_socket fd)
                      (const char *)&enabled, sizeof(enabled));
 }
 
+static int client_tick_interval_ms(const df_client *c)
+{
+    int interval = c->cbs.tick_interval_ms;
+    if (c->cbs.on_tick_interval_ms)
+        interval = c->cbs.on_tick_interval_ms(c->ud, interval);
+    return interval > 0 ? interval : 500;
+}
+
 #ifdef _WIN32
 #define DF_POLL_READ  POLLRDNORM
 #define DF_POLL_WRITE POLLWRNORM
@@ -932,7 +940,7 @@ df_client *df_client_connect_ex(const char *host, uint16_t port, const char *nam
     /* Packet helpers use the active client to select TLS or plain socket I/O.
      * Keep it active through the initial hello and optional clipboard setup. */
     io_client = c;
-    io_wait_interval_ms = c->cbs.tick_interval_ms > 0 ? c->cbs.tick_interval_ms : 500;
+    io_wait_interval_ms = client_tick_interval_ms(c);
 
     /* 1. server -> hello packet: "%7s%2i%2i" (protocol name + major + minor). */
     uint8_t *hello = NULL;
@@ -1245,8 +1253,7 @@ int df_client_run(df_client *c, volatile sig_atomic_t *stop)
     int result = 0;
     /* A partial TCP packet must not stall an asynchronous transport's pending
      * replies/reports for the legacy 500ms cancellation interval. */
-    io_wait_interval_ms = c->cbs.tick_interval_ms > 0
-                             ? c->cbs.tick_interval_ms : 500;
+    io_wait_interval_ms = client_tick_interval_ms(c);
     io_client = c;
 
     for (;;) {
@@ -1259,8 +1266,8 @@ int df_client_run(df_client *c, volatile sig_atomic_t *stop)
         if (c->cbs.on_tick && c->cbs.on_tick(c->ud)) {
             break;
         }
-        int timeout_ms = c->cbs.tick_interval_ms > 0
-                             ? c->cbs.tick_interval_ms : 500;
+        io_wait_interval_ms = client_tick_interval_ms(c);
+        int timeout_ms = io_wait_interval_ms;
         int pr = df_socket_wait_timeout(fd, timeout_ms);
         if (pr < 0) {
             if (df_socket_interrupted()) {

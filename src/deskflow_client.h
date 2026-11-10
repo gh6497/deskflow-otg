@@ -44,6 +44,9 @@ typedef struct df_client_callbacks {
      * including during continuous traffic. Zero interval keeps the 500ms
      * default. Also bounds partial-read waits between cancellation checks. */
     int (*on_tick)(void *ud);
+    /* Optional dynamic override for the periodic callback interval. The
+     * configured interval is passed in; non-positive results use 500ms. */
+    int (*on_tick_interval_ms)(void *ud, int configured_ms);
     int tick_interval_ms;
     /* UTF-8 primary clipboard only. Called on the Deskflow loop thread. */
     void (*on_clipboard)(void *ud, const char *text, size_t size);

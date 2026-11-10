@@ -41,6 +41,7 @@ struct State {
     bool suspended = false;
     uint64_t peer_address = 0, epoch = 0;
     unsigned notification_interval_ms = otg_ble_win_detail::notification_interval_ms;
+    unsigned pointer_interval_ms = otg_ble_win_detail::pointer_notification_interval_ms;
     uint8_t protocol_mode = 1; // Report Protocol; Boot Protocol is not implemented.
     std::string waiting;
     otg_ble_win_detail::Queue queue;
@@ -466,6 +467,8 @@ public:
                                 std::lock_guard<std::mutex> lock(state->mutex);
                                 state->notification_interval_ms =
                                     otg_ble_win_detail::notification_interval_ms;
+                                state->pointer_interval_ms =
+                                    otg_ble_win_detail::pointer_notification_interval_ms;
                             }
                             log("INFO", "device ConnectionStatus=disconnected; observed sessions keyboard=" +
                                 session_text(key_session) + " pointer=" + session_text(mouse_session));
@@ -484,6 +487,7 @@ public:
                                 {
                                     std::lock_guard<std::mutex> lock(state->mutex);
                                     state->notification_interval_ms = ms;
+                                    state->pointer_interval_ms = ms;
                                 }
                                 log("INFO", "BLE negotiated connection interval=" + std::to_string(ms) + "ms");
                             } catch (const hresult_error& e) {
@@ -497,6 +501,7 @@ public:
                         {
                             std::lock_guard<std::mutex> lock(s->mutex);
                             s->notification_interval_ms = ms;
+                            s->pointer_interval_ms = ms;
                         }
                         log("INFO", "BLE negotiated connection interval=" + std::to_string(ms) + "ms");
                     }
@@ -700,7 +705,11 @@ static void worker(const std::shared_ptr<State>& s)
                         }
                         service.send(report);
                         unsigned interval_ms;
-                        { std::lock_guard<std::mutex> lock(s->mutex); interval_ms = s->notification_interval_ms; }
+                        {
+                            std::lock_guard<std::mutex> lock(s->mutex);
+                            interval_ms = report.id == 2 && report.movement
+                                ? s->pointer_interval_ms : s->notification_interval_ms;
+                        }
                         next_notification = Clock::now() + std::chrono::milliseconds(interval_ms);
                         {
                             std::lock_guard<std::mutex> lock(s->mutex);
