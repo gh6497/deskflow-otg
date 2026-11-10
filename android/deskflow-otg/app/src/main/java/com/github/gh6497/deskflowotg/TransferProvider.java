@@ -45,7 +45,9 @@ public final class TransferProvider extends ContentProvider {
                 (fd, uri, mime, options, data) -> {
                     try (OutputStream out = new ParcelFileDescriptor.AutoCloseOutputStream(fd)) {
                         out.write(data);
-                    } catch (IOException ignored) { /* cancelled reader */ }
+                    } catch (IOException exception) {
+                        Log.w(TAG, "could not write transfer document", exception);
+                    }
                 });
     }
     @Override public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
@@ -91,7 +93,10 @@ public final class TransferProvider extends ContentProvider {
             ScheduledFuture<?> watchdog = timer.scheduleWithFixedDelay(() -> {
                 long now = SystemClock.elapsedRealtime();
                 if (now - last.get() > 30000 || now - started > 15 * 60 * 1000) {
-                    try { pipe[0].close(); } catch (IOException ignored) {}
+                    try { pipe[0].close(); }
+                    catch (IOException exception) {
+                        Log.w(TAG, "could not close timed-out transfer pipe", exception);
+                    }
                 }
             }, 5, 5, TimeUnit.SECONDS);
             worker.execute(() -> {
@@ -107,14 +112,16 @@ public final class TransferProvider extends ContentProvider {
                             s.writeReceipt(entry);
                             s.delete(id, "in");
                         } catch (IOException | RuntimeException exception) {
-                            Log.w(TAG, "public publish failed: "
-                                    + exception);
+                            Log.w(TAG, "public publish failed", exception);
                             try { s.setPublicState(id, "in", "failed"); }
-                            catch (IOException ignored) { }
+                            catch (IOException stateException) {
+                                Log.e(TAG, "could not mark failed transfer", stateException);
+                            }
                         }
                     }
-                } catch (IOException | RuntimeException ignored) {
+                } catch (IOException | RuntimeException exception) {
                     // No receipt is committed on failure. Never log content or source URIs.
+                    Log.e(TAG, "transfer worker failed", exception);
                 } finally {
                     watchdog.cancel(false);
                     receiving.set(false);
@@ -122,7 +129,10 @@ public final class TransferProvider extends ContentProvider {
             });
             return pipe[1];
         } catch (IOException | JSONException e) {
-            throw new FileNotFoundException(e.getMessage());
+            Log.e(TAG, "could not open transfer", e);
+            FileNotFoundException failure = new FileNotFoundException(e.getMessage());
+            failure.initCause(e);
+            throw failure;
         }
     }
     @Override public int delete(Uri uri, String selection, String[] args) {
@@ -131,7 +141,10 @@ public final class TransferProvider extends ContentProvider {
         if (path.size() != 2 || !"out".equals(path.get(0)) || !TransferStore.validId(path.get(1)))
             throw new IllegalArgumentException("Invalid URI");
         try { store(getContext()).delete(path.get(1), "out"); return 1; }
-        catch (IOException e) { throw new IllegalArgumentException("Cannot acknowledge transfer", e); }
+        catch (IOException e) {
+            Log.e(TAG, "could not acknowledge transfer", e);
+            throw new IllegalArgumentException("Cannot acknowledge transfer", e);
+        }
     }
     @Override public String getType(Uri uri) { authorize(); return "application/octet-stream"; }
     @Override public Cursor query(Uri uri, String[] projection, String selection, String[] args, String order) {
